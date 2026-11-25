@@ -103,7 +103,7 @@ public static class EvalReport
         {
             text.AppendLine($"### {c.Case.Id}, run {run.Run}");
             text.AppendLine();
-            text.AppendLine($"Expected triage {TriageStore.Label(c.Case.Expect.Triage)} and {string.Join(" or ", c.Case.Expect.Outcomes.Select(EvalCaseLoader.OutcomeName))}; got triage {run.TriageLabel ?? "none"} and {EvalCaseLoader.OutcomeName(run.Outcome)}.");
+            text.AppendLine($"Expected triage {(c.Case.Expect.Triage is { } t ? TriageStore.Label(t) : "any")} and {string.Join(" or ", c.Case.Expect.Outcomes.Select(EvalCaseLoader.OutcomeName))}; got triage {run.TriageLabel ?? "none"} and {EvalCaseLoader.OutcomeName(run.Outcome)}.");
             text.AppendLine();
             foreach (var reason in run.Reasons)
             {
@@ -160,7 +160,7 @@ public static class EvalReport
                 description = c.Case.Description,
                 expect = new
                 {
-                    triage = TriageStore.Label(c.Case.Expect.Triage),
+                    triage = c.Case.Expect.Triage is { } t ? TriageStore.Label(t) : "any",
                     outcome = c.Case.Expect.Outcomes.Select(EvalCaseLoader.OutcomeName).ToList(),
                 },
                 plannedRuns = c.PlannedRuns,

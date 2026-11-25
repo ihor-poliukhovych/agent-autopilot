@@ -4,6 +4,7 @@
     <ProjectReference Include="..\Autopilot.Core\Autopilot.Core.csproj" />
     <ProjectReference Include="..\Autopilot.ClaudeCode\Autopilot.ClaudeCode.csproj" />
     <ProjectReference Include="..\Autopilot.Diagnostics\Autopilot.Diagnostics.csproj" />
+    <ProjectReference Include="..\Autopilot.AzureDevOps\Autopilot.AzureDevOps.csproj" />
   </ItemGroup>
 
   <ItemGroup>

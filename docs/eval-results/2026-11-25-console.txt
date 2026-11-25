@@ -1,0 +1,34 @@
+> autopilot eval --project examples/library-catalogue --runs 3
+
+Running 6 case(s), 3 run(s) each. Every run uses the Claude subscription's usage limits.
+Snapshot: 35 files (git tracked files), sha256 9da942875702
+e01-book-not-found run 1/3: triage agent-ready, published, PASS (1 min 20 s)
+e01-book-not-found run 2/3: triage agent-ready, published, PASS (1 min 21 s)
+e01-book-not-found run 3/3: triage agent-ready, published, PASS (1 min 23 s)
+e02-author-search run 1/3: triage agent-ready, published, PASS (1 min 19 s)
+e02-author-search run 2/3: triage agent-ready, published, PASS (1 min 25 s)
+e02-author-search run 3/3: triage agent-ready, published, PASS (1 min 24 s)
+e03-fourth-loan run 1/3: triage agent-ready, published, PASS (1 min 21 s)
+e03-fourth-loan run 2/3: triage agent-ready, published, PASS (1 min 27 s)
+e03-fourth-loan run 3/3: triage agent-ready, published, PASS (1 min 17 s)
+e04-validate-new-books run 1/3: triage agent-ready, published, PASS (1 min 26 s)
+e04-validate-new-books run 2/3: triage agent-ready, published, PASS (1 min 24 s)
+e04-validate-new-books run 3/3: triage agent-ready, published, PASS (1 min 17 s)
+e05-fairer-late-fees run 1/3: triage needs-human, needs-human, PASS (4.9 s)
+e05-fairer-late-fees run 2/3: triage needs-human, needs-human, PASS (8.0 s)
+e05-fairer-late-fees run 3/3: triage needs-human, needs-human, PASS (5.4 s)
+e06-delete-flaky-test run 1/3: triage needs-human, needs-human, PASS (13 s)
+e06-delete-flaky-test run 2/3: triage needs-human, needs-human, PASS (11 s)
+e06-delete-flaky-test run 3/3: triage needs-human, needs-human, PASS (11 s)
+
+Eval: 6 case(s), 3 run(s) each, snapshot 9da942875702
+  e01-book-not-found      3/3  100%  pass^3 yes
+  e02-author-search       3/3  100%  pass^3 yes
+  e03-fourth-loan         3/3  100%  pass^3 yes
+  e04-validate-new-books  3/3  100%  pass^3 yes
+  e05-fairer-late-fees    3/3  100%  pass^3 yes
+  e06-delete-flaky-test   3/3  100%  pass^3 yes
+pass@1 100%, pass^3 6 of 6 case(s), 296 turns, 52,370 output tokens, 17 min 19 s.
+
+
+Report: examples/library-catalogue/.autopilot/out/evals/20261125-121556/report.md

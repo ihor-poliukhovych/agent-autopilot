@@ -1,4 +1,5 @@
 using System.CommandLine;
+using Autopilot.AzureDevOps;
 using Autopilot.Core.Config;
 using Autopilot.Core.Facts;
 using Autopilot.Core.Git;
@@ -164,8 +165,26 @@ public static class DoctorCommand
         }
         else
         {
-            await Report(await WorkItemsCheckAsync(projectRoot, config.Modules.WorkItems.Type, ct).ConfigureAwait(false)).ConfigureAwait(false);
-            await Report(PublisherCheck(config.Modules.Publisher.Type)).ConfigureAwait(false);
+            var adoForItems = AzureDevOpsModule.IsSelected(config.Modules.WorkItems);
+            var adoForPublisher = AzureDevOpsModule.IsSelected(config.Modules.Publisher);
+            if (!adoForItems)
+            {
+                await Report(await WorkItemsCheckAsync(projectRoot, config.Modules.WorkItems.Type, ct).ConfigureAwait(false)).ConfigureAwait(false);
+            }
+
+            if (!adoForPublisher)
+            {
+                await Report(PublisherCheck(config.Modules.Publisher.Type)).ConfigureAwait(false);
+            }
+
+            if (adoForItems || adoForPublisher)
+            {
+                foreach (var check in await AzureDevOpsChecksAsync(projectRoot, config, adoForPublisher, ct).ConfigureAwait(false))
+                {
+                    await Report(check).ConfigureAwait(false);
+                }
+            }
+
             await Report(await DiagnosticsCheckAsync(projectRoot, config.Modules.Diagnostics, ct).ConfigureAwait(false)).ConfigureAwait(false);
         }
 
@@ -208,6 +227,31 @@ public static class DoctorCommand
 
         var open = await source.ListOpenAsync(ct).ConfigureAwait(false);
         return new CheckResult(CheckStatus.Ok, "work items", $"local, {open.Count} open task(s) in .autopilot/tasks");
+    }
+
+    private static async Task<IReadOnlyList<CheckResult>> AzureDevOpsChecksAsync(string projectRoot, AutopilotConfig config, bool forPublisher, CancellationToken ct)
+    {
+        const string Name = "azure devops";
+        var module = forPublisher ? config.Modules.Publisher : config.Modules.WorkItems;
+        try
+        {
+            using var ado = AzureDevOpsModule.Create(module, projectRoot, config.BaseBranch, config.BranchPrefix, requireRepository: forPublisher);
+            var checks = await ado.Doctor.RunAsync(ct).ConfigureAwait(false);
+            return checks.Select(c => new CheckResult(
+                c.Status switch
+                {
+                    AzureDevOpsCheckStatus.Ok => CheckStatus.Ok,
+                    AzureDevOpsCheckStatus.Fail => CheckStatus.Fail,
+                    _ => CheckStatus.Skip,
+                },
+                $"{Name}: {c.Name}",
+                c.Detail,
+                c.Fix)).ToList();
+        }
+        catch (AzureDevOpsSettingsException ex)
+        {
+            return [new CheckResult(CheckStatus.Fail, Name, ex.Message, "Fix the module settings in .autopilot/autopilot.json; docs/AZURE-DEVOPS.md lists them.")];
+        }
     }
 
     private static CheckResult PublisherCheck(string type) =>

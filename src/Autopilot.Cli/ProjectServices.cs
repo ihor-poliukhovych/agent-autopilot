@@ -1,4 +1,5 @@
 using Autopilot.Cli.Commands;
+using Autopilot.AzureDevOps;
 using Autopilot.ClaudeCode;
 using Autopilot.Core;
 using Autopilot.Core.Config;
@@ -42,12 +43,13 @@ public static class ProjectServices
         var diagnosticsServer = DiagnosticsServerFor(projectRoot, config);
         var git = new GitClient(repoRoot);
         var worktreeRoot = context.WorktreeRoot ?? GitClient.DefaultWorktreeRoot(repoRoot);
+        var (workItems, publisher) = CreateModules(projectRoot, config);
         return new AutopilotPipeline(new AutopilotPipelineOptions
         {
             ProjectRoot = projectRoot,
             Config = config,
-            WorkItems = new LocalWorkItemSource(projectRoot),
-            Publisher = new LocalPublisher(projectRoot),
+            WorkItems = workItems,
+            Publisher = publisher,
             Runner = context.RunnerFactory?.Invoke() ?? new ClaudeCodeRunner(new ClaudeCodeRunnerOptions
             {
                 HookCommand = HookCommandLine.Build(Environment.ProcessPath, System.Reflection.Assembly.GetEntryAssembly()?.Location),
@@ -60,6 +62,47 @@ public static class ProjectServices
             Log = context.Out,
             DiagnosticsServer = diagnosticsServer,
         });
+    }
+
+    /// <summary>
+    /// Picks the work item source and the publisher from the config. The local bundle is always
+    /// written; with Azure DevOps the draft pull request is opened after it.
+    /// The module lives as long as the process (one command), so it is not disposed here.
+    /// </summary>
+    public static (IWorkItemSource WorkItems, IPublisher Publisher) CreateModules(string projectRoot, AutopilotConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        IWorkItemSource workItems = new LocalWorkItemSource(projectRoot);
+        IPublisher publisher = new LocalPublisher(projectRoot);
+
+        var adoForItems = AzureDevOpsModule.IsSelected(config.Modules.WorkItems);
+        var adoForPublisher = AzureDevOpsModule.IsSelected(config.Modules.Publisher);
+        if (!adoForItems && !adoForPublisher)
+        {
+            return (workItems, publisher);
+        }
+
+        try
+        {
+            // Both modules read the same settings block; the publisher's wins when both are set.
+            var module = adoForPublisher ? config.Modules.Publisher : config.Modules.WorkItems;
+            var ado = AzureDevOpsModule.Create(module, projectRoot, config.BaseBranch, config.BranchPrefix, requireRepository: adoForPublisher);
+            if (adoForItems)
+            {
+                workItems = ado.WorkItems;
+            }
+
+            if (adoForPublisher)
+            {
+                publisher = new LocalThenRemotePublisher(publisher, ado.CreatePublisher());
+            }
+        }
+        catch (AzureDevOpsSettingsException ex)
+        {
+            throw new ProjectSetupException(ex.Message);
+        }
+
+        return (workItems, publisher);
     }
 
     /// <summary>
@@ -85,6 +128,24 @@ public static class ProjectServices
 
         return DiagnosticsServerCommand.Build(
             Environment.ProcessPath, System.Reflection.Assembly.GetEntryAssembly()?.Location, projectRoot);
+    }
+}
+
+/// <summary>Writes the local bundle first (the audit trail), then publishes remotely.</summary>
+public sealed class LocalThenRemotePublisher(IPublisher local, IPublisher remote) : IPublisher
+{
+    public async Task<PublishResult> PublishAsync(PublishRequest request, CancellationToken ct)
+    {
+        var localResult = await local.PublishAsync(request, ct).ConfigureAwait(false);
+        if (!localResult.Succeeded)
+        {
+            return localResult;
+        }
+
+        var remoteResult = await remote.PublishAsync(request, ct).ConfigureAwait(false);
+        return remoteResult.Succeeded
+            ? remoteResult
+            : remoteResult with { Error = $"{remoteResult.Error} (the local bundle is in {localResult.Location})" };
     }
 }
 

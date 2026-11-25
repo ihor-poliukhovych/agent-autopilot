@@ -239,8 +239,12 @@ public sealed class EvalRunner(EvalRunnerOptions options)
     {
         ArgumentNullException.ThrowIfNull(evalCase);
         var reasons = new List<string>();
-        var expectedLabel = TriageStore.Label(evalCase.Expect.Triage);
-        if (!string.Equals(triageLabel, expectedLabel, StringComparison.Ordinal))
+        var expectedLabel = evalCase.Expect.Triage is { } expectedTriage ? TriageStore.Label(expectedTriage) : null;
+        if (expectedLabel is null && triageLabel is null)
+        {
+            reasons.Add($"Triage gave no label ({Shorten(message)}).");
+        }
+        else if (expectedLabel is not null && !string.Equals(triageLabel, expectedLabel, StringComparison.Ordinal))
         {
             reasons.Add(triageLabel is null
                 ? $"Triage gave no label ({Shorten(message)}); expected {expectedLabel}."

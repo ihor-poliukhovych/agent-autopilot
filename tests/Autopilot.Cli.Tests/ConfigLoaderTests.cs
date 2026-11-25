@@ -95,8 +95,8 @@ public sealed class ConfigLoaderTests
         Assert.Contains(problems, p => p.StartsWith("gate.maxSourceLinesChanged is -1", StringComparison.Ordinal));
         Assert.Contains(problems, p => p.StartsWith("roles.reviewer.maxToolCalls is 0", StringComparison.Ordinal));
         Assert.Contains(problems, p => p.Contains("\"jira\" is unknown", StringComparison.Ordinal));
-        Assert.Contains(problems, p => p.Contains("\"azure-devops\" is not available yet", StringComparison.Ordinal));
-        Assert.Equal(8, problems.Count);
+        Assert.DoesNotContain(problems, p => p.Contains("not available", StringComparison.Ordinal));
+        Assert.Equal(7, problems.Count);
     }
 
     [Theory]

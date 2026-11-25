@@ -14,7 +14,7 @@ public static class ConfigLoader
     public static IReadOnlyList<string> KnownDiagnosticsTypes { get; } = ["none", "jsonl"];
 
     /// <summary>Module types that are known but not built yet.</summary>
-    public static IReadOnlyList<string> NotAvailableYet { get; } = ["azure-devops"];
+    public static IReadOnlyList<string> NotAvailableYet { get; } = [];
 
     /// <summary>camelCase, comments and trailing commas allowed, enums as kebab-case strings.</summary>
     public static JsonSerializerOptions JsonOptions { get; } = CreateOptions();

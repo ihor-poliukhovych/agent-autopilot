@@ -197,9 +197,10 @@ public static class InitCommand
           - `allowedTools`: Claude Code tools the role may use (Read, Grep, Glob, Edit, Write, Bash).
           - `allowedCommands`: shell commands the role may run through Bash. A command is allowed
             when it equals an entry or starts with an entry followed by a space.
-          When you change a role, keep all four keys: a role you write replaces the default one as a whole.
-        - `modules.workItems.type`: `local` (this folder's `tasks/`). `azure-devops` is not available yet.
-        - `modules.publisher.type`: `local` (a bundle in `out/runs/<id>/`). `azure-devops` is not available yet.
+          A role you write only partly keeps the defaults for the keys you leave out.
+        - `modules.workItems.type`: `local` (this folder's `tasks/`) or `azure-devops` (work items from a query).
+        - `modules.publisher.type`: `local` (a bundle in `out/runs/<id>/`) or `azure-devops` (the bundle, then a draft pull request).
+          Azure DevOps settings and the agent identity setup are in docs/AZURE-DEVOPS.md of Agent Autopilot.
         - `modules.diagnostics.type`: `none` or `jsonl`. With `jsonl`, set `settings.path` to a JSON Lines log
           file inside the project; triage and implementer then get the read-only `mcp__diagnostics__*` tools.
         - `modules.*.settings`: free-form strings that only that module reads.

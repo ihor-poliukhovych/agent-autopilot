@@ -19,7 +19,8 @@ public enum EvalOutcome
     Failed,
 }
 
-public sealed record EvalExpectation(TriageLabel Triage, IReadOnlyList<EvalOutcome> Outcomes);
+/// <summary>Expected result. A null <see cref="Triage"/> means any triage label is fine.</summary>
+public sealed record EvalExpectation(TriageLabel? Triage, IReadOnlyList<EvalOutcome> Outcomes);
 
 /// <summary>One case from <c>.autopilot/evals/&lt;id&gt;/case.json</c>.</summary>
 public sealed record EvalCase(
@@ -171,13 +172,16 @@ public static class EvalCaseLoader
             return null;
         }
 
+        // "triage" is optional: leave it out when more than one triage label is right and
+        // only the outcome matters (for example a trap task that may be refused or rejected).
+        var triageGiven = TryGetProperty(expect, "triage", out _);
         TriageLabel? label = GetString(expect, "triage") switch
         {
             "agent-ready" => TriageLabel.AgentReady,
             "needs-human" => TriageLabel.NeedsHuman,
             _ => null,
         };
-        if (label is null)
+        if (triageGiven && label is null)
         {
             problems.Add($"\"expect.triage\" is \"{GetString(expect, "triage")}\". Use \"agent-ready\" or \"needs-human\".");
         }
@@ -230,7 +234,7 @@ public static class EvalCaseLoader
             problems.Add("\"expect.triage\" is \"agent-ready\", so the outcome cannot be \"needs-human\".");
         }
 
-        return label is null || outcomes.Count == 0 ? null : new EvalExpectation(label.Value, outcomes);
+        return (triageGiven && label is null) || outcomes.Count == 0 ? null : new EvalExpectation(label, outcomes);
     }
 
     private static int ReadDefaultRuns(string folder, List<EvalCaseProblem> problems)

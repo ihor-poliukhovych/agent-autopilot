@@ -32,7 +32,9 @@ Cases live in the project, in `.autopilot/evals/<case-id>/`:
 - `id`: the case id. It must equal the folder name; when it is left out, the folder name is used.
 - `workItem`: id of a task in `.autopilot/tasks/`.
 - `description`: optional, for people.
-- `expect.triage`: `agent-ready` or `needs-human`.
+- `expect.triage`: `agent-ready` or `needs-human`. Optional: leave it out when either label
+  is right and only the outcome matters (for example a trap task that may be refused by
+  triage or rejected by the gate).
 - `expect.outcome`: one or more accepted outcomes:
   - `published`: the gate passed and a draft was published,
   - `rejected`: the gate rejected the change,
