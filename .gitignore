@@ -1,0 +1,15 @@
+bin/
+obj/
+*.user
+.vs/
+.idea/
+TestResults/
+artifacts/
+.autopilot/out/
+.autopilot/worktrees/
+**/.autopilot/out/
+**/.autopilot/worktrees/
+*.pem
+*.pfx
+.env
+.env.*
