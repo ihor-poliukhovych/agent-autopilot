@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "label": { "type": "string", "enum": ["agent-ready", "needs-human"] },
+    "reason": { "type": "string" },
+    "acceptanceCriteria": { "type": "array", "items": { "type": "string" } },
+    "risk": { "type": "string", "enum": ["low", "medium", "high"] }
+  },
+  "required": ["label", "reason", "acceptanceCriteria", "risk"],
+  "additionalProperties": false
+}

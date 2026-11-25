@@ -1,0 +1,418 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using Autopilot.Core.Config;
+using Autopilot.Core.Facts;
+using Autopilot.Core.Gate;
+using Autopilot.Core.Git;
+using Autopilot.Core.Local;
+using Autopilot.Core.Prompts;
+
+namespace Autopilot.Core.Pipeline;
+
+/// <summary>Everything the pipeline needs. The CLI builds the real set; tests pass fakes.</summary>
+public sealed record AutopilotPipelineOptions
+{
+    /// <summary>Project root; must be the git repository's top-level folder.</summary>
+    public required string ProjectRoot { get; init; }
+
+    public required AutopilotConfig Config { get; init; }
+    public required IWorkItemSource WorkItems { get; init; }
+    public required IAgentRunner Runner { get; init; }
+    public required IPublisher Publisher { get; init; }
+    public required GitClient Git { get; init; }
+    public required IGateFactsCollector Facts { get; init; }
+
+    /// <summary>Folder for agent worktrees, outside the project.</summary>
+    public required string WorktreeRoot { get; init; }
+
+    /// <summary>The gate. Defaults to <see cref="MergeGate.Evaluate"/>.</summary>
+    public Func<GateInput, AutopilotConfig, GateDecision> EvaluateGate { get; init; } = MergeGate.Evaluate;
+
+    /// <summary>Progress lines for a person. Null for silence.</summary>
+    public TextWriter? Log { get; init; }
+}
+
+/// <summary>
+/// Triage, implement, review, gate, publish. The agent never commits, merges, or decides the outcome:
+/// the harness commits, the gate decides, and a person merges.
+/// </summary>
+public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
+{
+    private readonly AutopilotConfig _config = options.Config;
+    private readonly GitClient _git = options.Git;
+    private readonly TriageStore _triageStore = new(options.ProjectRoot);
+    private readonly string _projectRoot = Path.GetFullPath(options.ProjectRoot);
+
+    public async Task<IReadOnlyList<TriageItemResult>> TriageAsync(string? workItemId, CancellationToken ct)
+    {
+        IReadOnlyList<WorkItem> items;
+        if (workItemId is null)
+        {
+            items = await options.WorkItems.ListOpenAsync(ct).ConfigureAwait(false);
+        }
+        else
+        {
+            var item = await options.WorkItems.GetAsync(workItemId, ct).ConfigureAwait(false);
+            if (item is null)
+            {
+                return [new TriageItemResult(workItemId, string.Empty, null, $"Work item {workItemId} was not found.")];
+            }
+
+            items = [item];
+        }
+
+        if (items.Count == 0)
+        {
+            return [];
+        }
+
+        var baseCommit = await _git.TryGetCommitAsync(_config.BaseBranch, ct).ConfigureAwait(false);
+        if (baseCommit is null)
+        {
+            return items.Select(i => new TriageItemResult(i.Id, i.Title, null, $"Base branch \"{_config.BaseBranch}\" does not exist.")).ToList();
+        }
+
+        // Triage reads the code at the base branch, in a worktree outside the project.
+        var worktree = Path.Combine(options.WorktreeRoot, "_triage");
+        await RemoveWorktreeIfPresentAsync(worktree).ConfigureAwait(false);
+        await _git.AddDetachedWorktreeAsync(worktree, baseCommit, ct).ConfigureAwait(false);
+        var results = new List<TriageItemResult>();
+        try
+        {
+            foreach (var item in items)
+            {
+                results.Add(await TriageOneAsync(item, worktree, ct).ConfigureAwait(false));
+            }
+        }
+        finally
+        {
+            await RemoveWorktreeIfPresentAsync(worktree).ConfigureAwait(false);
+        }
+
+        return results;
+    }
+
+    public async Task<ImplementResult> ImplementAsync(string workItemId, CancellationToken ct)
+    {
+        var item = await options.WorkItems.GetAsync(workItemId, ct).ConfigureAwait(false);
+        if (item is null)
+        {
+            return new ImplementResult(workItemId, ImplementOutcome.NotFound, $"Work item {workItemId} was not found.");
+        }
+
+        var id = ProjectPaths.SafeId(item.Id);
+        var triage = await _triageStore.LoadAsync(id, ct).ConfigureAwait(false);
+        if (triage is null)
+        {
+            return new ImplementResult(id, ImplementOutcome.NotReady, $"Work item {id} has no triage yet. Run 'autopilot triage {id}' first.");
+        }
+
+        if (triage.Label != TriageLabel.AgentReady)
+        {
+            return new ImplementResult(id, ImplementOutcome.NotReady, $"Triage marked {id} as needs-human: {triage.Reason}");
+        }
+
+        var repoRoot = await _git.GetRepositoryRootAsync(ct).ConfigureAwait(false);
+        if (!SamePath(repoRoot, _projectRoot))
+        {
+            return new ImplementResult(id, ImplementOutcome.Failed, $"The project folder must be the git repository root ({repoRoot}).");
+        }
+
+        var branch = _config.BranchPrefix + id;
+        if (await _git.BranchExistsAsync(branch, ct).ConfigureAwait(false))
+        {
+            return new ImplementResult(id, ImplementOutcome.Failed,
+                $"Branch {branch} already exists from an earlier run. Review it, then delete it with 'git branch -D {branch}' to try again.", branch);
+        }
+
+        var baseCommit = await _git.TryGetCommitAsync(_config.BaseBranch, ct).ConfigureAwait(false);
+        if (baseCommit is null)
+        {
+            return new ImplementResult(id, ImplementOutcome.Failed, $"Base branch \"{_config.BaseBranch}\" does not exist.");
+        }
+
+        var runFolder = ProjectPaths.RunFolder(_projectRoot, id);
+        Directory.CreateDirectory(runFolder);
+        DeleteIfExists(Path.Combine(runFolder, "REJECTED.md"));
+        DeleteIfExists(Path.Combine(runFolder, "PULL_REQUEST.md"));
+
+        var worktree = Path.Combine(options.WorktreeRoot, id);
+        await RemoveWorktreeIfPresentAsync(worktree).ConfigureAwait(false);
+        Write($"{id}: creating worktree on {branch} from {_config.BaseBranch}");
+        await _git.AddWorktreeAsync(worktree, branch, baseCommit, ct).ConfigureAwait(false);
+        try
+        {
+            return await ImplementInWorktreeAsync(item, triage, branch, baseCommit, worktree, runFolder, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await WriteRejectedAsync(runFolder, item, branch, $"The run stopped with an error: {ex.Message}", [], null).ConfigureAwait(false);
+            return new ImplementResult(id, ImplementOutcome.Failed, ex.Message, branch, runFolder);
+        }
+        finally
+        {
+            await RemoveWorktreeIfPresentAsync(worktree).ConfigureAwait(false);
+        }
+    }
+
+    public async Task<RunSummary> RunAsync(int? limit, CancellationToken ct)
+    {
+        var triage = await TriageAsync(null, ct).ConfigureAwait(false);
+        var implemented = new List<ImplementResult>();
+        var skipped = new List<string>();
+        foreach (var entry in triage.Where(t => t.Triage?.Label == TriageLabel.AgentReady))
+        {
+            if (limit is { } max && implemented.Count >= max)
+            {
+                skipped.Add($"{entry.WorkItemId}: not started, the limit of {max} was reached.");
+                continue;
+            }
+
+            var branch = _config.BranchPrefix + entry.WorkItemId;
+            if (await _git.BranchExistsAsync(branch, ct).ConfigureAwait(false))
+            {
+                skipped.Add($"{entry.WorkItemId}: branch {branch} already exists from an earlier run.");
+                continue;
+            }
+
+            implemented.Add(await ImplementAsync(entry.WorkItemId, ct).ConfigureAwait(false));
+        }
+
+        return new RunSummary(triage, implemented, skipped);
+    }
+
+    private async Task<TriageItemResult> TriageOneAsync(WorkItem item, string worktree, CancellationToken ct)
+    {
+        Write($"{item.Id}: triage");
+        var run = await RunAgentAsync(item.Id, AgentRole.Triage, worktree, PromptLibrary.TriagePrompt(item), [], ct).ConfigureAwait(false);
+        if (!run.Succeeded)
+        {
+            return new TriageItemResult(item.Id, item.Title, null, $"The triage agent failed: {run.Error}");
+        }
+
+        if (!OutputParser.TryParseTriage(run, out var triage, out var error))
+        {
+            return new TriageItemResult(item.Id, item.Title, null, $"Could not read the triage answer: {error}");
+        }
+
+        await _triageStore.SaveAsync(item, triage, ct).ConfigureAwait(false);
+        await options.WorkItems.RecordTriageAsync(item.Id, triage, ct).ConfigureAwait(false);
+        return new TriageItemResult(item.Id, item.Title, triage, null);
+    }
+
+    private async Task<ImplementResult> ImplementInWorktreeAsync(
+        WorkItem item, TriageResult triage, string branch, string baseCommit, string worktree, string runFolder, CancellationToken ct)
+    {
+        var id = item.Id;
+        var writable = _config.WritablePaths;
+
+        // Round 1: implement.
+        Write($"{id}: implementer");
+        var implement = await RunAgentAsync(id, AgentRole.Implementer, worktree,
+            PromptLibrary.ImplementerPrompt(item, triage, writable, _config.Commands), writable, ct).ConfigureAwait(false);
+        if (!implement.Succeeded)
+        {
+            return await RejectAsync(item, branch, runFolder, ImplementOutcome.Failed, $"The implementer run failed: {implement.Error}").ConfigureAwait(false);
+        }
+
+        OutputParser.TryParseSelfReview(implement, out var selfReview, out _);
+        var commit = await _git.CommitAllAsync(worktree, CommitMessage(item, 1), ct).ConfigureAwait(false);
+        if (commit is null)
+        {
+            return await RejectAsync(item, branch, runFolder, ImplementOutcome.Rejected, "The implementer made no changes.").ConfigureAwait(false);
+        }
+
+        var review = await ReviewAsync(item, triage, baseCommit, branch, worktree, ct).ConfigureAwait(false);
+
+        // Round 2: one more implementer round when the reviewer asked for changes.
+        if (review is { Verdict: ReviewVerdict.RequestChanges })
+        {
+            Write($"{id}: reviewer asked for changes, implementer round 2");
+            var fix = await RunAgentAsync(id, AgentRole.Implementer, worktree,
+                PromptLibrary.ImplementerPrompt(item, triage, writable, _config.Commands, review.Findings), writable, ct).ConfigureAwait(false);
+            if (fix.Succeeded)
+            {
+                if (OutputParser.TryParseSelfReview(fix, out var secondSelfReview, out _))
+                {
+                    selfReview = secondSelfReview;
+                }
+
+                await _git.CommitAllAsync(worktree, CommitMessage(item, 2), ct).ConfigureAwait(false);
+                review = await ReviewAsync(item, triage, baseCommit, branch, worktree, ct).ConfigureAwait(false);
+            }
+        }
+
+        // The gate collects its own facts on clean checkouts.
+        Write($"{id}: merge gate (build and tests on clean checkouts)");
+        var headCommit = await _git.GetCommitAsync(branch, ct).ConfigureAwait(false);
+        var evidence = new Evidence(id, triage, selfReview, review);
+        var input = await options.Facts.CollectAsync(id, baseCommit, headCommit, evidence, ct).ConfigureAwait(false);
+        await File.WriteAllTextAsync(Path.Combine(runFolder, "gate-log.txt"), input.Tests.Log, ct).ConfigureAwait(false);
+        var decision = options.EvaluateGate(input, _config);
+        var diff = await _git.GetDiffAsync(baseCommit, headCommit, ct).ConfigureAwait(false);
+
+        if (decision.Outcome != GateOutcome.Passed)
+        {
+            await File.WriteAllTextAsync(Path.Combine(runFolder, "change.patch"), diff, ct).ConfigureAwait(false);
+            await File.WriteAllTextAsync(Path.Combine(runFolder, "gate.json"), JsonSerializer.Serialize(decision, ConfigLoader.JsonOptions), ct).ConfigureAwait(false);
+            await WriteRejectedAsync(runFolder, item, branch, "The merge gate rejected the change.", decision.Findings, decision).ConfigureAwait(false);
+            return new ImplementResult(id, ImplementOutcome.Rejected,
+                $"The merge gate rejected the change ({decision.Findings.Count} finding(s)).", branch, runFolder, decision);
+        }
+
+        Write($"{id}: gate passed, publishing");
+        var published = await options.Publisher.PublishAsync(new PublishRequest(item, branch, diff, decision, evidence), ct).ConfigureAwait(false);
+        if (!published.Succeeded)
+        {
+            return new ImplementResult(id, ImplementOutcome.Failed, $"The gate passed but publishing failed: {published.Error}", branch, runFolder, decision);
+        }
+
+        return new ImplementResult(id, ImplementOutcome.Published, "The gate passed. A draft is waiting for a person.", branch, published.Location, decision);
+    }
+
+    private async Task<ReviewResult?> ReviewAsync(WorkItem item, TriageResult triage, string baseCommit, string branch, string worktree, CancellationToken ct)
+    {
+        Write($"{item.Id}: reviewer");
+        var diff = await _git.GetDiffAsync(baseCommit, branch, ct).ConfigureAwait(false);
+        var run = await RunAgentAsync(item.Id, AgentRole.Reviewer, worktree, PromptLibrary.ReviewerPrompt(item, triage, diff), [], ct).ConfigureAwait(false);
+        return OutputParser.TryParseReview(run, out var review, out _) ? review : null;
+    }
+
+    private async Task<AgentRunResult> RunAgentAsync(
+        string id, AgentRole role, string workingDirectory, string prompt, IReadOnlyList<string> writablePaths, CancellationToken ct)
+    {
+        var runFolder = ProjectPaths.RunFolder(_projectRoot, id);
+        var number = NextRunNumber(runFolder);
+        var roleName = role.ToString().ToLowerInvariant();
+        var runDirectory = Path.Combine(runFolder, $"{number}-{roleName}");
+        Directory.CreateDirectory(runDirectory);
+
+        var request = new AgentRunRequest(
+            role,
+            workingDirectory,
+            PromptLibrary.SystemPrompt(role),
+            prompt,
+            _config.Roles.For(role),
+            writablePaths,
+            PromptLibrary.OutputSchema(role),
+            runDirectory);
+
+        AgentRunResult result;
+        try
+        {
+            result = await options.Runner.RunAsync(request, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            result = new AgentRunResult(false, string.Empty, null, 0, TokenUsage.Zero, TimeSpan.Zero, null, ex.Message);
+        }
+
+        await AppendRunLogAsync(runFolder, number, role, result, ct).ConfigureAwait(false);
+        return result;
+    }
+
+    private static int NextRunNumber(string runFolder)
+    {
+        if (!Directory.Exists(runFolder))
+        {
+            return 1;
+        }
+
+        var numbers = Directory.EnumerateDirectories(runFolder)
+            .Select(d => RunNumber().Match(Path.GetFileName(d)))
+            .Where(m => m.Success)
+            .Select(m => int.Parse(m.Groups[1].Value));
+        return numbers.DefaultIfEmpty(0).Max() + 1;
+    }
+
+    private static async Task AppendRunLogAsync(string runFolder, int number, AgentRole role, AgentRunResult result, CancellationToken ct)
+    {
+        var entry = new
+        {
+            timestamp = DateTimeOffset.UtcNow,
+            run = number,
+            role = role.ToString().ToLowerInvariant(),
+            succeeded = result.Succeeded,
+            turns = result.Turns,
+            usage = result.Usage,
+            durationMs = (long)result.Duration.TotalMilliseconds,
+            model = result.Model,
+            error = result.Error,
+        };
+        var line = JsonSerializer.Serialize(entry, RunLogOptions) + "\n";
+        await File.AppendAllTextAsync(Path.Combine(runFolder, "runs.jsonl"), line, ct).ConfigureAwait(false);
+    }
+
+    private static readonly JsonSerializerOptions RunLogOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    private async Task<ImplementResult> RejectAsync(WorkItem item, string branch, string runFolder, ImplementOutcome outcome, string reason)
+    {
+        await WriteRejectedAsync(runFolder, item, branch, reason, [], null).ConfigureAwait(false);
+        return new ImplementResult(item.Id, outcome, reason, branch, runFolder);
+    }
+
+    private static async Task WriteRejectedAsync(
+        string runFolder, WorkItem item, string branch, string reason, IReadOnlyList<GateFinding> findings, GateDecision? decision)
+    {
+        var text = new StringBuilder();
+        text.AppendLine($"# Rejected: {item.Id} {item.Title}");
+        text.AppendLine();
+        text.AppendLine(reason);
+        text.AppendLine();
+        if (findings.Count > 0)
+        {
+            text.AppendLine("## Findings");
+            text.AppendLine();
+            foreach (var finding in findings)
+            {
+                text.AppendLine($"- [{finding.RuleId}] {finding.Message}{(finding.HighRisk ? " (high risk)" : string.Empty)}");
+            }
+
+            text.AppendLine();
+        }
+
+        if (decision?.HighRisk == true)
+        {
+            text.AppendLine("The change touches a risk path, so a person must look at it in any case.");
+            text.AppendLine();
+        }
+
+        text.AppendLine("## What a person can do");
+        text.AppendLine();
+        text.AppendLine($"- The branch `{branch}` is kept. Look at it with `git log {branch}` and `git diff {branch}~..{branch}`.");
+        text.AppendLine("- The agent run logs are in the numbered folders next to this file, and `runs.jsonl` lists every run.");
+        text.AppendLine($"- To try again, delete the branch (`git branch -D {branch}`), improve the task file, and run `autopilot implement {item.Id}`.");
+        Directory.CreateDirectory(runFolder);
+        await File.WriteAllTextAsync(Path.Combine(runFolder, "REJECTED.md"), text.ToString()).ConfigureAwait(false);
+    }
+
+    private async Task RemoveWorktreeIfPresentAsync(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            await _git.RemoveWorktreeAsync(path, CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    private static string CommitMessage(WorkItem item, int round) =>
+        round == 1 ? $"{item.Id}: {item.Title}" : $"{item.Id}: address review findings";
+
+    private static bool SamePath(string a, string b) => string.Equals(
+        Path.GetFullPath(a).TrimEnd('\\', '/'),
+        Path.GetFullPath(b).TrimEnd('\\', '/'),
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    private static void DeleteIfExists(string path)
+    {
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+    }
+
+    private void Write(string line) => options.Log?.WriteLine(line);
+
+    [GeneratedRegex(@"^(\d+)-")]
+    private static partial Regex RunNumber();
+}
