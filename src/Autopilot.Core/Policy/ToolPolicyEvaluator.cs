@@ -172,7 +172,12 @@ public static class ToolPolicyEvaluator
     private static PolicyDecision EvaluateBash(JsonElement input, ToolPolicy policy)
     {
         var allowed = policy.AllowedCommands ?? [];
-        if (allowed.Count == 0)
+        var configured = (policy.ConfiguredCommands ?? [])
+            .Select(c => c?.Trim())
+            .Where(c => !string.IsNullOrEmpty(c))
+            .Select(c => c!)
+            .ToList();
+        if (allowed.Count == 0 && configured.Count == 0)
         {
             return PolicyDecision.Deny($"no shell commands are allowed for the {policy.Role} role");
         }
@@ -190,19 +195,29 @@ public static class ToolPolicyEvaluator
             return PolicyDecision.Deny("empty shell command");
         }
 
-        foreach (var forbidden in ForbiddenShellText)
+        // The project's own build and test command lines come from its reviewed config, so they are
+        // allowed exactly as written. Extra trailing arguments must pass the normal rules.
+        foreach (var line in configured)
         {
-            if (command.Contains(forbidden, StringComparison.Ordinal))
+            if (command.Equals(line, StringComparison.Ordinal))
             {
-                var shown = forbidden switch
-                {
-                    "\n" => "a newline",
-                    "\r" => "a carriage return",
-                    _ => $"'{forbidden}'",
-                };
-                return PolicyDecision.Deny(
-                    $"shell command contains {shown}; chaining, redirection, substitution, variables and quotes are not allowed");
+                return PolicyDecision.Allow("shell command is the configured build or test command");
             }
+
+            if (command.StartsWith(line + " ", StringComparison.Ordinal))
+            {
+                var extra = command[line.Length..];
+                if (ForbiddenTextProblem(extra) is null && CheckArguments(extra) is null)
+                {
+                    return PolicyDecision.Allow("shell command is the configured build or test command with extra arguments");
+                }
+            }
+        }
+
+        var textProblem = ForbiddenTextProblem(command);
+        if (textProblem is not null)
+        {
+            return PolicyDecision.Deny(textProblem);
         }
 
         foreach (var entry in allowed)
@@ -224,6 +239,26 @@ public static class ToolPolicyEvaluator
         }
 
         return PolicyDecision.Deny($"shell command '{command}' is not on the allowed list");
+    }
+
+    /// <summary>Why the shell text is refused (chaining, redirection, variables, quotes, newlines), or null.</summary>
+    private static string? ForbiddenTextProblem(string command)
+    {
+        foreach (var forbidden in ForbiddenShellText)
+        {
+            if (command.Contains(forbidden, StringComparison.Ordinal))
+            {
+                var shown = forbidden switch
+                {
+                    "\n" => "a newline",
+                    "\r" => "a carriage return",
+                    _ => $"'{forbidden}'",
+                };
+                return $"shell command contains {shown}; chaining, redirection, substitution, variables and quotes are not allowed";
+            }
+        }
+
+        return null;
     }
 
     public static bool IsKnownTool(string tool) =>

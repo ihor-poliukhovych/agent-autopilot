@@ -39,6 +39,13 @@ public sealed record AutopilotConfig
     /// </summary>
     public IReadOnlyList<string> PassEnvironment { get; init; } = [];
 
+    /// <summary>
+    /// Project rules and context for the agents: project-relative files or folders (for example
+    /// <c>docs/agent-rules.md</c> or <c>docs/decisions/</c>). Their text is read from the base commit and
+    /// added to the triage, implementer and reviewer prompts. The agent can never write these paths.
+    /// </summary>
+    public IReadOnlyList<string> Context { get; init; } = [];
+
     public GateConfig Gate { get; init; } = new();
 
     public RolesConfig Roles { get; init; } = new();

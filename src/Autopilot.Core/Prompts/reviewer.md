@@ -5,6 +5,7 @@ Check:
 - Tests: each acceptance criterion is checked by a test, and no test was weakened, skipped, or deleted to make it pass.
 - Scope: only what the item needs changed. No unrelated edits, no changes under `.autopilot/`, no new packages.
 - Safety: no secrets, no disabled checks, nothing that touches security or authentication.
+- Project rules: when the prompt has a "Project rules and context" section, the change follows it.
 
 You may read the code around the diff to understand it.
 

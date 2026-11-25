@@ -16,6 +16,9 @@ public sealed class GitClient
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromMinutes(5);
 
+    private const string HeadsPrefix = "refs/heads/";
+    private const string RemotesPrefix = "refs/remotes/";
+
     public GitClient(string repositoryPath, GitIdentity? identity = null)
     {
         RepositoryPath = Path.GetFullPath(repositoryPath);
@@ -85,6 +88,81 @@ public sealed class GitClient
         var result = await RunGitAsync(RepositoryPath, ["show-ref", "--verify", "--quiet", "refs/heads/" + branch], ct).ConfigureAwait(false);
         return result.Succeeded;
     }
+
+    /// <summary>
+    /// Finds a branch by name: the local branch <c>refs/heads/&lt;name&gt;</c> first, then a remote-tracking
+    /// branch <c>refs/remotes/&lt;remote&gt;/&lt;name&gt;</c> (origin first, then the other remotes by name),
+    /// then any other revision git understands (for example "origin/main" or a commit hash).
+    /// Returns null when nothing matches.
+    /// </summary>
+    public async Task<ResolvedBranch?> ResolveBranchAsync(string branch, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(branch))
+        {
+            return null;
+        }
+
+        var name = branch.Trim();
+        if (name.StartsWith(HeadsPrefix, StringComparison.Ordinal))
+        {
+            name = name[HeadsPrefix.Length..];
+        }
+
+        var local = await TryGetCommitAsync(HeadsPrefix + name, ct).ConfigureAwait(false);
+        if (local is not null)
+        {
+            return new ResolvedBranch(name, HeadsPrefix + name, local);
+        }
+
+        var remotes = await ListRemotesAsync(ct).ConfigureAwait(false);
+        foreach (var remote in remotes.OrderBy(r => r == "origin" ? 0 : 1).ThenBy(r => r, StringComparer.Ordinal))
+        {
+            var remoteRef = $"{RemotesPrefix}{remote}/{name}";
+            var commit = await TryGetCommitAsync(remoteRef, ct).ConfigureAwait(false);
+            if (commit is not null)
+            {
+                return new ResolvedBranch(name, remoteRef, commit);
+            }
+        }
+
+        var other = await TryGetCommitAsync(name, ct).ConfigureAwait(false);
+        if (other is null)
+        {
+            return null;
+        }
+
+        var symbolic = await RunGitAsync(RepositoryPath, ["rev-parse", "--verify", "--quiet", "--symbolic-full-name", name], ct).ConfigureAwait(false);
+        var fullName = symbolic.Succeeded ? symbolic.StandardOutput.Trim() : string.Empty;
+        return new ResolvedBranch(name, fullName.Length > 0 ? fullName : name, other);
+    }
+
+    /// <summary>Names of the configured remotes (<c>git remote</c>).</summary>
+    public async Task<IReadOnlyList<string>> ListRemotesAsync(CancellationToken ct = default)
+    {
+        var result = await RunGitAsync(RepositoryPath, ["remote"], ct).ConfigureAwait(false);
+        return result.Succeeded
+            ? result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : [];
+    }
+
+    /// <summary>
+    /// Files at <paramref name="path"/> in a commit: the file itself, or every file under a folder, as
+    /// repository-relative paths with forward slashes, sorted. Empty when the path is not in the commit.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> ListFilesAtAsync(string commit, string path, CancellationToken ct = default)
+    {
+        var normalized = path.Replace('\\', '/').Trim('/');
+        var output = await RunCheckedAsync(RepositoryPath, ["-c", "core.quotepath=false", "ls-tree", "-r", "-z", "--full-tree", "--name-only", commit, "--", normalized], ct).ConfigureAwait(false);
+        return output.Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            .Select(f => f.Trim('\r', '\n'))
+            .Where(f => f.Length > 0 && (f == normalized || f.StartsWith(normalized + "/", StringComparison.Ordinal)))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>The text of one file in a commit (<c>git cat-file blob &lt;commit&gt;:&lt;path&gt;</c>).</summary>
+    public Task<string> ReadFileAtAsync(string commit, string path, CancellationToken ct = default) =>
+        RunCheckedAsync(RepositoryPath, ["cat-file", "blob", $"{commit}:{path.Replace('\\', '/')}"], ct);
 
     /// <summary>Runs <c>git worktree add -b &lt;branch&gt; &lt;path&gt; &lt;base&gt;</c>.</summary>
     public async Task AddWorktreeAsync(string path, string newBranch, string baseRevision, CancellationToken ct = default)
@@ -312,6 +390,27 @@ public sealed class GitClient
             }
         }
     }
+}
+
+/// <summary>
+/// A branch found by <see cref="GitClient.ResolveBranchAsync"/>: the name asked for, the full ref it
+/// resolved to (<c>refs/heads/main</c> or <c>refs/remotes/origin/main</c>) and its commit.
+/// </summary>
+public sealed record ResolvedBranch(string Name, string Ref, string Commit)
+{
+    /// <summary>True when there is no local branch and a remote-tracking branch was used.</summary>
+    public bool RemoteOnly => Ref.StartsWith("refs/remotes/", StringComparison.Ordinal);
+
+    /// <summary>The ref without <c>refs/heads/</c> or <c>refs/remotes/</c>, for example "origin/main".</summary>
+    public string ShortRef =>
+        Ref.StartsWith("refs/remotes/", StringComparison.Ordinal) ? Ref["refs/remotes/".Length..]
+        : Ref.StartsWith("refs/heads/", StringComparison.Ordinal) ? Ref["refs/heads/".Length..]
+        : Ref;
+
+    /// <summary>For a remote-only branch: what is used and the command that creates the local branch; otherwise null.</summary>
+    public string? RemoteNote => RemoteOnly
+        ? $"branch \"{Name}\" exists only as {ShortRef}; using {ShortRef} ({Commit[..Math.Min(12, Commit.Length)]}). To track it locally: git branch {Name} {ShortRef}"
+        : null;
 }
 
 /// <summary>A git command failed. The message includes git's own error text.</summary>

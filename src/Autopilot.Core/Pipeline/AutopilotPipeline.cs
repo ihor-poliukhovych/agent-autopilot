@@ -88,10 +88,17 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
             return results;
         }
 
-        var baseCommit = await _git.TryGetCommitAsync(_config.BaseBranch, ct).ConfigureAwait(false);
+        var baseCommit = await ResolveBaseAsync(ct).ConfigureAwait(false);
         if (baseCommit is null)
         {
-            results.AddRange(items.Select(i => new TriageItemResult(i.Id, i.Title, null, $"Base branch \"{_config.BaseBranch}\" does not exist.")));
+            results.AddRange(items.Select(i => new TriageItemResult(i.Id, i.Title, null, BaseMissingMessage)));
+            return results;
+        }
+
+        var context = await LoadContextAsync(baseCommit, ct).ConfigureAwait(false);
+        if (context.Missing.Count > 0)
+        {
+            results.AddRange(items.Select(i => new TriageItemResult(i.Id, i.Title, null, ContextMissingMessage(context))));
             return results;
         }
 
@@ -103,7 +110,7 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         {
             foreach (var item in items)
             {
-                results.Add(await TriageOneAsync(item, worktree, ct).ConfigureAwait(false));
+                results.Add(await TriageOneAsync(item, worktree, context, ct).ConfigureAwait(false));
             }
         }
         finally
@@ -165,10 +172,16 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
                 $"Branch {branch} already exists from an earlier run. Review it, then delete it with 'git branch -D {branch}' to try again.", branch);
         }
 
-        var baseCommit = await _git.TryGetCommitAsync(_config.BaseBranch, ct).ConfigureAwait(false);
+        var baseCommit = await ResolveBaseAsync(ct).ConfigureAwait(false);
         if (baseCommit is null)
         {
-            return new ImplementResult(id, ImplementOutcome.Failed, $"Base branch \"{_config.BaseBranch}\" does not exist.");
+            return new ImplementResult(id, ImplementOutcome.Failed, BaseMissingMessage);
+        }
+
+        var context = await LoadContextAsync(baseCommit, ct).ConfigureAwait(false);
+        if (context.Missing.Count > 0)
+        {
+            return new ImplementResult(id, ImplementOutcome.Failed, ContextMissingMessage(context));
         }
 
         var runFolder = ProjectPaths.RunFolder(_projectRoot, id);
@@ -182,7 +195,7 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         await _git.AddWorktreeAsync(worktree, branch, baseCommit, ct).ConfigureAwait(false);
         try
         {
-            return await ImplementInWorktreeAsync(item, triage, branch, baseCommit, worktree, runFolder, ct).ConfigureAwait(false);
+            return await ImplementInWorktreeAsync(item, triage, branch, baseCommit, worktree, runFolder, context, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -221,10 +234,11 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         return new RunSummary(triage, implemented, skipped);
     }
 
-    private async Task<TriageItemResult> TriageOneAsync(WorkItem item, string worktree, CancellationToken ct)
+    private async Task<TriageItemResult> TriageOneAsync(WorkItem item, string worktree, ProjectContext context, CancellationToken ct)
     {
         Write($"{item.Id}: triage");
-        var run = await RunAgentAsync(item.Id, AgentRole.Triage, worktree, PromptLibrary.TriagePrompt(item), [], ct).ConfigureAwait(false);
+        var prompt = PromptLibrary.TriagePrompt(item, _config.RiskPaths, MergeGate.ProtectedPaths.Concat(ContextPaths.ProtectedPatterns(_config.Context)).ToList(), context);
+        var run = await RunAgentAsync(item.Id, AgentRole.Triage, worktree, prompt, [], ct).ConfigureAwait(false);
         if (!run.Succeeded)
         {
             return new TriageItemResult(item.Id, item.Title, null, $"The triage agent failed: {run.Error}");
@@ -241,7 +255,7 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
     }
 
     private async Task<ImplementResult> ImplementInWorktreeAsync(
-        WorkItem item, TriageResult triage, string branch, string baseCommit, string worktree, string runFolder, CancellationToken ct)
+        WorkItem item, TriageResult triage, string branch, string baseCommit, string worktree, string runFolder, ProjectContext context, CancellationToken ct)
     {
         var id = item.Id;
         var writable = _config.WritablePaths;
@@ -249,7 +263,7 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         // Round 1: implement.
         Write($"{id}: implementer");
         var implement = await RunAgentAsync(id, AgentRole.Implementer, worktree,
-            PromptLibrary.ImplementerPrompt(item, triage, writable, _config.Commands), writable, ct).ConfigureAwait(false);
+            PromptLibrary.ImplementerPrompt(item, triage, writable, _config.Commands, context: context), writable, ct).ConfigureAwait(false);
         if (!implement.Succeeded)
         {
             return await RejectAsync(item, branch, runFolder, ImplementOutcome.Failed, $"The implementer run failed: {implement.Error}").ConfigureAwait(false);
@@ -262,14 +276,14 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
             return await RejectAsync(item, branch, runFolder, ImplementOutcome.Rejected, "The implementer made no changes.").ConfigureAwait(false);
         }
 
-        var review = await ReviewAsync(item, triage, baseCommit, branch, worktree, ct).ConfigureAwait(false);
+        var review = await ReviewAsync(item, triage, baseCommit, branch, worktree, context, ct).ConfigureAwait(false);
 
         // Round 2: one more implementer round when the reviewer asked for changes.
         if (review is { Verdict: ReviewVerdict.RequestChanges })
         {
             Write($"{id}: reviewer asked for changes, implementer round 2");
             var fix = await RunAgentAsync(id, AgentRole.Implementer, worktree,
-                PromptLibrary.ImplementerPrompt(item, triage, writable, _config.Commands, review.Findings), writable, ct).ConfigureAwait(false);
+                PromptLibrary.ImplementerPrompt(item, triage, writable, _config.Commands, review.Findings, context), writable, ct).ConfigureAwait(false);
             if (fix.Succeeded)
             {
                 if (OutputParser.TryParseSelfReview(fix, out var secondSelfReview, out _))
@@ -278,7 +292,7 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
                 }
 
                 await _git.CommitAllAsync(worktree, CommitMessage(item, 2), ct).ConfigureAwait(false);
-                review = await ReviewAsync(item, triage, baseCommit, branch, worktree, ct).ConfigureAwait(false);
+                review = await ReviewAsync(item, triage, baseCommit, branch, worktree, context, ct).ConfigureAwait(false);
             }
         }
 
@@ -311,11 +325,11 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         return new ImplementResult(id, ImplementOutcome.Published, "The gate passed. A draft is waiting for a person.", branch, published.Location, decision);
     }
 
-    private async Task<ReviewResult?> ReviewAsync(WorkItem item, TriageResult triage, string baseCommit, string branch, string worktree, CancellationToken ct)
+    private async Task<ReviewResult?> ReviewAsync(WorkItem item, TriageResult triage, string baseCommit, string branch, string worktree, ProjectContext context, CancellationToken ct)
     {
         Write($"{item.Id}: reviewer");
         var diff = await _git.GetDiffAsync(baseCommit, branch, ct).ConfigureAwait(false);
-        var run = await RunAgentAsync(item.Id, AgentRole.Reviewer, worktree, PromptLibrary.ReviewerPrompt(item, triage, diff), [], ct).ConfigureAwait(false);
+        var run = await RunAgentAsync(item.Id, AgentRole.Reviewer, worktree, PromptLibrary.ReviewerPrompt(item, triage, diff, context), [], ct).ConfigureAwait(false);
         return OutputParser.TryParseReview(run, out var review, out _) ? review : null;
     }
 
@@ -336,6 +350,17 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
             mcpServers = new Dictionary<string, McpServerSpec> { [DiagnosticsMcp.ServerName] = diagnostics };
         }
 
+        // The implementer may always run the project's own build and test command lines, exactly as configured.
+        IReadOnlyList<string>? configuredCommands = null;
+        if (role == AgentRole.Implementer)
+        {
+            configuredCommands = ConfiguredCommands(_config);
+            roleConfig = roleConfig with
+            {
+                AllowedCommands = roleConfig.AllowedCommands.Concat(configuredCommands).Distinct(StringComparer.Ordinal).ToList(),
+            };
+        }
+
         var request = new AgentRunRequest(
             role,
             workingDirectory,
@@ -345,8 +370,9 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
             writablePaths,
             PromptLibrary.OutputSchema(role),
             runDirectory,
-            _config.RiskPaths,
-            mcpServers);
+            _config.RiskPaths.Concat(ContextPaths.ProtectedPatterns(_config.Context)).Distinct(StringComparer.Ordinal).ToList(),
+            mcpServers,
+            configuredCommands);
 
         AgentRunResult result;
         try
@@ -361,6 +387,63 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         await AppendRunLogAsync(runFolder, number, role, result, ct).ConfigureAwait(false);
         return result;
     }
+
+    /// <summary>The configured build and test command lines, trimmed, without empty or repeated ones.</summary>
+    public static IReadOnlyList<string> ConfiguredCommands(AutopilotConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return new[] { config.Commands?.Build, config.Commands?.Test }
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c!.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private string BaseMissingMessage =>
+        $"Base branch \"{_config.BaseBranch}\" does not exist, locally or as a remote-tracking branch. Create it, run 'git fetch', or set baseBranch in .autopilot/autopilot.json.";
+
+    private bool _baseNoteWritten;
+
+    private ProjectContext? _context;
+
+    /// <summary>The base commit: the local branch, else a remote-tracking branch (with a note in the log).</summary>
+    private async Task<string?> ResolveBaseAsync(CancellationToken ct)
+    {
+        var resolved = await _git.ResolveBranchAsync(_config.BaseBranch, ct).ConfigureAwait(false);
+        if (resolved?.RemoteNote is { } note && !_baseNoteWritten)
+        {
+            _baseNoteWritten = true;
+            Write("Note: base " + note);
+        }
+
+        return resolved?.Commit;
+    }
+
+    /// <summary>The context files at the base commit, read once per commit.</summary>
+    private async Task<ProjectContext> LoadContextAsync(string baseCommit, CancellationToken ct)
+    {
+        if (_config.Context.Count == 0)
+        {
+            return ProjectContext.Empty;
+        }
+
+        if (_context is { } cached && cached.Commit == baseCommit)
+        {
+            return cached;
+        }
+
+        _context = await ProjectContext.LoadAsync(_git, baseCommit, _config.Context, ct).ConfigureAwait(false);
+        if (_context.Files.Count > 0)
+        {
+            Write($"Project context: {_context.Files.Count} file(s), {_context.TotalChars} characters from {baseCommit[..Math.Min(12, baseCommit.Length)]}{(_context.Truncated ? " (cut at the size limit)" : string.Empty)}");
+        }
+
+        return _context;
+    }
+
+    private string ContextMissingMessage(ProjectContext context) =>
+        $"These \"context\" paths do not exist in the base commit of \"{_config.BaseBranch}\": {string.Join(", ", context.Missing)}. " +
+        "Context is read from the base commit, so commit the files there, or fix \"context\" in .autopilot/autopilot.json.";
 
     private static int NextRunNumber(string runFolder)
     {

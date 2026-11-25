@@ -39,7 +39,7 @@ public class AzureDevOpsDoctorTests
         var checks = await Run(handler);
 
         Assert.All(checks, c => Assert.Equal(AzureDevOpsCheckStatus.Ok, c.Status));
-        Assert.Contains(checks, c => c.Name == "Work item query" && c.Detail == "3 item(s) match");
+        Assert.Contains(checks, c => c.Name == "Work item query" && c.Detail == "3 item(s) match (default query, tag \"agent-autopilot\")");
         Assert.Equal(4 + AzureDevOpsDoctor.RequiredPermissions.Count + AzureDevOpsDoctor.ForbiddenPermissions.Count + 1, checks.Count);
         var permissionRequest = handler.Requests.First(r => r.Uri.AbsolutePath.StartsWith("/contoso/_apis/permissions/", StringComparison.Ordinal));
         Assert.Contains($"tokens=repoV2%2F{Ado.ProjectId}%2F{Ado.RepoId}", permissionRequest.Uri.Query, StringComparison.Ordinal);

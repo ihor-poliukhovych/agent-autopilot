@@ -105,12 +105,12 @@ public sealed class CliTests
     [Fact]
     public async Task Doctor_passes_on_a_set_up_project_with_trivial_commands()
     {
-        using var repo = await TestRepo.CreateAsync();
+        using var repo = await TestRepo.CreateAsync(new Dictionary<string, string> { ["src/App.cs"] = "class App { }\n" });
         Assert.Equal(0, await CliApp.RunAsync(["init", "--project", repo.Root], NewContext()));
         var config = ConfigLoader.Load(repo.Root);
         ConfigLoader.Save(config with { Commands = new CommandsConfig { Build = "echo built", Test = "echo Passed!  - Failed: 0, Passed: 2, Skipped: 0, Total: 2" } }, repo.Root);
 
-        var results = await DoctorCommand.RunChecksAsync(repo.Root, skipBuild: false, TextWriter.Null, CancellationToken.None, checkTools: false);
+        var results = await DoctorCommand.RunChecksAsync(repo.Root, new DoctorOptions { CheckTools = false, WorktreeRoot = repo.WorktreeRoot }, TextWriter.Null, CancellationToken.None);
 
         string Status(string name) => results.Single(r => r.Name == name).Status.ToString();
         Assert.Equal("Ok", Status("git repository"));

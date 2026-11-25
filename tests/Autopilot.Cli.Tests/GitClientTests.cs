@@ -75,8 +75,101 @@ public sealed class GitClientTests
 
         Assert.False(Directory.Exists(worktree));
         Assert.True(await repo.Git.BranchExistsAsync("autopilot/001"));
-        var list = await repo.GitAsync("worktree", "list", "--porcelain");
-        Assert.DoesNotContain("001", list);
+        // Compare the listed worktree paths, not the whole text: the porcelain output also holds commit
+        // hashes and the temp folder name, which contain "001" by chance about once in a hundred runs.
+        var paths = await WorktreePathsAsync(repo);
+        Assert.DoesNotContain(paths, p => SamePath(p, worktree) || p.EndsWith(Path.DirectorySeparatorChar + "001", StringComparison.Ordinal));
+        Assert.Single(paths);
+    }
+
+    /// <summary>The paths in <c>git worktree list --porcelain</c>, one per "worktree " line.</summary>
+    internal static async Task<IReadOnlyList<string>> WorktreePathsAsync(TestRepo repo) =>
+        (await repo.GitAsync("worktree", "list", "--porcelain"))
+            .Split('\n')
+            .Select(l => l.TrimEnd('\r'))
+            .Where(l => l.StartsWith("worktree ", StringComparison.Ordinal))
+            .Select(l => Path.GetFullPath(l["worktree ".Length..]))
+            .ToList();
+
+    private static bool SamePath(string a, string b) => string.Equals(
+        Path.GetFullPath(a).TrimEnd('\\', '/'),
+        Path.GetFullPath(b).TrimEnd('\\', '/'),
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    [Fact]
+    public void Worktree_list_check_ignores_hashes_that_contain_the_id()
+    {
+        // The old check searched the whole output for "001" and failed when a hash contained it.
+        var porcelain = "worktree C:/tmp/repo\nHEAD 3f2a001bc0ffee0000000000000000000000abcd\nbranch refs/heads/main\n";
+        var paths = porcelain.Split('\n').Where(l => l.StartsWith("worktree ", StringComparison.Ordinal)).Select(l => l["worktree ".Length..]);
+
+        Assert.Contains("001", porcelain, StringComparison.Ordinal);
+        Assert.DoesNotContain(paths, p => p.EndsWith("/001", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Resolve_branch_prefers_local_then_remote_tracking()
+    {
+        using var repo = await TestRepo.CreateAsync();
+        var commit = await repo.Git.GetCommitAsync("main");
+        await repo.GitAsync("remote", "add", "origin", "https://example.invalid/shop.git");
+        await repo.GitAsync("update-ref", "refs/remotes/origin/develop", commit);
+
+        var local = await repo.Git.ResolveBranchAsync("main");
+        var remote = await repo.Git.ResolveBranchAsync("develop");
+
+        Assert.NotNull(local);
+        Assert.False(local.RemoteOnly);
+        Assert.Equal("refs/heads/main", local.Ref);
+        Assert.Null(local.RemoteNote);
+        Assert.NotNull(remote);
+        Assert.True(remote.RemoteOnly);
+        Assert.Equal("refs/remotes/origin/develop", remote.Ref);
+        Assert.Equal(commit, remote.Commit);
+        Assert.Contains("git branch develop origin/develop", remote.RemoteNote, StringComparison.Ordinal);
+        Assert.Null(await repo.Git.ResolveBranchAsync("nope"));
+        Assert.False(await repo.Git.BranchExistsAsync("develop"));
+    }
+
+    [Fact]
+    public async Task Worktree_can_start_from_a_remote_only_base_branch()
+    {
+        using var repo = await TestRepo.CreateAsync();
+        await repo.GitAsync("update-ref", "refs/remotes/origin/develop", await repo.Git.GetCommitAsync("main"));
+        await repo.GitAsync("remote", "add", "origin", "https://example.invalid/shop.git");
+        var resolved = await repo.Git.ResolveBranchAsync("develop");
+        var path = Path.Combine(repo.WorktreeRoot, "002");
+
+        await repo.Git.AddWorktreeAsync(path, "autopilot/002", resolved!.Commit);
+        try
+        {
+            Assert.True(File.Exists(Path.Combine(path, "README.md")));
+        }
+        finally
+        {
+            await repo.Git.RemoveWorktreeAsync(path);
+        }
+
+        Assert.True(await repo.Git.BranchExistsAsync("autopilot/002"));
+    }
+
+    [Fact]
+    public async Task Files_and_text_are_read_from_a_commit_not_the_working_tree()
+    {
+        using var repo = await TestRepo.CreateAsync(new Dictionary<string, string>
+        {
+            ["docs/agent-rules.md"] = "Use the repository layer.\n",
+            ["docs/decisions/0002-b.md"] = "B\n",
+            ["docs/decisions/0001-a.md"] = "A\n",
+            ["docs/agent-rules-old.md"] = "old\n",
+        });
+        var commit = await repo.Git.GetCommitAsync("main");
+        repo.Write("docs/agent-rules.md", "uncommitted edit\n");
+
+        Assert.Equal(["docs/decisions/0001-a.md", "docs/decisions/0002-b.md"], await repo.Git.ListFilesAtAsync(commit, "docs/decisions/"));
+        Assert.Equal(["docs/agent-rules.md"], await repo.Git.ListFilesAtAsync(commit, "docs/agent-rules.md"));
+        Assert.Empty(await repo.Git.ListFilesAtAsync(commit, "docs/missing.md"));
+        Assert.Equal("Use the repository layer.", (await repo.Git.ReadFileAtAsync(commit, "docs/agent-rules.md")).Trim());
     }
 
     [Fact]

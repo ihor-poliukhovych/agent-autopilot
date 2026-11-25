@@ -5,7 +5,7 @@ using Autopilot.Core.Local;
 
 namespace Autopilot.Cli.Commands;
 
-/// <summary><c>autopilot init [--force]</c>: creates <c>.autopilot/</c> with defaults adapted to the project.</summary>
+/// <summary><c>autopilot init [--force] [--base-branch &lt;name&gt;]</c>: creates <c>.autopilot/</c> with defaults adapted to the project.</summary>
 public static class InitCommand
 {
     public const string GitIgnoreEntry = ".autopilot/out/";
@@ -13,17 +13,27 @@ public static class InitCommand
     public static Command Create(Option<string> projectOption, CliContext context)
     {
         var force = new Option<bool>("--force") { Description = "Overwrite existing Agent Autopilot files." };
-        var command = new Command("init", "Create .autopilot/ in the project: settings, an example task and a README.") { force };
+        var baseBranch = new Option<string?>("--base-branch")
+        {
+            Description = "Branch agent work starts from and drafts target. Default: main, else master, else the current branch.",
+        };
+        var command = new Command("init", "Create .autopilot/ in the project: settings, an example task and a README.") { force, baseBranch };
         command.SetAction(async (parse, ct) =>
         {
             var project = CliApp.ResolveProject(parse.GetValue(projectOption));
-            return await RunAsync(project, parse.GetValue(force), context.Out, context.Error, ct).ConfigureAwait(false);
+            return await RunAsync(project, parse.GetValue(force), context.Out, context.Error, ct, parse.GetValue(baseBranch)).ConfigureAwait(false);
         });
         return command;
     }
 
-    public static async Task<int> RunAsync(string projectRoot, bool force, TextWriter output, TextWriter error, CancellationToken ct)
+    public static async Task<int> RunAsync(string projectRoot, bool force, TextWriter output, TextWriter error, CancellationToken ct, string? baseBranch = null)
     {
+        if (baseBranch is not null && string.IsNullOrWhiteSpace(baseBranch))
+        {
+            await error.WriteLineAsync("--base-branch needs a branch name, for example --base-branch main.").ConfigureAwait(false);
+            return ExitCodes.Usage;
+        }
+
         var configPath = ConfigLoader.ConfigPath(projectRoot);
         if (File.Exists(configPath) && !force)
         {
@@ -31,7 +41,7 @@ public static class InitCommand
             return ExitCodes.Failure;
         }
 
-        var config = await BuildDefaultsAsync(projectRoot, ct).ConfigureAwait(false);
+        var config = await BuildDefaultsAsync(projectRoot, ct, baseBranch?.Trim()).ConfigureAwait(false);
         ConfigLoader.Save(config, projectRoot);
         await output.WriteLineAsync($"Wrote {configPath}").ConfigureAwait(false);
 
@@ -56,14 +66,17 @@ public static class InitCommand
         await output.WriteLineAsync().ConfigureAwait(false);
         await output.WriteLineAsync($"Build command: {config.Commands.Build}").ConfigureAwait(false);
         await output.WriteLineAsync($"Test command:  {config.Commands.Test}").ConfigureAwait(false);
-        await output.WriteLineAsync($"Writable:      {string.Join(", ", config.WritablePaths)}").ConfigureAwait(false);
-        await output.WriteLineAsync($"Base branch:   {config.BaseBranch}").ConfigureAwait(false);
+        await output.WriteLineAsync(config.WritablePaths.Count == 0
+            ? "Writable:      (empty) No src/ or tests/ folder and no project folder was found. Fill in writablePaths before you run the agent; 'autopilot doctor' says what is missing."
+            : $"Writable:      {string.Join(", ", config.WritablePaths)}").ConfigureAwait(false);
+        await output.WriteLineAsync($"Base branch:   {config.BaseBranch} ({await DescribeBaseBranchAsync(projectRoot, config.BaseBranch, baseBranch is not null, ct).ConfigureAwait(false)})").ConfigureAwait(false);
+        await output.WriteLineAsync("               To use another branch: 'autopilot init --force --base-branch <name>', or edit baseBranch in .autopilot/autopilot.json.").ConfigureAwait(false);
         await output.WriteLineAsync().ConfigureAwait(false);
         await output.WriteLineAsync("Next: check the settings in .autopilot/autopilot.json, then run 'autopilot doctor'.").ConfigureAwait(false);
         return ExitCodes.Ok;
     }
 
-    public static async Task<AutopilotConfig> BuildDefaultsAsync(string projectRoot, CancellationToken ct)
+    public static async Task<AutopilotConfig> BuildDefaultsAsync(string projectRoot, CancellationToken ct, string? baseBranch = null)
     {
         var defaults = new AutopilotConfig();
 
@@ -86,13 +99,13 @@ public static class InitCommand
 
         if (writable.Count == 0)
         {
-            // Everything; .autopilot/** stays protected by the hook and the gate whatever this says.
-            writable.Add("**");
+            // Never "**": the folders that hold a project file, or nothing (validation then says what to fill in).
+            writable.AddRange(ProjectFolders(projectRoot).Select(f => f + "/**"));
         }
 
         return defaults with
         {
-            BaseBranch = await DetectBaseBranchAsync(projectRoot, ct).ConfigureAwait(false) ?? defaults.BaseBranch,
+            BaseBranch = baseBranch ?? await DetectBaseBranchAsync(projectRoot, ct).ConfigureAwait(false) ?? defaults.BaseBranch,
             Commands = commands,
             WritablePaths = writable,
         };
@@ -114,6 +127,55 @@ public static class InitCommand
         return true;
     }
 
+    /// <summary>Folders skipped when looking for project files.</summary>
+    private static readonly HashSet<string> SkippedFolders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "bin", "obj", "node_modules", "packages", "artifacts", "TestResults",
+    };
+
+    /// <summary>
+    /// Project-relative folders (forward slashes, sorted) that hold a <c>*.csproj</c>, outside build output and
+    /// dot folders. A folder inside one already listed is left out; a project file at the root is not listed.
+    /// </summary>
+    public static IReadOnlyList<string> ProjectFolders(string projectRoot)
+    {
+        var found = new List<string>();
+        var pending = new Stack<string>();
+        pending.Push(projectRoot);
+        while (pending.Count > 0)
+        {
+            var folder = pending.Pop();
+            IEnumerable<string> subfolders;
+            try
+            {
+                if (!string.Equals(folder, projectRoot, StringComparison.Ordinal) && Directory.EnumerateFiles(folder, "*.csproj").Any())
+                {
+                    found.Add(Path.GetRelativePath(projectRoot, folder).Replace('\\', '/'));
+                    continue;
+                }
+
+                subfolders = Directory.EnumerateDirectories(folder);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var sub in subfolders)
+            {
+                var name = Path.GetFileName(sub);
+                if (name.StartsWith('.') || SkippedFolders.Contains(name) || new DirectoryInfo(sub).LinkTarget is not null)
+                {
+                    continue;
+                }
+
+                pending.Push(sub);
+            }
+        }
+
+        return found.Order(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     private static async Task<string?> DetectBaseBranchAsync(string projectRoot, CancellationToken ct)
     {
         if (await GitClient.FindRepositoryRootAsync(projectRoot, ct).ConfigureAwait(false) is null)
@@ -130,7 +192,34 @@ public static class InitCommand
             }
         }
 
+        // A clone that has only origin/main (for example a fresh worktree or a detached checkout).
+        foreach (var candidate in new[] { "main", "master" })
+        {
+            if (await git.ResolveBranchAsync(candidate, ct).ConfigureAwait(false) is { RemoteOnly: true })
+            {
+                return candidate;
+            }
+        }
+
         return await git.GetCurrentBranchAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>How the base branch was chosen and whether it exists, for the init summary.</summary>
+    private static async Task<string> DescribeBaseBranchAsync(string projectRoot, string branch, bool given, CancellationToken ct)
+    {
+        var how = given ? "from --base-branch" : "detected: main, else master, else the current branch";
+        if (await GitClient.FindRepositoryRootAsync(projectRoot, ct).ConfigureAwait(false) is null)
+        {
+            return $"{how}; not a git repository yet";
+        }
+
+        var resolved = await new GitClient(projectRoot).ResolveBranchAsync(branch, ct).ConfigureAwait(false);
+        return resolved switch
+        {
+            null => $"{how}; it does not exist yet",
+            { RemoteOnly: true } => $"{how}; only {resolved.ShortRef} exists, which is used. To track it locally: git branch {resolved.Name} {resolved.ShortRef}",
+            _ => how,
+        };
     }
 
     private const string ExampleTask = """
@@ -178,7 +267,11 @@ public static class InitCommand
         - `commands.build`, `commands.test`: run in the project root by `doctor`, by the agent, and
           by the gate on a clean checkout of the base commit and of the agent's branch.
         - `writablePaths`: glob patterns (relative to the project root) the implementer may write.
-          `.autopilot/**` is always protected, whatever this list says.
+          `.autopilot/**` is always protected, whatever this list says. `init` lists `src/**` and `tests/**`,
+          or else the folders that hold a project file; when it found none the list is empty and must be filled in.
+        - `context`: project rule files or folders (for example `docs/agent-rules.md`, `docs/decisions/`). Their
+          text is read from the base commit and added to the triage, implementer and reviewer prompts under
+          "Project rules and context" (about 40 KB in total). The agent can never write them.
         - `riskPaths`: glob patterns that make a change high risk. Such a change is rejected and goes to a person.
           The agent can never write these files (project files, `*.props`, `*.targets`, settings, auth code).
         - `passEnvironment`: extra environment variable names passed to Claude Code and to build and test

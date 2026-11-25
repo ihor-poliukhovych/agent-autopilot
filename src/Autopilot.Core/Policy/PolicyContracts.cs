@@ -18,7 +18,13 @@ public sealed record ToolPolicy(
     IReadOnlyList<string> AllowedCommands,
     int MaxToolCalls,
     /// <summary>File where the hook keeps its call counter.</summary>
-    string CounterFile);
+    string CounterFile,
+    /// <summary>
+    /// The project's configured build and test command lines. Each is allowed exactly as written (after
+    /// trimming), even with quotes or options such as <c>-p:Name=Value</c> that the normal argument rules
+    /// deny, and with extra trailing arguments that pass the normal rules. Null or empty: none.
+    /// </summary>
+    IReadOnlyList<string>? ConfiguredCommands = null);
 
 /// <summary>A tool call as Claude Code sends it to a PreToolUse hook.</summary>
 public sealed record ToolCall(string ToolName, JsonElement ToolInput);

@@ -11,8 +11,9 @@ public static class PipelineCommands
     public static Command CreateTriage(Option<string> projectOption, CliContext context)
     {
         var id = new Argument<string?>("id") { Description = "One work item id. Default: every open item.", Arity = ArgumentArity.ZeroOrOne };
-        var command = new Command("triage", "Sort work items into agent-ready and needs-human.") { id };
-        command.SetAction((parse, ct) => WithPipelineAsync(parse.GetValue(projectOption), context, ct, async pipeline =>
+        var source = SourceOption();
+        var command = new Command("triage", "Sort work items into agent-ready and needs-human.") { id, source };
+        command.SetAction((parse, ct) => WithPipelineAsync(parse.GetValue(projectOption), parse.GetValue(source), context, ct, async pipeline =>
         {
             var results = await pipeline.TriageAsync(parse.GetValue(id), ct).ConfigureAwait(false);
             await PrintTriageAsync(context.Out, results).ConfigureAwait(false);
@@ -24,8 +25,9 @@ public static class PipelineCommands
     public static Command CreateImplement(Option<string> projectOption, CliContext context)
     {
         var id = new Argument<string>("id") { Description = "Work item id; triage must have marked it agent-ready." };
-        var command = new Command("implement", "Implement one agent-ready item: worktree, implementer, reviewer, merge gate, draft. Exit code 0 only when a draft was published.") { id };
-        command.SetAction((parse, ct) => WithPipelineAsync(parse.GetValue(projectOption), context, ct, async pipeline =>
+        var source = SourceOption();
+        var command = new Command("implement", "Implement one agent-ready item: worktree, implementer, reviewer, merge gate, draft. Exit code 0 only when a draft was published.") { id, source };
+        command.SetAction((parse, ct) => WithPipelineAsync(parse.GetValue(projectOption), parse.GetValue(source), context, ct, async pipeline =>
         {
             var result = await pipeline.ImplementAsync(parse.GetRequiredValue(id), ct).ConfigureAwait(false);
             await PrintImplementAsync(context.Out, result).ConfigureAwait(false);
@@ -37,7 +39,8 @@ public static class PipelineCommands
     public static Command CreateRun(Option<string> projectOption, CliContext context)
     {
         var limit = new Option<int?>("--limit") { Description = "Implement at most this many items." };
-        var command = new Command("run", "Triage every open item, then implement the agent-ready ones. Exit code 1 when something broke.") { limit };
+        var source = SourceOption();
+        var command = new Command("run", "Triage every open item, then implement the agent-ready ones. Exit code 1 when something broke.") { limit, source };
         command.SetAction((parse, ct) =>
         {
             var max = parse.GetValue(limit);
@@ -46,7 +49,7 @@ public static class PipelineCommands
                 throw new UsageException("--limit must be greater than 0.");
             }
 
-            return WithPipelineAsync(parse.GetValue(projectOption), context, ct, async pipeline =>
+            return WithPipelineAsync(parse.GetValue(projectOption), parse.GetValue(source), context, ct, async pipeline =>
             {
                 var summary = await pipeline.RunAsync(max, ct).ConfigureAwait(false);
                 await PrintTriageAsync(context.Out, summary.Triage).ConfigureAwait(false);
@@ -68,13 +71,24 @@ public static class PipelineCommands
         return command;
     }
 
-    private static async Task<int> WithPipelineAsync(string? projectValue, CliContext context, CancellationToken ct, Func<AutopilotPipeline, Task<int>> body)
+    /// <summary><c>--source local</c>: read <c>.autopilot/tasks/</c> for this run, whatever modules.workItems says.</summary>
+    private static Option<string?> SourceOption()
+    {
+        var option = new Option<string?>("--source")
+        {
+            Description = "Where work items come from for this run. 'local' reads .autopilot/tasks/ (and keeps drafts local) even when modules.workItems is remote.",
+        };
+        option.AcceptOnlyFromAmong(ProjectServices.LocalSource);
+        return option;
+    }
+
+    private static async Task<int> WithPipelineAsync(string? projectValue, string? source, CliContext context, CancellationToken ct, Func<AutopilotPipeline, Task<int>> body)
     {
         var project = CliApp.ResolveProject(projectValue);
         AutopilotPipeline pipeline;
         try
         {
-            pipeline = await ProjectServices.CreatePipelineAsync(project, context, ct).ConfigureAwait(false);
+            pipeline = await ProjectServices.CreatePipelineAsync(project, context, ct, source).ConfigureAwait(false);
         }
         catch (ProjectSetupException ex)
         {

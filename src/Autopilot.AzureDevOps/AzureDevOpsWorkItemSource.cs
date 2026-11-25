@@ -8,7 +8,7 @@ namespace Autopilot.AzureDevOps;
 /// <summary>
 /// Work items from an Azure DevOps project. The list comes from the configured WIQL query; the id is
 /// the work item number. Triage results are written back as one tag (<c>&lt;prefix&gt;agent-ready</c> or
-/// <c>&lt;prefix&gt;needs-human</c>) and one comment.
+/// <c>&lt;prefix&gt;needs-human</c>) and one comment, unless <c>recordTriage</c> is <c>local</c>.
 /// </summary>
 public sealed class AzureDevOpsWorkItemSource(AzureDevOpsClient client, AzureDevOpsSettings settings) : IWorkItemSource
 {
@@ -44,6 +44,13 @@ public sealed class AzureDevOpsWorkItemSource(AzureDevOpsClient client, AzureDev
     public async Task RecordTriageAsync(string id, TriageResult result, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(result);
+
+        // Read-only mode: the pipeline already stored the result in .autopilot/out/triage/.
+        if (settings.RecordTriage == TriageRecording.Local)
+        {
+            return;
+        }
+
         if (!TryParseId(id, out var number))
         {
             throw new ArgumentException($"\"{id}\" is not an Azure DevOps work item number.", nameof(id));

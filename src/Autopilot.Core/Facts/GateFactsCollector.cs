@@ -1,4 +1,7 @@
+using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Autopilot.Core.Config;
 using Autopilot.Core.Gate;
 using Autopilot.Core.Git;
@@ -41,8 +44,8 @@ public sealed class GateFactsCollector(GitClient git, AutopilotConfig config, st
         var changes = await git.GetChangesAsync(baseCommit, headCommit, ct).ConfigureAwait(false);
         var log = new StringBuilder();
 
-        var before = await BuildAndTestAsync(workItemId, "gate-base", baseCommit, log, ct).ConfigureAwait(false);
-        var after = await BuildAndTestAsync(workItemId, "gate-head", headCommit, log, ct).ConfigureAwait(false);
+        var before = await BaseAsync(workItemId, baseCommit, log, ct).ConfigureAwait(false);
+        var after = await BuildAndTestCommitAsync(workItemId, "gate-head", headCommit, log, ct).ConfigureAwait(false);
 
         var tests = new TestFacts(
             BuildSucceeded: after.BuildSucceeded,
@@ -61,8 +64,122 @@ public sealed class GateFactsCollector(GitClient git, AutopilotConfig config, st
     /// </summary>
     public static string InternalName(string workItemId, string label) => $"@{label}-{workItemId}";
 
-    private async Task<StepResult> BuildAndTestAsync(string workItemId, string label, string commit, StringBuilder log, CancellationToken ct)
+    /// <summary>
+    /// Folder for cached base-commit results (<c>.autopilot/out/cache/gate-base/</c>). Null turns the cache off.
+    /// </summary>
+    public string? BaseCacheFolder { get; init; }
+
+    /// <summary>Part of the cache key, so a new tool version never reuses an old result.</summary>
+    public string ToolVersion { get; init; } = DefaultToolVersion;
+
+    public static string DefaultToolVersion { get; } =
+        typeof(GateFactsCollector).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? typeof(GateFactsCollector).Assembly.GetName().Version?.ToString()
+        ?? "unknown";
+
+    /// <summary>
+    /// The cache key for a base result: SHA-256 over the base commit, the build and test command lines and
+    /// the tool version. Changing any of them gives a new key, so an old result is never reused for it.
+    /// </summary>
+    public static string BaseCacheKey(string baseCommit, string buildCommand, string testCommand, string toolVersion)
     {
+        var text = string.Join("\n", "gate-base/v1", baseCommit.Trim(), buildCommand.Trim(), testCommand.Trim(), toolVersion.Trim());
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..32];
+    }
+
+    /// <summary>The base commit's facts: from the cache when a matching entry exists, otherwise built and tested.</summary>
+    private async Task<CheckoutRun> BaseAsync(string workItemId, string baseCommit, StringBuilder log, CancellationToken ct)
+    {
+        if (BaseCacheFolder is null)
+        {
+            return await BuildAndTestCommitAsync(workItemId, "gate-base", baseCommit, log, ct).ConfigureAwait(false);
+        }
+
+        var key = BaseCacheKey(baseCommit, config.Commands.Build, config.Commands.Test, ToolVersion);
+        var file = Path.Combine(BaseCacheFolder, key + ".json");
+        var cached = ReadCache(file);
+        if (cached is not null
+            && cached.BaseCommit == baseCommit
+            && cached.Build == config.Commands.Build.Trim()
+            && cached.Test == config.Commands.Test.Trim()
+            && cached.ToolVersion == ToolVersion)
+        {
+            var counts = new TrxCounts(cached.TrxFiles, cached.Total, cached.Skipped, cached.Failed);
+            log.AppendLine($"== gate-base ({Short(baseCommit)}): reused the cached result in {file} (made {cached.CreatedAt:u}); build and tests were not run again");
+            log.AppendLine($"-> cached: build {(cached.BuildSucceeded ? "ok" : "failed")}, tests {(cached.TestsSucceeded ? "passed" : "failed")}, {counts.Total} tests, {counts.Skipped} skipped, {counts.Failed} failed");
+            return new CheckoutRun(cached.BuildSucceeded, cached.TestsSucceeded, counts, null, null, config.Commands.Test, FromCache: true);
+        }
+
+        var run = await BuildAndTestCommitAsync(workItemId, "gate-base", baseCommit, log, ct).ConfigureAwait(false);
+
+        // Only a complete result is kept: a failed build or uncounted tests may be a passing problem.
+        if (run.BuildSucceeded && run.Counts.Found)
+        {
+            var entry = new BaseCacheEntry(1, baseCommit, config.Commands.Build.Trim(), config.Commands.Test.Trim(), ToolVersion,
+                run.BuildSucceeded, run.TestsSucceeded, run.Counts.Files, run.Counts.Total, run.Counts.Skipped, run.Counts.Failed, DateTimeOffset.UtcNow);
+            if (WriteCache(file, entry))
+            {
+                log.AppendLine($"-> base result cached in {file}");
+            }
+        }
+
+        return run;
+    }
+
+    private static BaseCacheEntry? ReadCache(string file)
+    {
+        try
+        {
+            return File.Exists(file) ? JsonSerializer.Deserialize<BaseCacheEntry>(File.ReadAllText(file), CacheJson) : null;
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static bool WriteCache(string file, BaseCacheEntry entry)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            File.WriteAllText(file, JsonSerializer.Serialize(entry, CacheJson));
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static readonly JsonSerializerOptions CacheJson = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+
+    private static string Short(string commit) => commit[..Math.Min(12, commit.Length)];
+
+    /// <summary>What the cache file holds.</summary>
+    public sealed record BaseCacheEntry(
+        int Version,
+        string BaseCommit,
+        string Build,
+        string Test,
+        string ToolVersion,
+        bool BuildSucceeded,
+        bool TestsSucceeded,
+        int TrxFiles,
+        int Total,
+        int Skipped,
+        int Failed,
+        DateTimeOffset CreatedAt);
+
+    /// <summary>
+    /// Builds and tests one commit in a fresh detached worktree of its own, the way the gate does: the
+    /// configured build command, then the test command with a TRX logger into a folder only this run
+    /// writes. <paramref name="name"/> and <paramref name="label"/> name the worktree. Doctor uses it too.
+    /// </summary>
+    public async Task<CheckoutRun> BuildAndTestCommitAsync(string name, string label, string commit, StringBuilder log, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(log);
+        var workItemId = name;
         var path = Path.Combine(worktreeRoot, InternalName(workItemId, label));
         if (Directory.Exists(path))
         {
@@ -77,7 +194,7 @@ public sealed class GateFactsCollector(GitClient git, AutopilotConfig config, st
             AppendLog(log, build);
             if (!build.Succeeded)
             {
-                return new StepResult(false, false, TrxCounts.None);
+                return new CheckoutRun(false, false, TrxCounts.None, build, null, config.Commands.Test);
             }
 
             // A fresh results folder that only the harness knows, outside every worktree: only TRX files
@@ -93,7 +210,7 @@ public sealed class GateFactsCollector(GitClient git, AutopilotConfig config, st
                 var test = await ShellRunner.RunAsync(testCommand, path, CommandTimeout, CommandEnvironment, ct, config.PassEnvironment).ConfigureAwait(false);
                 AppendLog(log, test);
                 var counts = ReadCounts(results, started, log);
-                return new StepResult(true, test.Succeeded, counts);
+                return new CheckoutRun(true, test.Succeeded, counts, build, test, testCommand);
             }
             finally
             {
@@ -150,5 +267,18 @@ public sealed class GateFactsCollector(GitClient git, AutopilotConfig config, st
         log.AppendLine(result.TimedOut ? "-> timed out" : $"-> exit code {result.ExitCode}");
     }
 
-    private sealed record StepResult(bool BuildSucceeded, bool TestsSucceeded, TrxCounts Counts);
+
 }
+
+/// <summary>
+/// Build and test of one commit on a clean checkout. <see cref="Build"/> and <see cref="Test"/> hold the
+/// full output; both are null when the result came from the base cache, and Test is null when the build failed.
+/// </summary>
+public sealed record CheckoutRun(
+    bool BuildSucceeded,
+    bool TestsSucceeded,
+    TrxCounts Counts,
+    ProcessResult? Build,
+    ProcessResult? Test,
+    string TestCommand,
+    bool FromCache = false);

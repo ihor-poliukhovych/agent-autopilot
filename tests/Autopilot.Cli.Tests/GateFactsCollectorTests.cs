@@ -104,6 +104,71 @@ public sealed class GateFactsCollectorTests
     }
 
     [Fact]
+    public async Task Base_result_is_cached_per_commit_commands_and_tool_version()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return; // The fake dotnet is a cmd script.
+        }
+
+        using var fake = new FakeDotnetOnPath();
+        using var repo = await TestRepo.CreateAsync(Files(Trx(3, 0)));
+        using var cache = new TempFolder();
+        var baseCommit = await repo.Git.GetCommitAsync("main");
+        var config = new AutopilotConfig { Commands = new CommandsConfig { Build = "echo built", Test = "dotnet test" } };
+        GateFactsCollector Collector(AutopilotConfig c, string version = "1.0.0") =>
+            new(repo.Git, c, repo.WorktreeRoot) { BaseCacheFolder = cache.Path, ToolVersion = version };
+
+        var first = await Collector(config).CollectAsync("001", baseCommit, baseCommit, NoEvidence, CancellationToken.None);
+        var key = GateFactsCollector.BaseCacheKey(baseCommit, "echo built", "dotnet test", "1.0.0");
+        var cacheFile = Path.Combine(cache.Path, key + ".json");
+        var second = await Collector(config).CollectAsync("001", baseCommit, baseCommit, NoEvidence, CancellationToken.None);
+        var otherVersion = await Collector(config, "1.0.1").CollectAsync("001", baseCommit, baseCommit, NoEvidence, CancellationToken.None);
+        var otherTest = await Collector(config with { Commands = new CommandsConfig { Build = "echo built", Test = "dotnet test --no-build" } })
+            .CollectAsync("001", baseCommit, baseCommit, NoEvidence, CancellationToken.None);
+
+        Assert.True(File.Exists(cacheFile));
+        Assert.Contains("base result cached in", first.Tests.Log, StringComparison.Ordinal);
+        Assert.DoesNotContain("reused the cached result", first.Tests.Log, StringComparison.Ordinal);
+        Assert.Contains($"reused the cached result in {cacheFile}", second.Tests.Log, StringComparison.Ordinal);
+        Assert.Single(second.Tests.Log.Split('\n'), l => l.StartsWith("== gate-", StringComparison.Ordinal) && l.Contains("echo built", StringComparison.Ordinal));
+        Assert.Equal(3, second.Tests.TestCountBefore);
+        Assert.True(second.Tests.TestCountsKnown);
+        Assert.DoesNotContain("reused the cached result", otherVersion.Tests.Log, StringComparison.Ordinal);
+        Assert.DoesNotContain("reused the cached result", otherTest.Tests.Log, StringComparison.Ordinal);
+        Assert.Equal(3, Directory.GetFiles(cache.Path, "*.json").Length);
+    }
+
+    [Fact]
+    public async Task Base_result_without_counted_tests_is_not_cached()
+    {
+        using var repo = await TestRepo.CreateAsync();
+        using var cache = new TempFolder();
+        var commit = await repo.Git.GetCommitAsync("main");
+        var config = new AutopilotConfig { Commands = new CommandsConfig { Build = "echo ok", Test = "echo no trx" } };
+        var collector = new GateFactsCollector(repo.Git, config, repo.WorktreeRoot) { BaseCacheFolder = cache.Path };
+
+        await collector.CollectAsync("001", commit, commit, NoEvidence, CancellationToken.None);
+        var again = await collector.CollectAsync("001", commit, commit, NoEvidence, CancellationToken.None);
+
+        Assert.Empty(Directory.GetFiles(cache.Path));
+        Assert.DoesNotContain("reused the cached result", again.Tests.Log, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Cache_key_changes_with_every_input()
+    {
+        var key = GateFactsCollector.BaseCacheKey("abc", "build", "test", "1");
+
+        Assert.Equal(key, GateFactsCollector.BaseCacheKey(" abc ", "build ", " test", "1"));
+        Assert.NotEqual(key, GateFactsCollector.BaseCacheKey("abd", "build", "test", "1"));
+        Assert.NotEqual(key, GateFactsCollector.BaseCacheKey("abc", "build2", "test", "1"));
+        Assert.NotEqual(key, GateFactsCollector.BaseCacheKey("abc", "build", "test2", "1"));
+        Assert.NotEqual(key, GateFactsCollector.BaseCacheKey("abc", "build", "test", "2"));
+        Assert.Matches("^[0-9a-f]{32}$", key);
+    }
+
+    [Fact]
     public async Task Summary_text_without_trx_leaves_the_counts_unknown()
     {
         using var repo = await TestRepo.CreateAsync(new Dictionary<string, string>

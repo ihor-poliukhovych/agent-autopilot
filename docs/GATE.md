@@ -13,6 +13,11 @@ reviews and merges.
 - The diff between the base commit and the agent branch (`git diff --numstat -M`).
 - Build and test results from **clean checkouts** of the base commit and of the agent
   branch, made by the gate, not the agent's own worktree.
+- The base commit's result is cached in `.autopilot/out/cache/gate-base/<key>.json`. The
+  key is a hash of the base commit, the build and test command lines and the tool
+  version, so changing any of them makes a new key. The gate log says when it reused a
+  cached result. Only a complete result (build passed, tests counted) is cached; delete
+  the folder to force a fresh run.
 - Test counts from TRX files that `dotnet test` writes into a folder the gate owns.
   Summary text in the output is ignored, so a test that prints a fake summary changes
   nothing.
@@ -28,7 +33,7 @@ reviews and merges.
 | `scope.test-lines` | added + removed lines in tests above `gate.maxTestLinesChanged` (300) | |
 | `scope.binary` | a binary file changed | yes |
 | `paths.allowed` | a changed path (or a rename's old path) is outside `writablePaths` | |
-| `paths.protected` | a change touches `.autopilot/` | |
+| `paths.protected` | a change touches `.autopilot/` or a `context` path | |
 | `paths.risk` | a change touches `riskPaths` | yes |
 | `tests.build` | the branch does not build | |
 | `tests.pass` | the branch's tests fail | |
@@ -47,11 +52,13 @@ All rules run every time, so a rejection lists everything that is wrong at once.
 
 The gate is the last line. Earlier, the PreToolUse hook stops the agent from:
 
-- writing outside `writablePaths`, or to `.autopilot/` or `riskPaths` at all;
+- writing outside `writablePaths`, or to `.autopilot/`, `riskPaths` or `context` paths at all;
 - reading or writing outside its worktree, inside `.git`, or through links;
 - running shell commands other than the role's list, chaining or redirecting them,
   using variables, or passing options that write or read elsewhere (`--output`, `-o`,
-  `--no-index`, absolute paths, `..`, and others);
+  `--no-index`, absolute paths, `..`, and others). The implementer may always run the
+  configured `commands.build` and `commands.test` lines exactly as written, plus extra
+  trailing arguments that pass these rules;
 - using tools without a policy (web access, subagents, other shells);
 - going past its tool-call limit.
 

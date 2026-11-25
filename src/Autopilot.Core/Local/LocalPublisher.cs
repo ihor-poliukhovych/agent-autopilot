@@ -30,6 +30,9 @@ public sealed class LocalPublisher(string projectRoot) : IPublisher
         }
     }
 
+    /// <summary>Heading of the triage agent's acceptance criteria, kept apart from the work item's own text.</summary>
+    public const string AcceptanceCriteriaHeading = "Acceptance criteria from triage";
+
     public static string PullRequestText(PublishRequest request)
     {
         var item = request.WorkItem;
@@ -50,7 +53,10 @@ public sealed class LocalPublisher(string projectRoot) : IPublisher
         text.AppendLine();
         if (evidence.Triage is { AcceptanceCriteria.Count: > 0 } triage)
         {
-            text.AppendLine("Acceptance criteria:");
+            text.AppendLine($"## {AcceptanceCriteriaHeading}");
+            text.AppendLine();
+            text.AppendLine("Written by the triage agent from the work item; the change was checked against these.");
+            text.AppendLine();
             foreach (var criterion in triage.AcceptanceCriteria)
             {
                 text.AppendLine($"- {criterion}");

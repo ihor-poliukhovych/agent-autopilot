@@ -136,12 +136,17 @@ public static class ConfigLoader
         var writable = config.WritablePaths?.Where(p => !string.IsNullOrWhiteSpace(p)).ToList() ?? [];
         if (writable.Count == 0)
         {
-            problems.Add("writablePaths is empty. List the folders the agent may change, for example \"src/**\" and \"tests/**\".");
+            problems.Add("writablePaths is empty. Fill in the folders the agent may change, as glob patterns relative to the project root, for example \"src/MyApp/**\" and \"tests/MyApp.Tests/**\". Keep it to source and test folders.");
         }
 
         foreach (var pattern in writable.Where(TargetsAutopilotFolder))
         {
             problems.Add($"writablePaths entry \"{pattern}\" points into .autopilot/. The agent may never change its own settings; remove it.");
+        }
+
+        foreach (var problem in (config.Context ?? []).Select(ContextPaths.Problem).OfType<string>())
+        {
+            problems.Add(problem);
         }
 
         if (config.Gate is null)

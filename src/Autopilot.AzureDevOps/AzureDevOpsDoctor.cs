@@ -74,9 +74,14 @@ public sealed class AzureDevOpsDoctor(AzureDevOpsClient client, AzureDevOpsSetti
         try
         {
             var ids = await client.QueryWorkItemIdsAsync(settings.Query, AzureDevOpsClient.DefaultTop, ct).ConfigureAwait(false);
+            var selection = settings.UsesDefaultQuery
+                ? $"default query, tag \"{AzureDevOpsSettings.DefaultQueryTag}\""
+                : "custom query";
             results.Add(ids.Count > 0
-                ? Ok("Work item query", $"{ids.Count} item(s) match")
-                : Ok("Work item query", "runs, but no item matches yet; tag a work item \"autopilot\" (or change \"query\") to give the agent work"));
+                ? Ok("Work item query", $"{ids.Count} item(s) match ({selection})")
+                : Ok("Work item query", settings.UsesDefaultQuery
+                    ? $"runs, but no item matches yet ({selection}); tag a work item \"{AzureDevOpsSettings.DefaultQueryTag}\" (or change \"query\") to give the agent work"
+                    : $"runs, but no item matches yet ({selection})"));
         }
         catch (AzureDevOpsException ex)
         {

@@ -58,7 +58,8 @@ checks every item of the setup and prints "ok" or what to do next:
 |---|---|
 | .NET SDK and git installed | always |
 | Claude Code installed and signed in | always |
-| The project builds and its tests pass with the configured commands | always |
+| The project builds and its tests pass with the configured commands, on a clean checkout of the base commit | always |
+| Project rules in `context` exist in the base commit | when set |
 | `autopilot.json` is valid, writable paths exist, no overlap with risk paths | always |
 | Work item module can read items | always |
 | Publisher module can reach its target with the agent identity | when not local |
@@ -108,7 +109,9 @@ How the limits are enforced, not just asked for:
   Quotes, `$`, `%` and `~` are denied, and so is any argument that starts with an option
   that writes, runs or reads elsewhere (`--output`, `-o`, `--no-index`, `--ext-diff`,
   `--exec`, `--config`, `-c`, `--git-dir`, `--work-tree`, `-C`, `--source`,
-  `--property`, `-p:`, `/p:`), is an absolute path, or contains `..` or `:`.
+  `--property`, `-p:`, `/p:`), is an absolute path, or contains `..` or `:`. The configured
+  `commands.build` and `commands.test` lines are the exception: the implementer may run
+  them exactly as written, plus trailing arguments that pass these rules.
 - **Clean environment.** Claude Code and the build and test commands start from an
   empty environment plus a short allow-list (PATH, TEMP, the user folders, system
   folders, `DOTNET_*`, `NUGET_*`, `MSBUILD*`, ...) and the names in `passEnvironment`.

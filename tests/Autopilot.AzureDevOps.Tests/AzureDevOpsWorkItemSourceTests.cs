@@ -17,7 +17,7 @@ public class AzureDevOpsWorkItemSourceTests
                 "System.Title": "Return 404 for unknown products",
                 "System.Description": "<div>The endpoint returns <b>500</b>.</div><ul><li>Seen in the logs</li></ul>",
                 "Microsoft.VSTS.Common.AcceptanceCriteria": "<ol><li>GET /products/999 returns 404</li></ol>",
-                "System.Tags": "autopilot; backend; autopilot:needs-human",
+                "System.Tags": "agent-autopilot; backend; autopilot:needs-human",
                 "System.State": "New",
                 "System.WorkItemType": "Bug"
               },
@@ -44,7 +44,7 @@ public class AzureDevOpsWorkItemSourceTests
         Assert.Equal("42", item.Id);
         Assert.Equal("Return 404 for unknown products", item.Title);
         Assert.Equal("The endpoint returns 500.\n\n- Seen in the logs\n\n## Acceptance criteria\n\n1. GET /products/999 returns 404", item.Body);
-        Assert.Equal(["autopilot", "backend", "autopilot:needs-human"], item.Labels);
+        Assert.Equal(["agent-autopilot", "backend", "autopilot:needs-human"], item.Labels);
         var query = JsonDocument.Parse(handler.Requests[0].Body).RootElement.GetProperty("query").GetString();
         Assert.Equal(AzureDevOpsSettings.DefaultQuery, query);
         Assert.Contains("$top=50", handler.Requests[0].Uri.Query, StringComparison.Ordinal);
@@ -94,7 +94,7 @@ public class AzureDevOpsWorkItemSourceTests
         var patch = handler.Requests.Single(r => r.Method == HttpMethod.Patch);
         var ops = JsonDocument.Parse(patch.Body).RootElement.EnumerateArray().ToList();
         Assert.Equal(5, ops[0].GetProperty("value").GetInt32());
-        Assert.Equal("autopilot; backend; autopilot:agent-ready", ops[1].GetProperty("value").GetString());
+        Assert.Equal("agent-autopilot; backend; autopilot:agent-ready", ops[1].GetProperty("value").GetString());
 
         var comment = Assert.Single(handler.Requests, r => r.Uri.AbsolutePath.EndsWith("/comments", StringComparison.Ordinal));
         var text = JsonDocument.Parse(comment.Body).RootElement.GetProperty("text").GetString()!;

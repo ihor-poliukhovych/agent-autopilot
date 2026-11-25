@@ -15,6 +15,9 @@ public static class ProjectPaths
 
     public static string TriageFolder(string projectRoot) => Path.Combine(OutFolder(projectRoot), "triage");
 
+    /// <summary>Cached build and test facts of base commits, one JSON file per key.</summary>
+    public static string GateBaseCacheFolder(string projectRoot) => Path.Combine(OutFolder(projectRoot), "cache", "gate-base");
+
     public static string RunFolder(string projectRoot, string workItemId) =>
         Path.Combine(OutFolder(projectRoot), "runs", SafeId(workItemId));
 

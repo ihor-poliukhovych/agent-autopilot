@@ -65,7 +65,8 @@ public static class MergeGate
                 $"Changed outside the writable paths: {Names(outside)}."));
         }
 
-        var protectedHits = touched.Where(p => GlobMatcher.IsMatch(p, ProtectedPaths)).ToList();
+        var protectedPatterns = ProtectedPaths.Concat(ContextPaths.ProtectedPatterns(config.Context)).ToList();
+        var protectedHits = touched.Where(p => GlobMatcher.IsMatch(p, protectedPatterns)).ToList();
         if (protectedHits.Count > 0)
         {
             findings.Add(new("paths.protected",

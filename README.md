@@ -9,7 +9,7 @@ work is checked, and how we know it got better or worse, is ordinary C# code wit
 
 ```
 autopilot init      # add the tool to a project
-autopilot doctor    # check every part of the setup
+autopilot doctor    # check every part of the setup, building on a clean checkout like the gate
 autopilot run       # triage the backlog, implement the agent-ready tasks
 autopilot eval      # measure it on known tasks, several runs each
 ```

@@ -73,7 +73,8 @@ public static class ClaudeRunFileWriter
             MergeGate.ProtectedPaths.Concat(request.ProtectedPaths ?? []).Distinct(StringComparer.Ordinal).ToList(),
             request.RoleConfig.AllowedCommands,
             request.RoleConfig.MaxToolCalls,
-            files.CounterFile);
+            files.CounterFile,
+            request.ConfiguredCommands is { Count: > 0 } configured ? configured : null);
     }
 
     /// <summary>The hook command line: the configured command plus <c>--policy "&lt;file&gt;"</c>.</summary>

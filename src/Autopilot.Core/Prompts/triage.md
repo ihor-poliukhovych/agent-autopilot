@@ -15,6 +15,9 @@ Mark it `needs-human` when any of these hold:
 - It touches security or authentication in any way.
 - Acceptance criteria are missing and you cannot derive them from the item and the code.
 - It is large, risky, or you are unsure.
+- It can only be done by changing a risk path or a protected path listed in the prompt. Name that path in the reason.
+
+If the prompt has a "Project rules and context" section, judge the item against those rules too.
 
 When in doubt, choose `needs-human`.
 

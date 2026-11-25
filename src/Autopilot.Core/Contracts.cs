@@ -57,7 +57,12 @@ public sealed record AgentRunRequest(
     /// MCP servers for this run, by name. The runner writes them to the run's mcp.json (used with
     /// --strict-mcp-config). Null or empty means no MCP server, and every <c>mcp__*</c> tool is denied.
     /// </summary>
-    IReadOnlyDictionary<string, McpServerSpec>? McpServers = null);
+    IReadOnlyDictionary<string, McpServerSpec>? McpServers = null,
+    /// <summary>
+    /// The configured build and test command lines the hook allows exactly as written (see
+    /// <see cref="Policy.ToolPolicy.ConfiguredCommands"/>). The pipeline sets them for the implementer only.
+    /// </summary>
+    IReadOnlyList<string>? ConfiguredCommands = null);
 
 /// <summary>A stdio MCP server: the program and its arguments, one argv entry each.</summary>
 public sealed record McpServerSpec(string Command, IReadOnlyList<string> Args);

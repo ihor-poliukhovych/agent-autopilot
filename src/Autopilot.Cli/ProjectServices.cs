@@ -16,7 +16,15 @@ namespace Autopilot.Cli;
 /// <summary>Builds the pipeline for a project from its config. Fails with a readable message.</summary>
 public static class ProjectServices
 {
-    public static async Task<AutopilotPipeline> CreatePipelineAsync(string projectRoot, CliContext context, CancellationToken ct)
+    /// <summary>The value of <c>--source</c> that reads <c>.autopilot/tasks/</c> for one run.</summary>
+    public const string LocalSource = "local";
+
+    /// <summary>
+    /// Builds the pipeline. <paramref name="source"/> "local" reads the work items from
+    /// <c>.autopilot/tasks/</c> for this run whatever <c>modules.workItems</c> says, and then drafts stay
+    /// local bundles too, so a local task id is never linked to an unrelated remote work item.
+    /// </summary>
+    public static async Task<AutopilotPipeline> CreatePipelineAsync(string projectRoot, CliContext context, CancellationToken ct, string? source = null)
     {
         AutopilotConfig config;
         try
@@ -43,7 +51,16 @@ public static class ProjectServices
         var diagnosticsServer = DiagnosticsServerFor(projectRoot, config);
         var git = new GitClient(repoRoot);
         var worktreeRoot = context.WorktreeRoot ?? GitClient.DefaultWorktreeRoot(repoRoot);
-        var (workItems, publisher) = CreateModules(projectRoot, config);
+        var localSource = string.Equals(source, LocalSource, StringComparison.OrdinalIgnoreCase);
+        if (localSource && !string.Equals(config.Modules.WorkItems.Type, LocalSource, StringComparison.OrdinalIgnoreCase))
+        {
+            await context.Out.WriteLineAsync(
+                $"--source local: work items come from .autopilot/tasks/ for this run (modules.workItems is \"{config.Modules.WorkItems.Type}\"); drafts are local bundles only.").ConfigureAwait(false);
+        }
+
+        var (workItems, publisher) = localSource
+            ? ((IWorkItemSource)new LocalWorkItemSource(projectRoot), (IPublisher)new LocalPublisher(projectRoot))
+            : CreateModules(projectRoot, config);
         return new AutopilotPipeline(new AutopilotPipelineOptions
         {
             ProjectRoot = projectRoot,
@@ -56,7 +73,7 @@ public static class ProjectServices
                 PassEnvironment = config.PassEnvironment,
             }),
             Git = git,
-            Facts = context.FactsCollectorFactory?.Invoke(config) ?? new GateFactsCollector(git, config, worktreeRoot),
+            Facts = context.FactsCollectorFactory?.Invoke(config) ?? new GateFactsCollector(git, config, worktreeRoot) { BaseCacheFolder = ProjectPaths.GateBaseCacheFolder(projectRoot) },
             WorktreeRoot = worktreeRoot,
             EvaluateGate = context.EvaluateGate ?? MergeGate.Evaluate,
             Log = context.Out,

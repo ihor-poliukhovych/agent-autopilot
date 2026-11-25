@@ -116,6 +116,33 @@ public class ClaudeRunFilesTests : IDisposable
     }
 
     [Fact]
+    public void Configured_commands_reach_the_policy_and_survive_the_json()
+    {
+        const string build = "dotnet build \"App.sln\" -p:Deterministic=true";
+        var request = TestData.Request() with { ConfiguredCommands = [build, "dotnet test \"App.sln\""] };
+
+        var policy = ClaudeRunFileWriter.BuildPolicy(request, ClaudeRunFiles.For(_dir));
+        var back = PolicyJson.Deserialize(PolicyJson.Serialize(policy));
+
+        Assert.Equal([build, "dotnet test \"App.sln\""], back.ConfiguredCommands);
+        Assert.Contains("configuredCommands", PolicyJson.Serialize(policy), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_policy_file_without_configured_commands_still_reads()
+    {
+        var policy = ClaudeRunFileWriter.BuildPolicy(TestData.Request(), ClaudeRunFiles.For(_dir));
+        var node = System.Text.Json.Nodes.JsonNode.Parse(PolicyJson.Serialize(policy))!.AsObject();
+        node.Remove("configuredCommands");
+
+        var back = PolicyJson.Deserialize(node.ToJsonString());
+
+        Assert.Null(policy.ConfiguredCommands);
+        Assert.Null(back.ConfiguredCommands);
+        Assert.Equal(policy.AllowedCommands, back.AllowedCommands);
+    }
+
+    [Fact]
     public void Default_hook_timeout_is_120_seconds()
     {
         Assert.Equal(120, TestData.Options().HookTimeoutSeconds);

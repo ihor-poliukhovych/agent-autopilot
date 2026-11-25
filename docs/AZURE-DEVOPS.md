@@ -137,21 +137,27 @@ The work item source and the publisher read the same settings block. Copy it int
 | `remote` | no | `origin` | The git remote that points to that repository |
 | `query` | no | see below | WIQL query that lists the items the agent may look at |
 | `tagPrefix` | no | `autopilot:` | Prefix of the triage tag |
+| `recordTriage` | no | `remote` | `remote`: triage writes a tag and a comment on the work item. `local`: results stay in `.autopilot/out/triage/` and nothing is written to Azure DevOps (read-only) |
 | `auth` | no | `pat` | `pat` (environment variable) or `az` (Azure CLI) |
 | `tokenVariable` | no | `AUTOPILOT_ADO_PAT` | Name of the environment variable; must start with `AUTOPILOT_` |
 
 Default query: open items of the project (state not Closed, Done or Removed) that have
-the tag `autopilot`, newest first, at most 50:
+the tag `agent-autopilot`, newest first, at most 50:
 
 ```sql
 SELECT [System.Id] FROM WorkItems
 WHERE [System.TeamProject] = @project
   AND [System.State] NOT IN ('Closed', 'Done', 'Removed')
-  AND [System.Tags] CONTAINS 'autopilot'
+  AND [System.Tags] CONTAINS 'agent-autopilot'
 ORDER BY [System.CreatedDate] DESC
 ```
 
-So a person decides which items the agent may look at by adding the tag `autopilot`.
+So a person decides which items the agent may look at by adding the tag `agent-autopilot`.
+The name is chosen so that it does not start with the triage tag prefix `autopilot:`.
+
+Open task files in `.autopilot/tasks/` are not read while the work items come from Azure
+DevOps; `autopilot doctor` warns when there are some. `autopilot triage --source local`
+(also `implement` and `run`) uses them for one run; drafts of that run stay local.
 
 The git remote must point to the same organisation over https (or ssh). The token is
 only ever sent to the host of `organizationUrl`; a push to any other https host is
@@ -165,6 +171,10 @@ refused.
 - **Triage** replaces any tag that starts with `autopilot:` by `autopilot:agent-ready`
   or `autopilot:needs-human` (other tags stay) and adds one comment, marked
   "Written by Agent Autopilot", with the reason, the acceptance criteria and the risk.
+  With `"recordTriage": "local"` it does neither: the result is only written to
+  `.autopilot/out/triage/<id>.md` and `.json`, and the module sends no PATCH and no
+  comment. Reading items still uses the query and batch endpoints (both POST requests
+  that change nothing).
 - **Publish** (only after the merge gate passed): pushes the agent branch
   (`autopilot/<id>`, never forced, no other branch) and opens a **draft** pull request
   `[autopilot] <title>` into the base branch, linked to the work item, with the same
@@ -175,9 +185,10 @@ refused.
 
 | Check | OK when |
 |---|---|
+| Triage results | Always OK; says whether `recordTriage` is `remote` (tags and a comment) or `local` (nothing written) |
 | Azure DevOps token | The environment variable is set, or `az` returns a token |
 | Azure DevOps project | The project can be read with the token |
-| Work item query | The query runs (shows how many items match) |
+| Work item query | The query runs; shows how many items match and the tag used (`agent-autopilot` for the default query, or "custom query") |
 | Azure DevOps repository | The repository can be read |
 | Agent can Contribute / Create branch / Contribute to pull requests | The identity has the right |
 | Agent cannot force push, edit policies, manage permissions, bypass policies when pushing, bypass policies when completing pull requests | The identity does **not** have the right; each one it has is a FAIL with the fix |
