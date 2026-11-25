@@ -284,9 +284,13 @@ public class MergeGateTests
     [Fact]
     public void Renaming_a_test_file_within_test_paths_is_fine()
     {
-        var rename = new FileChange("tests/App.Tests/NewTests.cs", FileChangeKind.Renamed, 0, 0, OldPath: "tests/App.Tests/OldTests.cs");
+        var rename = new FileChange("tests/App.Tests/NewTests.cs", FileChangeKind.Renamed, 2, 0, OldPath: "tests/App.Tests/OldTests.cs");
+        var pureRename = rename with { AddedLines = 0 };
 
         Assert.Equal(GateOutcome.Passed, Run(Clean([Source(), rename])).Outcome);
+
+        // A rename with no added line is not a test change (evidence.test-change), but never a deletion.
+        Assert.Equal(["evidence.test-change"], Rules(Run(Clean([Source(), pureRename]))));
     }
 
     // ---------- evidence.* ----------
@@ -390,5 +394,49 @@ public class MergeGateTests
         ];
         Assert.Equal(expected.Order(), Rules(decision).Order());
         Assert.All(decision.Findings, f => Assert.False(string.IsNullOrWhiteSpace(f.Message)));
+    }
+
+    // ---------- new rules: binary files, TRX counts, added test lines, build files ----------
+
+    [Fact]
+    public void Binary_file_is_rejected_as_high_risk()
+    {
+        var decision = Run(Clean([Source(), Test(), new("src/App/logo.png", FileChangeKind.Added, 0, 0, Binary: true)]));
+
+        var finding = Single(decision, "scope.binary");
+        Assert.True(finding.HighRisk);
+        Assert.Contains("src/App/logo.png", finding.Message);
+    }
+
+    [Fact]
+    public void Unknown_test_counts_are_rejected()
+    {
+        var finding = Single(Run(Clean(tests: GoodTests() with { TestCountsKnown = false })), "tests.count");
+
+        Assert.Contains("could not count tests", finding.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Test_change_with_only_removed_lines_does_not_count()
+    {
+        Single(Run(Clean([Source(), Test(added: 0, removed: 4)])), "evidence.test-change");
+    }
+
+    [Fact]
+    public void Test_change_with_one_added_line_counts()
+    {
+        Assert.Equal(GateOutcome.Passed, Run(Clean([Source(), Test(added: 1, removed: 0)])).Outcome);
+    }
+
+    [Theory]
+    [InlineData("Directory.Build.props")]
+    [InlineData("src/App/Custom.targets")]
+    [InlineData("build/deep/Shared.props")]
+    public void Props_and_targets_files_are_risk_paths_by_default(string path)
+    {
+        var config = Config with { WritablePaths = ["**"] };
+        var decision = Run(Clean([Source(), Test(), new(path, FileChangeKind.Modified, 1, 0)]), config);
+
+        Assert.True(Single(decision, "paths.risk").HighRisk);
     }
 }

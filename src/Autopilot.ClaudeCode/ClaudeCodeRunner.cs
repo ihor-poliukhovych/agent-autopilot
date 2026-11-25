@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text;
+using Autopilot.ClaudeCode.Hooks;
 using Autopilot.Core;
+using Autopilot.Core.Process;
 
 namespace Autopilot.ClaudeCode;
 
@@ -48,7 +50,7 @@ public sealed class ClaudeCodeRunner(ClaudeCodeRunnerOptions options) : IAgentRu
             startInfo.ArgumentList.Add(argument);
         }
 
-        ClaudeEnvironment.Scrub(startInfo.Environment);
+        ClaudeEnvironment.Apply(startInfo.Environment, Options.PassEnvironment);
 
         using var process = new Process { StartInfo = startInfo };
         try
@@ -60,8 +62,8 @@ public sealed class ClaudeCodeRunner(ClaudeCodeRunnerOptions options) : IAgentRu
             return ClaudeResultParser.Failure($"Could not start Claude Code at \"{executable}\": {ex.Message}", clock.Elapsed);
         }
 
-        Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
-        Task<string> stderrTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
+        TextCapture stdoutCapture = TextCapture.Start(process.StandardOutput);
+        TextCapture stderrCapture = TextCapture.Start(process.StandardError);
 
         using var timeout = new CancellationTokenSource(Options.Timeout);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
@@ -91,8 +93,10 @@ public sealed class ClaudeCodeRunner(ClaudeCodeRunnerOptions options) : IAgentRu
             killed = true;
         }
 
-        string stdout = await stdoutTask.ConfigureAwait(false);
-        string stderr = await stderrTask.ConfigureAwait(false);
+        // A grandchild can keep the pipes open after Claude Code is gone; wait for the readers for a
+        // bounded time only, then go on with what was captured.
+        string stdout = await stdoutCapture.TextAfterAsync(ProcessRunner.ReaderGracePeriod).ConfigureAwait(false);
+        string stderr = await stderrCapture.TextAfterAsync(ProcessRunner.ReaderGracePeriod).ConfigureAwait(false);
         await File.WriteAllTextAsync(files.StdoutFile, stdout, CancellationToken.None).ConfigureAwait(false);
         await File.WriteAllTextAsync(files.StderrFile, stderr, CancellationToken.None).ConfigureAwait(false);
 
@@ -104,12 +108,41 @@ public sealed class ClaudeCodeRunner(ClaudeCodeRunnerOptions options) : IAgentRu
                 clock.Elapsed);
         }
 
-        return ClaudeResultParser.Parse(
+        AgentRunResult result = ClaudeResultParser.Parse(
             stdout,
             stderr,
-            process.ExitCode,
+            process.HasExited ? process.ExitCode : -1,
             clock.Elapsed,
             expectStructuredOutput: !string.IsNullOrWhiteSpace(request.OutputJsonSchema));
+        return CheckHookRan(result, files);
+    }
+
+    /// <summary>
+    /// More than one turn means the agent called at least one tool, so the hook must have logged a
+    /// decision. When it did not, the hook was not in force (for example Claude Code did not load the
+    /// settings), and the run cannot be trusted.
+    /// </summary>
+    public static AgentRunResult CheckHookRan(AgentRunResult result, ClaudeRunFiles files)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(files);
+        if (result.Turns <= 1)
+        {
+            return result;
+        }
+
+        string log = Path.Combine(files.RunDirectory, PreToolUseHook.LogFileName);
+        bool hasEntries = File.Exists(log) && new FileInfo(log).Length > 0;
+        if (hasEntries)
+        {
+            return result;
+        }
+
+        return result with
+        {
+            Succeeded = false,
+            Error = $"the policy hook did not run: Claude Code reported {result.Turns} turns but {PreToolUseHook.LogFileName} is missing or empty, so the run is not trusted.",
+        };
     }
 
     private static string? Validate(AgentRunRequest request)
@@ -135,24 +168,17 @@ public sealed class ClaudeCodeRunner(ClaudeCodeRunnerOptions options) : IAgentRu
         return null;
     }
 
+    /// <summary>Kills the process tree and waits at most 10 s for it to exit. Never throws.</summary>
     private static void Kill(Process process)
     {
+        ProcessRunner.Kill(process);
         try
         {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-
             process.WaitForExit(TimeSpan.FromSeconds(10));
         }
-        catch (InvalidOperationException)
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException)
         {
-            // Already exited.
-        }
-        catch (System.ComponentModel.Win32Exception)
-        {
-            // Could not kill (already gone or access denied); nothing more to do.
+            // Already gone or not ours to wait for; the capped reader waits end the run.
         }
     }
 }

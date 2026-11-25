@@ -8,6 +8,12 @@ public static class ProcessRunner
 {
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// After a kill, how long to wait for the output readers. A grandchild that escaped the kill can
+    /// hold the pipes open forever; after this the runner returns what it has.
+    /// </summary>
+    public static readonly TimeSpan ReaderGracePeriod = TimeSpan.FromSeconds(10);
+
     public static Task<ProcessResult> RunAsync(
         string fileName,
         IEnumerable<string> arguments,
@@ -25,12 +31,18 @@ public static class ProcessRunner
         return RunAsync(startInfo, timeout, environment, ct);
     }
 
-    /// <summary>Runs a prepared start info. Output is redirected and read as UTF-8.</summary>
+    /// <summary>
+    /// Runs a prepared start info. Output is redirected and read as UTF-8. With
+    /// <paramref name="cleanEnvironment"/> the child starts from <see cref="ChildEnvironment"/>'s
+    /// allow-list plus <paramref name="passEnvironment"/>; <paramref name="environment"/> is applied after that.
+    /// </summary>
     public static async Task<ProcessResult> RunAsync(
         ProcessStartInfo startInfo,
         TimeSpan? timeout = null,
         IReadOnlyDictionary<string, string?>? environment = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool cleanEnvironment = false,
+        IReadOnlyList<string>? passEnvironment = null)
     {
         startInfo.UseShellExecute = false;
         startInfo.RedirectStandardOutput = true;
@@ -39,6 +51,11 @@ public static class ProcessRunner
         startInfo.CreateNoWindow = true;
         startInfo.StandardOutputEncoding = Encoding.UTF8;
         startInfo.StandardErrorEncoding = Encoding.UTF8;
+        if (cleanEnvironment)
+        {
+            ChildEnvironment.Apply(startInfo.Environment, passEnvironment);
+        }
+
         if (environment is not null)
         {
             foreach (var (key, value) in environment)
@@ -89,11 +106,12 @@ public static class ProcessRunner
         {
             timedOut = !ct.IsCancellationRequested;
             Kill(process);
-            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            await WaitAtMostAsync(process.WaitForExitAsync(CancellationToken.None), ReaderGracePeriod).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
         }
 
-        // WaitForExitAsync returns after the output streams reach end of file.
+        // WaitForExitAsync returns after the output streams reach end of file; after a kill that
+        // wait is capped, so the text below may be cut.
         lock (gate)
         {
             return new ProcessResult(
@@ -120,8 +138,34 @@ public static class ProcessRunner
         }
     }
 
-    private static void Kill(System.Diagnostics.Process process)
+    /// <summary>Waits for a task for at most <paramref name="limit"/>. True when it finished in time.</summary>
+    public static async Task<bool> WaitAtMostAsync(Task task, TimeSpan limit)
     {
+        ArgumentNullException.ThrowIfNull(task);
+        var finished = await Task.WhenAny(task, Task.Delay(limit)).ConfigureAwait(false);
+        if (finished != task)
+        {
+            // Observe a later failure so it is not reported as unobserved.
+            _ = task.ContinueWith(t => _ = t.Exception, TaskScheduler.Default);
+            return false;
+        }
+
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or ObjectDisposedException)
+        {
+            // The reader ended badly; what was captured is still returned.
+        }
+
+        return true;
+    }
+
+    /// <summary>Kills the process tree. Never throws: a failed kill leaves the capped waits to end the run.</summary>
+    public static void Kill(System.Diagnostics.Process process)
+    {
+        ArgumentNullException.ThrowIfNull(process);
         try
         {
             process.Kill(entireProcessTree: true);
@@ -129,6 +173,18 @@ public static class ProcessRunner
         catch (InvalidOperationException)
         {
             // Already exited.
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Access denied or already gone.
+        }
+        catch (AggregateException)
+        {
+            // Some processes of the tree could not be killed.
+        }
+        catch (NotSupportedException)
+        {
+            // Remote process; not ours.
         }
     }
 }

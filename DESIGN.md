@@ -97,8 +97,34 @@ How the limits are enforced, not just asked for:
 - A **PreToolUse hook** (a small C# program shipped with the tool) runs before every
   tool call. It denies writes outside the writable paths, any shell command not on
   the role's list, and every call after the role's turn limit.
+- **Build files are not writable.** The hook denies writes to the risk paths as well as
+  to `.autopilot/**`, so the agent can never change `*.csproj`, `Directory.Build.*`,
+  `*.props`, `*.targets`, `appsettings*.json` or auth and security files.
+- **Only known tools.** Read, Grep, Glob, Edit, Write, MultiEdit, NotebookEdit, Bash,
+  StructuredOutput and `mcp__*` tools have rules; any other tool (PowerShell, Task,
+  Agent, WebFetch, ...) is denied even when a role lists it. Paths through a symlink,
+  junction or other reparse point inside the worktree are denied.
+- **Bash arguments.** After the allowed prefix, the command is split on whitespace.
+  Quotes, `$`, `%` and `~` are denied, and so is any argument that starts with an option
+  that writes, runs or reads elsewhere (`--output`, `-o`, `--no-index`, `--ext-diff`,
+  `--exec`, `--config`, `-c`, `--git-dir`, `--work-tree`, `-C`, `--source`,
+  `--property`, `-p:`, `/p:`), is an absolute path, or contains `..` or `:`.
+- **Clean environment.** Claude Code and the build and test commands start from an
+  empty environment plus a short allow-list (PATH, TEMP, the user folders, system
+  folders, `DOTNET_*`, `NUGET_*`, `MSBUILD*`, ...) and the names in `passEnvironment`.
+  `ANTHROPIC_*` and `AUTOPILOT_*` are never passed.
+- **The hook fails closed.** Claude Code lets a call through when its hook times out or
+  exits with any code but 2, so the hook exits 2 on every failure, the hook timeout is
+  120 s, and the hook command uses the fast-starting `autopilot.exe` apphost. A run that
+  reports more than one turn but left no hook log is marked failed.
 - The harness reads turns and token usage from Claude Code's JSON output for logs
   and evals.
+
+**Limits of the sandbox.** The hook controls the agent's tools, not the code the agent
+writes. That code runs during build and test (the agent's own runs and the gate's), with
+the rights of the user who started Agent Autopilot. Run it on a machine, or as an OS
+user, without access to secrets you care about. A stronger sandbox (a container or a
+separate OS user) is future work.
 
 The model is set per role in `autopilot.json` (default: Claude Code's default model).
 
@@ -112,10 +138,12 @@ agent says it did. Limits are configurable per project.
 | Files changed | at most 6 | rejected |
 | Lines changed outside tests | at most 150 (tests: at most 300) | rejected |
 | Allowed paths | only the configured writable paths | rejected |
-| Risk paths | configured list (example: auth, security, settings files, package references) | rejected as high risk, goes to a person |
+| Risk paths | configured list (example: auth, security, settings files, package references, `*.props`, `*.targets`) | rejected as high risk, goes to a person |
+| Binary files | any file git counts as binary (numstat `-`) | rejected as high risk, goes to a person |
 | Tests re-run | gate runs the build and test commands itself on a clean checkout of the branch | rejected |
 | No weakened tests | test count must not drop, no new skipped tests, no deleted test files | rejected |
-| Evidence | linked work item, triage said `agent-ready`, self-review present, reviewer said `approve`, a test changed when non-test code changed | rejected |
+| Test counts | counted from TRX files only: for `dotnet test` the gate adds `--logger trx` and a fresh results folder it owns; no TRX for the base or the branch run means "could not count tests" | rejected |
+| Evidence | linked work item, triage said `agent-ready` on the current text of the item, self-review present, reviewer said `approve`, at least one line added to a test file when non-test code changed | rejected |
 
 The result is `Rejected` (every failed rule listed, branch kept for a person) or
 `Passed` (handed to the publisher as a draft). There is no auto-merge outcome.

@@ -101,7 +101,7 @@ public sealed class GitClientTests
         var changes = GitClient.ParseChanges(numstat, nameStatus);
 
         Assert.Equal(
-            [new FileChange("img.png", FileChangeKind.Added, 0, 0), new FileChange("b.cs", FileChangeKind.Added, 5, 0)],
+            [new FileChange("img.png", FileChangeKind.Added, 0, 0, Binary: true), new FileChange("b.cs", FileChangeKind.Added, 5, 0)],
             changes);
     }
 

@@ -183,4 +183,58 @@ public class PreToolUseHookTests : IDisposable
             "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"r\"}}",
             PreToolUseHook.BuildDenyJson("r"));
     }
+
+    [Fact]
+    public async Task Log_lines_keep_quotes_and_plus_readable()
+    {
+        await Run(ReadCall, (_, _, _) => PolicyDecision.Deny("shell command 'a+b' contains '\"'"), _ => 1);
+
+        string line = Assert.Single(LogLines());
+        Assert.Contains("a+b", line);
+        Assert.DoesNotContain(@"\u0022", line);
+        Assert.DoesNotContain(@"\u002B", line);
+        Assert.DoesNotContain(@"\u0027", line);
+    }
+}
+
+public class TextCaptureTests
+{
+    /// <summary>A reader that returns some text once and then never ends, like a pipe a grandchild holds open.</summary>
+    private sealed class HangingReader(string first) : TextReader
+    {
+        private bool _sent;
+
+        public override ValueTask<int> ReadAsync(Memory<char> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_sent)
+            {
+                return new ValueTask<int>(new TaskCompletionSource<int>().Task);
+            }
+
+            _sent = true;
+            first.AsSpan().CopyTo(buffer.Span);
+            return new ValueTask<int>(first.Length);
+        }
+    }
+
+    [Fact]
+    public async Task Returns_what_was_read_when_the_stream_never_ends()
+    {
+        var capture = Autopilot.Core.Process.TextCapture.Start(new HangingReader("partial output"));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        string text = await capture.TextAfterAsync(TimeSpan.FromMilliseconds(200));
+
+        Assert.Equal("partial output", text);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(5));
+        Assert.False(capture.Completion.IsCompleted);
+    }
+
+    [Fact]
+    public async Task Reads_to_the_end_of_a_finished_stream()
+    {
+        var capture = Autopilot.Core.Process.TextCapture.Start(new StringReader(new string('x', 10_000)));
+
+        Assert.Equal(10_000, (await capture.TextAfterAsync(TimeSpan.FromSeconds(10))).Length);
+    }
 }

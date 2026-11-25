@@ -70,7 +70,7 @@ public static class ClaudeRunFileWriter
             Path.GetFullPath(request.WorkingDirectory),
             request.RoleConfig.AllowedTools,
             request.WritablePaths,
-            MergeGate.ProtectedPaths,
+            MergeGate.ProtectedPaths.Concat(request.ProtectedPaths ?? []).Distinct(StringComparer.Ordinal).ToList(),
             request.RoleConfig.AllowedCommands,
             request.RoleConfig.MaxToolCalls,
             files.CounterFile);

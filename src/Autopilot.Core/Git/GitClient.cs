@@ -161,7 +161,7 @@ public sealed class GitClient
     /// <summary>Joins <c>--numstat -z</c> and <c>--name-status -z</c> output into file changes.</summary>
     public static IReadOnlyList<FileChange> ParseChanges(string numstatZ, string nameStatusZ)
     {
-        var lines = new Dictionary<string, (int Added, int Removed)>(StringComparer.Ordinal);
+        var lines = new Dictionary<string, (int Added, int Removed, bool Binary)>(StringComparer.Ordinal);
         var tokens = numstatZ.Split('\0');
         for (var i = 0; i < tokens.Length; i++)
         {
@@ -177,7 +177,8 @@ public sealed class GitClient
                 continue;
             }
 
-            var added = int.TryParse(parts[0], out var a) ? a : 0; // "-" for binary files
+            var binary = parts[0] == "-" || parts[1] == "-"; // numstat shows "-" for binary files
+            var added = int.TryParse(parts[0], out var a) ? a : 0;
             var removed = int.TryParse(parts[1], out var r) ? r : 0;
             string path;
             if (parts[2].Length == 0 && i + 2 < tokens.Length)
@@ -191,7 +192,7 @@ public sealed class GitClient
                 path = parts[2];
             }
 
-            lines[path] = (added, removed);
+            lines[path] = (added, removed, binary);
         }
 
         var changes = new List<FileChange>();
@@ -243,7 +244,7 @@ public sealed class GitClient
             }
 
             lines.TryGetValue(path, out var counts);
-            changes.Add(new FileChange(path, kind, counts.Added, counts.Removed, oldPath));
+            changes.Add(new FileChange(path, kind, counts.Added, counts.Removed, oldPath, counts.Binary));
         }
 
         return changes;

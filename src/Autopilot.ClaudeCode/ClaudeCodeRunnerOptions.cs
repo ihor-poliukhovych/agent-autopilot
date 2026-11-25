@@ -17,8 +17,17 @@ public sealed record ClaudeCodeRunnerOptions
 
     public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(30);
 
-    /// <summary>Seconds Claude Code waits for one hook call before it gives up on it.</summary>
-    public int HookTimeoutSeconds { get; init; } = 30;
+    /// <summary>
+    /// Seconds Claude Code waits for one hook call. Claude Code lets a call go ahead when its hook times
+    /// out, so this is generous: a cold start of the hook must never run into it.
+    /// </summary>
+    public int HookTimeoutSeconds { get; init; } = 120;
+
+    /// <summary>
+    /// Extra environment variable names passed to Claude Code (from the config's <c>passEnvironment</c>).
+    /// ANTHROPIC_* and AUTOPILOT_* are never passed.
+    /// </summary>
+    public IReadOnlyList<string> PassEnvironment { get; init; } = [];
 
     /// <summary>
     /// Extra MCP config files passed to <c>--mcp-config</c> next to the run's own empty config.

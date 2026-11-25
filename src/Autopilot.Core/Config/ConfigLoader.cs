@@ -1,5 +1,8 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using Autopilot.Core.Process;
 
 namespace Autopilot.Core.Config;
 
@@ -34,17 +37,57 @@ public static class ConfigLoader
         return Parse(File.ReadAllText(path), path);
     }
 
+    /// <summary>
+    /// Parses the file onto the defaults: the JSON is deep-merged over the serialized
+    /// <see cref="AutopilotConfig"/> defaults (objects merge key by key, arrays and values replace), so a
+    /// file that sets only <c>roles.triage.model</c> keeps every other triage default.
+    /// </summary>
     public static AutopilotConfig Parse(string json, string source = "autopilot.json")
     {
         try
         {
-            return JsonSerializer.Deserialize<AutopilotConfig>(json, JsonOptions)
+            var node = JsonNode.Parse(json, nodeOptions: null, documentOptions: new JsonDocumentOptions
+            {
+                CommentHandling = JsonCommentHandling.Skip,
+                AllowTrailingCommas = true,
+            }) ?? throw new ConfigException($"{source} is empty.");
+            if (node is not JsonObject user)
+            {
+                throw new ConfigException($"{source} must hold one JSON object ({{ ... }}).");
+            }
+
+            var merged = JsonSerializer.SerializeToNode(new AutopilotConfig(), JsonOptions)!.AsObject();
+            MergeInto(merged, user);
+            return merged.Deserialize<AutopilotConfig>(JsonOptions)
                 ?? throw new ConfigException($"{source} is empty.");
         }
         catch (JsonException ex)
         {
             var where = ex.LineNumber is { } line ? $" (line {line + 1})" : string.Empty;
             throw new ConfigException($"{source} is not valid JSON{where}: {ex.Message}");
+        }
+    }
+
+    /// <summary>Copies <paramref name="overlay"/> onto <paramref name="target"/>: objects merge, everything else replaces. Keys match ignoring case.</summary>
+    public static void MergeInto(JsonObject target, JsonObject overlay)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(overlay);
+        foreach (var (key, value) in overlay.ToList())
+        {
+            var existingKey = target.Select(p => p.Key).FirstOrDefault(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
+            if (existingKey is not null && target[existingKey] is JsonObject targetChild && value is JsonObject overlayChild)
+            {
+                MergeInto(targetChild, overlayChild);
+                continue;
+            }
+
+            if (existingKey is not null)
+            {
+                target.Remove(existingKey);
+            }
+
+            target[existingKey ?? key] = value?.DeepClone();
         }
     }
 
@@ -136,6 +179,18 @@ public static class ConfigLoader
             }
         }
 
+        foreach (var name in config.PassEnvironment ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                problems.Add("passEnvironment has an empty entry. Remove it.");
+            }
+            else if (ChildEnvironment.IsNeverPassed(name))
+            {
+                problems.Add($"passEnvironment entry \"{name}\" is not allowed: ANTHROPIC_* and AUTOPILOT_* variables are never passed to the agent or to build and test commands. Remove it.");
+            }
+        }
+
         if (config.Modules is null)
         {
             problems.Add("modules is missing. Remove the \"modules\" key to use local files.");
@@ -207,6 +262,9 @@ public static class ConfigLoader
             AllowTrailingCommas = true,
             PropertyNameCaseInsensitive = true,
             WriteIndented = true,
+
+            // Readable files: quotes and plus signs are written as they are, not as unicode escapes.
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         };
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.KebabCaseLower));
         options.MakeReadOnly(populateMissingResolver: true);

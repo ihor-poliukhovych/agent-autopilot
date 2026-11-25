@@ -47,6 +47,7 @@ public static class ProjectServices
             Runner = context.RunnerFactory?.Invoke() ?? new ClaudeCodeRunner(new ClaudeCodeRunnerOptions
             {
                 HookCommand = HookCommandLine.Build(Environment.ProcessPath, System.Reflection.Assembly.GetEntryAssembly()?.Location),
+                PassEnvironment = config.PassEnvironment,
             }),
             Git = git,
             Facts = context.FactsCollectorFactory?.Invoke(config) ?? new GateFactsCollector(git, config, worktreeRoot),

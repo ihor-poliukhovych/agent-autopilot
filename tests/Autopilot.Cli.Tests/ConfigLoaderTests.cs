@@ -120,4 +120,97 @@ public sealed class ConfigLoaderTests
     {
         Assert.Empty(ConfigLoader.Validate(new AutopilotConfig { WritablePaths = [pattern] }));
     }
+
+    [Fact]
+    public void Partial_role_keeps_the_role_defaults()
+    {
+        var config = ConfigLoader.Parse("""
+            {
+              "roles": {
+                "triage": { "model": "haiku" },
+                "Implementer": { "maxToolCalls": 5 }
+              },
+              "gate": { "maxFilesChanged": 3 },
+              "modules": { "publisher": { "settings": { "x": "y" } } }
+            }
+            """);
+
+        Assert.Equal("haiku", config.Roles.Triage.Model);
+        Assert.Equal(RoleConfig.TriageDefault.AllowedTools, config.Roles.Triage.AllowedTools);
+        Assert.Equal(RoleConfig.TriageDefault.MaxToolCalls, config.Roles.Triage.MaxToolCalls);
+        Assert.Equal(5, config.Roles.Implementer.MaxToolCalls);
+        Assert.Equal(RoleConfig.ImplementerDefault.AllowedCommands, config.Roles.Implementer.AllowedCommands);
+        Assert.Equal(RoleConfig.ReviewerDefault.AllowedTools, config.Roles.Reviewer.AllowedTools);
+        Assert.Equal(3, config.Gate.MaxFilesChanged);
+        Assert.Equal(150, config.Gate.MaxSourceLinesChanged);
+        Assert.Equal("local", config.Modules.Publisher.Type);
+        Assert.Equal("y", config.Modules.Publisher.Settings["x"]);
+        Assert.Empty(ConfigLoader.Validate(config));
+    }
+
+    [Fact]
+    public void Arrays_in_the_file_replace_the_defaults()
+    {
+        var config = ConfigLoader.Parse("""{ "roles": { "reviewer": { "allowedTools": ["Read"] } }, "riskPaths": ["x/**"] }""");
+
+        Assert.Equal(["Read"], config.Roles.Reviewer.AllowedTools);
+        Assert.Equal(["x/**"], config.RiskPaths);
+    }
+
+    [Fact]
+    public void Null_section_is_still_reported_as_missing()
+    {
+        var config = ConfigLoader.Parse("""{ "roles": null }""");
+
+        Assert.Contains(ConfigLoader.Validate(config), p => p.StartsWith("roles is missing", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_file_that_is_not_an_object_is_refused()
+    {
+        var ex = Assert.Throws<ConfigException>(() => ConfigLoader.Parse("[1, 2]", "x.json"));
+        Assert.Contains("JSON object", ex.Message);
+    }
+
+    [Fact]
+    public void Saved_file_keeps_quotes_and_plus_readable()
+    {
+        using var temp = new TempFolder();
+        ConfigLoader.Save(new AutopilotConfig { Commands = new CommandsConfig { Build = "make \"all\" C++" } }, temp.Path);
+
+        var text = File.ReadAllText(ConfigLoader.ConfigPath(temp.Path));
+
+        Assert.Contains("C++", text);
+        Assert.Contains("\\\"all\\\"", text);
+        Assert.DoesNotContain(@"\u0022", text);
+        Assert.DoesNotContain(@"\u002B", text);
+        Assert.Equal("make \"all\" C++", ConfigLoader.Load(temp.Path).Commands.Build);
+    }
+
+    [Fact]
+    public void Default_risk_paths_cover_props_and_targets()
+    {
+        Assert.Contains("**/*.props", new AutopilotConfig().RiskPaths);
+        Assert.Contains("**/*.targets", new AutopilotConfig().RiskPaths);
+    }
+
+    [Theory]
+    [InlineData("ANTHROPIC_API_KEY")]
+    [InlineData("anthropic_base_url")]
+    [InlineData("AUTOPILOT_ADO_PAT")]
+    public void Pass_environment_refuses_anthropic_and_autopilot_names(string name)
+    {
+        var config = new AutopilotConfig { PassEnvironment = ["JAVA_HOME", name] };
+
+        var problem = Assert.Single(ConfigLoader.Validate(config));
+        Assert.Contains(name, problem);
+        Assert.Contains("never passed", problem);
+    }
+
+    [Fact]
+    public void Pass_environment_defaults_to_empty_and_reads_from_the_file()
+    {
+        Assert.Empty(new AutopilotConfig().PassEnvironment);
+        Assert.Equal(["JAVA_HOME"], ConfigLoader.Parse("""{ "passEnvironment": ["JAVA_HOME"] }""").PassEnvironment);
+    }
 }

@@ -130,7 +130,52 @@ public sealed class CliTests
     [InlineData("/usr/share/dotnet/dotnet", "/opt/a/autopilot.dll", "\"/usr/share/dotnet/dotnet\" \"/opt/a/autopilot.dll\" hook pre-tool-use")]
     public void Hook_command_line_adds_the_assembly_only_for_the_dotnet_host(string processPath, string assembly, string expected)
     {
-        Assert.Equal(expected, HookCommandLine.Build(processPath, assembly));
+        Assert.Equal(expected, HookCommandLine.Build(processPath, assembly, _ => false));
+    }
+
+    [Fact]
+    public void Hook_command_line_prefers_the_apphost_next_to_the_assembly()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "tools");
+        var assembly = Path.Combine(folder, "autopilot.dll");
+        var appHost = HookCommandLine.AppHostPath(assembly, OperatingSystem.IsWindows())!;
+
+        var line = HookCommandLine.Build(Path.Combine(folder, "dotnet.exe"), assembly, p => p == appHost);
+
+        Assert.Equal($"\"{appHost}\" hook pre-tool-use", line);
+        Assert.Equal(Path.Combine(folder, "autopilot.exe"), HookCommandLine.AppHostPath(assembly, windows: true));
+        Assert.Equal(Path.Combine(folder, "autopilot"), HookCommandLine.AppHostPath(assembly, windows: false));
+    }
+
+    private sealed class ThrowingWriter : StringWriter
+    {
+        public override Task WriteAsync(string? value) => throw new IOException("stdout is gone");
+
+        public override Task WriteLineAsync(string? value) => throw new IOException("stderr is gone");
+    }
+
+    [Fact]
+    public async Task Hook_path_exits_2_on_any_exception()
+    {
+        // Bad input makes the hook deny; writing the denial then throws. The CLI must still exit 2.
+        var context = new CliContext(new StringReader("not json"), new ThrowingWriter(), new ThrowingWriter());
+
+        var exit = await CliApp.RunAsync(["hook", "pre-tool-use", "--policy", "missing.json"], context);
+
+        Assert.Equal(2, exit);
+    }
+
+    [Fact]
+    public async Task Hook_path_turns_every_failure_code_into_2()
+    {
+        var (exit, _, _) = await RunAsync(new CliContext(new StringReader("{}"), new StringWriter(), new StringWriter()),
+            "hook", "pre-tool-use", "--policy", Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".json"));
+        var (unknownOption, _, _) = await RunAsync(NewContext(), "hook", "pre-tool-use", "--policy", "p", "--bogus");
+
+        Assert.Equal(2, exit);
+        Assert.Equal(2, unknownOption);
+        Assert.True(HookCommand.IsHookInvocation(["hook", "pre-tool-use"]));
+        Assert.False(HookCommand.IsHookInvocation(["triage", "hook"]));
     }
 }
 
@@ -167,6 +212,69 @@ public sealed class ShellRunnerTests
 
         Assert.True(result.TimedOut);
         Assert.True(result.Duration < TimeSpan.FromSeconds(20));
+    }
+
+    [Fact]
+    public async Task Shell_commands_start_from_the_allow_list()
+    {
+        using var temp = new TempFolder();
+        Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY_TEST_X", "a-secret");
+        Environment.SetEnvironmentVariable("RANDOM_SECRET_TEST_X", "b-secret");
+        Environment.SetEnvironmentVariable("ANTHROPIC_PASSED_TEST_X", "c-secret");
+        try
+        {
+            var result = await ShellRunner.RunAsync(OperatingSystem.IsWindows() ? "set" : "env", temp.Path,
+                passEnvironment: ["RANDOM_SECRET_TEST_X", "ANTHROPIC_PASSED_TEST_X"]);
+
+            Assert.True(result.Succeeded, result.Output);
+            Assert.Contains("RANDOM_SECRET_TEST_X=b-secret", result.Output);
+            Assert.DoesNotContain("a-secret", result.Output);
+            Assert.DoesNotContain("c-secret", result.Output);
+            Assert.Contains("PATH=", result.Output, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY_TEST_X", null);
+            Environment.SetEnvironmentVariable("RANDOM_SECRET_TEST_X", null);
+            Environment.SetEnvironmentVariable("ANTHROPIC_PASSED_TEST_X", null);
+        }
+    }
+
+    [Fact]
+    public async Task Timed_out_command_keeps_the_output_it_printed()
+    {
+        using var temp = new TempFolder();
+        var command = OperatingSystem.IsWindows() ? "echo started && ping -n 30 127.0.0.1 > nul" : "echo started && sleep 30";
+
+        var result = await ShellRunner.RunAsync(command, temp.Path, TimeSpan.FromSeconds(2));
+
+        Assert.True(result.TimedOut);
+        Assert.Contains("started", result.Output);
+        Assert.True(result.Duration < TimeSpan.FromSeconds(20));
+    }
+
+    [Fact]
+    public async Task Wait_at_most_gives_up_on_a_task_that_never_ends()
+    {
+        var never = new TaskCompletionSource().Task;
+
+        Assert.False(await ProcessRunner.WaitAtMostAsync(never, TimeSpan.FromMilliseconds(100)));
+        Assert.True(await ProcessRunner.WaitAtMostAsync(Task.CompletedTask, TimeSpan.FromSeconds(5)));
+        Assert.True(await ProcessRunner.WaitAtMostAsync(Task.FromException(new IOException("pipe broke")), TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public void Kill_never_throws_for_an_exited_process()
+    {
+        using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("git", "--version")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            CreateNoWindow = true,
+        })!;
+        process.WaitForExit();
+
+        ProcessRunner.Kill(process);
     }
 
     [Fact]

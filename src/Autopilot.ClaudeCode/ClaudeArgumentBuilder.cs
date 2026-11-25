@@ -73,6 +73,15 @@ public static class ClaudeArgumentBuilder
         args.Add(files.SettingsFile);
 
         // Empty list: no user, project or local settings (and none of their hooks); --settings still applies.
+        // The CLI reference (https://code.claude.com/docs/en/cli-reference) lists the values user, project
+        // and local and does not say what an empty list does, so it was checked on Claude Code 2.1.332
+        // (2026-11-25): a folder with .claude/settings.json and .claude/settings.local.json, each with a
+        // SessionStart and a UserPromptSubmit hook that writes a marker file, run with
+        // `claude -p --setting-sources "" --debug-file ...`. No marker file was written, so the empty value
+        // is not read as "not given" (the default loads all sources and would have run those hooks).
+        // The user source could not be tested without changing the user's own settings; its debug lines
+        // were the same as with `--setting-sources local`. There is no documented value that names
+        // "none", so the empty value stays.
         args.Add("--setting-sources");
         args.Add(string.Empty);
 

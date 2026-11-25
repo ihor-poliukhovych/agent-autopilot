@@ -1,5 +1,6 @@
 using System.CommandLine;
 using Autopilot.Cli.Commands;
+using Autopilot.ClaudeCode.Hooks;
 
 namespace Autopilot.Cli;
 
@@ -7,6 +8,35 @@ namespace Autopilot.Cli;
 public static class CliApp
 {
     public static async Task<int> RunAsync(string[] args, CliContext context, CancellationToken ct = default)
+    {
+        if (!HookCommand.IsHookInvocation(args))
+        {
+            return await RunCommandAsync(args, context, ct).ConfigureAwait(false);
+        }
+
+        // Claude Code treats every exit code except 2 as "go ahead", so the hook path turns every
+        // failure, including a parse error or an exception, into exit 2 (deny).
+        try
+        {
+            var exit = await RunCommandAsync(args, context, ct).ConfigureAwait(false);
+            return exit == ExitCodes.Ok ? ExitCodes.Ok : PreToolUseHook.DenyExitCode;
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                await context.Error.WriteLineAsync($"Autopilot hook failed, so the call is denied: {ex.Message}").ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Nothing more can be said; the exit code still denies.
+            }
+
+            return PreToolUseHook.DenyExitCode;
+        }
+    }
+
+    private static async Task<int> RunCommandAsync(string[] args, CliContext context, CancellationToken ct)
     {
         var projectOption = new Option<string>("--project")
         {

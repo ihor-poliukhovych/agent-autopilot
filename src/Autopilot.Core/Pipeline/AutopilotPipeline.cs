@@ -44,8 +44,16 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
     private readonly TriageStore _triageStore = new(options.ProjectRoot);
     private readonly string _projectRoot = Path.GetFullPath(options.ProjectRoot);
 
+    /// <summary>Worktree for triage. '@' cannot appear in an id, so no agent worktree can have this name.</summary>
+    public const string TriageWorktreeName = "@triage";
+
     public async Task<IReadOnlyList<TriageItemResult>> TriageAsync(string? workItemId, CancellationToken ct)
     {
+        if (workItemId is not null && !ProjectPaths.IsValidId(workItemId))
+        {
+            return [new TriageItemResult(workItemId, string.Empty, null, ProjectPaths.InvalidIdMessage(workItemId))];
+        }
+
         IReadOnlyList<WorkItem> items;
         if (workItemId is null)
         {
@@ -62,22 +70,28 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
             items = [item];
         }
 
+        // Every id is checked before any work starts; a bad one is reported and skipped, not fatal.
+        var results = items
+            .Where(i => !ProjectPaths.IsValidId(i.Id))
+            .Select(i => new TriageItemResult(i.Id, i.Title, null, ProjectPaths.InvalidIdMessage(i.Id)))
+            .ToList();
+        items = items.Where(i => ProjectPaths.IsValidId(i.Id)).ToList();
         if (items.Count == 0)
         {
-            return [];
+            return results;
         }
 
         var baseCommit = await _git.TryGetCommitAsync(_config.BaseBranch, ct).ConfigureAwait(false);
         if (baseCommit is null)
         {
-            return items.Select(i => new TriageItemResult(i.Id, i.Title, null, $"Base branch \"{_config.BaseBranch}\" does not exist.")).ToList();
+            results.AddRange(items.Select(i => new TriageItemResult(i.Id, i.Title, null, $"Base branch \"{_config.BaseBranch}\" does not exist.")));
+            return results;
         }
 
         // Triage reads the code at the base branch, in a worktree outside the project.
-        var worktree = Path.Combine(options.WorktreeRoot, "_triage");
+        var worktree = Path.Combine(options.WorktreeRoot, TriageWorktreeName);
         await RemoveWorktreeIfPresentAsync(worktree).ConfigureAwait(false);
         await _git.AddDetachedWorktreeAsync(worktree, baseCommit, ct).ConfigureAwait(false);
-        var results = new List<TriageItemResult>();
         try
         {
             foreach (var item in items)
@@ -95,17 +109,35 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
 
     public async Task<ImplementResult> ImplementAsync(string workItemId, CancellationToken ct)
     {
+        if (!ProjectPaths.IsValidId(workItemId))
+        {
+            return new ImplementResult(workItemId, ImplementOutcome.Failed, ProjectPaths.InvalidIdMessage(workItemId));
+        }
+
         var item = await options.WorkItems.GetAsync(workItemId, ct).ConfigureAwait(false);
         if (item is null)
         {
             return new ImplementResult(workItemId, ImplementOutcome.NotFound, $"Work item {workItemId} was not found.");
         }
 
-        var id = ProjectPaths.SafeId(item.Id);
-        var triage = await _triageStore.LoadAsync(id, ct).ConfigureAwait(false);
+        if (!ProjectPaths.IsValidId(item.Id))
+        {
+            return new ImplementResult(item.Id, ImplementOutcome.Failed, ProjectPaths.InvalidIdMessage(item.Id));
+        }
+
+        var id = item.Id;
+        var record = await _triageStore.LoadRecordAsync(id, ct).ConfigureAwait(false);
+        var triage = record?.Result;
         if (triage is null)
         {
             return new ImplementResult(id, ImplementOutcome.NotReady, $"Work item {id} has no triage yet. Run 'autopilot triage {id}' first.");
+        }
+
+        // Triage decided on one text; an edited work item needs a new decision.
+        if (!string.Equals(record!.TextHash, TriageStore.TextHash(item), StringComparison.Ordinal))
+        {
+            return new ImplementResult(id, ImplementOutcome.NotReady,
+                $"The text of work item {id} changed since it was triaged. Run 'autopilot triage {id}' again.");
         }
 
         if (triage.Label != TriageLabel.AgentReady)
@@ -296,7 +328,8 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
             _config.Roles.For(role),
             writablePaths,
             PromptLibrary.OutputSchema(role),
-            runDirectory);
+            runDirectory,
+            _config.RiskPaths);
 
         AgentRunResult result;
         try
@@ -344,7 +377,11 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         await File.AppendAllTextAsync(Path.Combine(runFolder, "runs.jsonl"), line, ct).ConfigureAwait(false);
     }
 
-    private static readonly JsonSerializerOptions RunLogOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static readonly JsonSerializerOptions RunLogOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     private async Task<ImplementResult> RejectAsync(WorkItem item, string branch, string runFolder, ImplementOutcome outcome, string reason)
     {

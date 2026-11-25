@@ -22,12 +22,22 @@ public sealed record AutopilotConfig
     /// <summary>Glob patterns (relative to the project root) the implementer may write to.</summary>
     public IReadOnlyList<string> WritablePaths { get; init; } = ["src/**", "tests/**"];
 
-    /// <summary>Glob patterns that make a change high risk; such a change always goes to a person.</summary>
+    /// <summary>
+    /// Glob patterns that make a change high risk; such a change always goes to a person. The agent can
+    /// never write these files either: the hook treats them like protected paths.
+    /// </summary>
     public IReadOnlyList<string> RiskPaths { get; init; } =
     [
         "**/*Auth*/**", "**/*Auth*.cs", "**/*Security*/**", "**/*Security*.cs",
         "**/appsettings*.json", "**/*.csproj", "**/Directory.Build.*", "**/Directory.Packages.props",
+        "**/*.props", "**/*.targets",
     ];
+
+    /// <summary>
+    /// Extra environment variable names passed to Claude Code and to build and test commands, on top of
+    /// the built-in allow-list. Names starting with ANTHROPIC_ or AUTOPILOT_ are never passed.
+    /// </summary>
+    public IReadOnlyList<string> PassEnvironment { get; init; } = [];
 
     public GateConfig Gate { get; init; } = new();
 

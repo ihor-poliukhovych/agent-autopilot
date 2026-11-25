@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Autopilot.Core.Config;
@@ -19,12 +20,16 @@ public sealed class TriageStore(string projectRoot)
     public async Task SaveAsync(WorkItem item, TriageResult result, CancellationToken ct)
     {
         Directory.CreateDirectory(Folder);
-        var record = new TriageRecord(item.Id, item.Title, DateTimeOffset.UtcNow, result);
+        var record = new TriageRecord(item.Id, item.Title, DateTimeOffset.UtcNow, result, TextHash(item));
         await File.WriteAllTextAsync(JsonPath(item.Id), JsonSerializer.Serialize(record, ConfigLoader.JsonOptions), ct).ConfigureAwait(false);
         await File.WriteAllTextAsync(MarkdownPath(item.Id), ToMarkdown(item.Id, item.Title, result), ct).ConfigureAwait(false);
     }
 
-    public async Task<TriageResult?> LoadAsync(string id, CancellationToken ct)
+    public async Task<TriageResult?> LoadAsync(string id, CancellationToken ct) =>
+        (await LoadRecordAsync(id, ct).ConfigureAwait(false))?.Result;
+
+    /// <summary>The stored record, with the hash of the text that was triaged, or null.</summary>
+    public async Task<TriageRecord?> LoadRecordAsync(string id, CancellationToken ct)
     {
         var path = JsonPath(id);
         if (!File.Exists(path))
@@ -34,13 +39,20 @@ public sealed class TriageStore(string projectRoot)
 
         try
         {
-            var record = JsonSerializer.Deserialize<TriageRecord>(await File.ReadAllTextAsync(path, ct).ConfigureAwait(false), ConfigLoader.JsonOptions);
-            return record?.Result;
+            return JsonSerializer.Deserialize<TriageRecord>(await File.ReadAllTextAsync(path, ct).ConfigureAwait(false), ConfigLoader.JsonOptions);
         }
         catch (JsonException)
         {
             return null;
         }
+    }
+
+    /// <summary>SHA-256 (lower-case hex) of the title, a newline and the body: the text triage decided on.</summary>
+    public static string TextHash(WorkItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        var text = (item.Title ?? string.Empty) + "\n" + (item.Body ?? string.Empty);
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
 
     public static string ToMarkdown(string id, string title, TriageResult result)
@@ -78,5 +90,6 @@ public sealed class TriageStore(string projectRoot)
 
     public static string Label(TriageLabel label) => label == TriageLabel.AgentReady ? "agent-ready" : "needs-human";
 
-    private sealed record TriageRecord(string Id, string Title, DateTimeOffset TriagedAt, TriageResult Result);
+    /// <summary>What <c>&lt;id&gt;.json</c> holds. TextHash is null in records written before it existed.</summary>
+    public sealed record TriageRecord(string Id, string Title, DateTimeOffset TriagedAt, TriageResult Result, string? TextHash = null);
 }

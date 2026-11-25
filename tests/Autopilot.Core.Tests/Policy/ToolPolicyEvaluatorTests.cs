@@ -28,6 +28,30 @@ public class ToolPolicyEvaluatorTests
     private static PolicyDecision Eval(ToolCall call, ToolPolicy? policy = null, int callNumber = 1) =>
         ToolPolicyEvaluator.Evaluate(call, policy ?? Policy(), callNumber);
 
+    [Theory]
+    [InlineData("dotnet test --configuration Release", true)]
+    [InlineData("dotnet build -c Release", false)]
+    [InlineData("dotnet build --output bin2", false)]
+    [InlineData("dotnet build --output=bin2", false)]
+    [InlineData("dotnet build -obin2", false)]
+    [InlineData("git diff --config", false)]
+    [InlineData("git diff --config=x", false)]
+    [InlineData("dotnet build -p:Foo=1", false)]
+    public void Long_options_match_whole_names_only(string command, bool allowed)
+    {
+        Assert.Equal(allowed, Eval(Call("Bash", new { command })).Allowed);
+    }
+
+    [Fact]
+    public void Structured_output_is_allowed_without_being_listed_and_after_the_limit()
+    {
+        var policy = Policy(tools: ["Read"]);
+        var call = Call("StructuredOutput", new { label = "agent-ready" });
+
+        Assert.True(Eval(call, policy).Allowed);
+        Assert.True(Eval(call, policy, callNumber: 10_000).Allowed);
+    }
+
     private static void Allowed(PolicyDecision decision)
     {
         Assert.True(decision.Allowed, decision.Reason);
@@ -79,7 +103,6 @@ public class ToolPolicyEvaluatorTests
     [Fact]
     public void Allowed_tool_without_paths_is_allowed()
     {
-        Allowed(Eval(Call("TodoWrite", new { todos = Array.Empty<object>() })));
         Allowed(Eval(Call("mcp__diag__search", new { query = "error" })));
     }
 
@@ -279,7 +302,8 @@ public class ToolPolicyEvaluatorTests
     [InlineData("dotnet build")]
     [InlineData("dotnet test")]
     [InlineData("  dotnet test --no-build  ")]
-    [InlineData("git diff HEAD~1")]
+    [InlineData("git diff HEAD")]
+    [InlineData("dotnet test --filter Category=Unit --no-build")]
     public void Allowed_commands_are_allowed(string command)
     {
         Allowed(Eval(Call("Bash", new { command, description = "x" })));
@@ -341,5 +365,160 @@ public class ToolPolicyEvaluatorTests
     public void Input_that_is_not_an_object_still_needs_a_path_for_writes()
     {
         Denied(Eval(new ToolCall("Write", JsonSerializer.SerializeToElement("src/a.cs"))));
+    }
+
+    // ---------- tools without a policy ----------
+
+    [Theory]
+    [InlineData("PowerShell")]
+    [InlineData("Task")]
+    [InlineData("Agent")]
+    [InlineData("WebFetch")]
+    [InlineData("TodoWrite")]
+    [InlineData("mcp__")]
+    public void Tools_without_an_evaluator_are_denied_even_when_listed(string tool)
+    {
+        var policy = Policy(tools: ["Read", tool]);
+
+        var decision = Eval(Call(tool, new { command = "dir" }), policy);
+
+        Denied(decision);
+        Assert.Equal($"no policy for tool {tool}", decision.Reason);
+    }
+
+    [Fact]
+    public void Known_tools_still_need_to_be_listed()
+    {
+        Denied(Eval(Call("Grep", new { pattern = "x" }), Policy(tools: ["Read"])), "not allowed");
+    }
+
+    // ---------- Bash arguments ----------
+
+    [Theory]
+    [InlineData("git diff --output=x.txt")]
+    [InlineData("git diff -ox.txt")]
+    [InlineData("git diff --no-index a b")]
+    [InlineData("git diff --ext-diff")]
+    [InlineData("dotnet test --exec x")]
+    [InlineData("git diff --config x")]
+    [InlineData("git diff -c core.pager=x")]
+    [InlineData("git diff --git-dir=x")]
+    [InlineData("git diff --work-tree=x")]
+    [InlineData("git diff -C x")]
+    [InlineData("dotnet build --source x")]
+    [InlineData("dotnet build --property Foo=1")]
+    [InlineData("dotnet build -p:Foo=1")]
+    [InlineData("dotnet build /p:Foo=1")]
+    [InlineData("dotnet build /P:Foo=1")]
+    [InlineData("dotnet build x/../y")]
+    [InlineData("dotnet build C:x")]
+    [InlineData("dotnet build /etc/passwd")]
+    [InlineData(@"dotnet build \server\share")]
+    [InlineData(@"dotnet build \x")]
+    public void Risky_arguments_after_an_allowed_prefix_are_denied(string command)
+    {
+        Denied(Eval(Call("Bash", new { command })), "argument");
+    }
+
+    [Theory]
+    [InlineData("dotnet build $HOME")]
+    [InlineData("dotnet build ~")]
+    [InlineData("dotnet build %USERPROFILE%")]
+    [InlineData("dotnet build \"a b\"")]
+    [InlineData("dotnet build 'a b'")]
+    public void Variables_home_and_quotes_are_denied(string command)
+    {
+        Denied(Eval(Call("Bash", new { command })), "not allowed");
+    }
+
+    [Fact]
+    public void Argument_rules_are_named_in_one_list()
+    {
+        Assert.Contains("--no-index", ToolPolicyEvaluator.ForbiddenArgumentPrefixes);
+        Assert.Contains("/p:", ToolPolicyEvaluator.ForbiddenArgumentPrefixes);
+    }
+
+    // ---------- links ----------
+
+    [Fact]
+    public void Path_through_a_junction_or_symlink_is_denied()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "autopilot-policy-tests", Guid.NewGuid().ToString("N"));
+        var outside = Path.Combine(root, "outside");
+        var worktree = Path.Combine(root, "wt");
+        Directory.CreateDirectory(outside);
+        Directory.CreateDirectory(Path.Combine(worktree, "src"));
+        File.WriteAllText(Path.Combine(outside, "secret.txt"), "x");
+        try
+        {
+            if (!LinkHelper.TryCreateDirectoryLink(Path.Combine(worktree, "src", "linked"), outside))
+            {
+                return; // The machine cannot create links; nothing to check.
+            }
+
+            var policy = Policy(writable: ["**"]) with { WorktreeRoot = worktree };
+
+            Denied(Eval(Call("Read", new { file_path = "src/linked/secret.txt" }), policy), "link");
+            Denied(Eval(Call("Write", new { file_path = "src/linked/new.cs", content = "x" }), policy), "link");
+            Denied(Eval(Call("Grep", new { pattern = "x", path = "src/linked" }), policy), "link");
+            Allowed(Eval(Call("Read", new { file_path = "src/other.cs" }), policy));
+            Allowed(Eval(Call("Write", new { file_path = "src/new/deeper/file.cs", content = "x" }), policy));
+        }
+        finally
+        {
+            LinkHelper.DeleteTree(root);
+        }
+    }
+}
+
+internal static class LinkHelper
+{
+    /// <summary>Creates a junction on Windows (no admin rights needed) or a symlink elsewhere.</summary>
+    public static bool TryCreateDirectoryLink(string link, string target)
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                var start = new System.Diagnostics.ProcessStartInfo("cmd.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+                foreach (var argument in new[] { "/d", "/c", "mklink", "/J", link, target })
+                {
+                    start.ArgumentList.Add(argument);
+                }
+
+                using var process = System.Diagnostics.Process.Start(start)!;
+                process.WaitForExit(30_000);
+                return process.ExitCode == 0 && Directory.Exists(link);
+            }
+
+            Directory.CreateSymbolicLink(link, target);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+    }
+
+    public static void DeleteTree(string root)
+    {
+        try
+        {
+            foreach (var dir in Directory.EnumerateDirectories(root, "*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0 }).ToList())
+            {
+                if (new DirectoryInfo(dir).LinkTarget is not null)
+                {
+                    Directory.Delete(dir); // Removes the link only, never the target's files.
+                }
+            }
+
+            Directory.Delete(root, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 }

@@ -65,7 +65,7 @@ public class ClaudeRunFilesTests : IDisposable
         Assert.Equal(RoleConfig.ImplementerDefault.AllowedCommands, policy.AllowedCommands);
         Assert.Equal(RoleConfig.ImplementerDefault.MaxToolCalls, policy.MaxToolCalls);
         Assert.Equal(["src/**", "tests/**"], policy.WritablePaths);
-        Assert.Equal(MergeGate.ProtectedPaths, policy.ProtectedPaths);
+        Assert.Equal(MergeGate.ProtectedPaths, policy.ProtectedPaths); // the request names no extra paths
         Assert.Equal(Path.Combine(Path.GetFullPath(run), ClaudeRunFiles.CounterFileName), policy.CounterFile);
 
         string settings = File.ReadAllText(files.SettingsFile);
@@ -100,5 +100,24 @@ public class ClaudeRunFilesTests : IDisposable
         Assert.Equal(policy.Role, back.Role);
         Assert.Equal(policy.AllowedTools, back.AllowedTools);
         Assert.Equal(policy.CounterFile, back.CounterFile);
+    }
+
+    [Fact]
+    public void Risk_paths_from_the_request_are_protected_too()
+    {
+        var request = TestData.Request() with { ProtectedPaths = new AutopilotConfig().RiskPaths };
+
+        var policy = ClaudeRunFileWriter.BuildPolicy(request, ClaudeRunFiles.For(_dir));
+
+        Assert.Contains(".autopilot/**", policy.ProtectedPaths);
+        Assert.Contains("**/*.csproj", policy.ProtectedPaths);
+        Assert.Contains("**/*.props", policy.ProtectedPaths);
+        Assert.Contains("**/*.targets", policy.ProtectedPaths);
+    }
+
+    [Fact]
+    public void Default_hook_timeout_is_120_seconds()
+    {
+        Assert.Equal(120, TestData.Options().HookTimeoutSeconds);
     }
 }

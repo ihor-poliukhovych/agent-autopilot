@@ -43,6 +43,13 @@ public static class MergeGate
                 $"{testLines} lines changed in tests; the limit is {gate.MaxTestLinesChanged}."));
         }
 
+        var binary = changes.Where(c => c.Binary).Select(c => GlobMatcher.Normalize(c.Path)).ToList();
+        if (binary.Count > 0)
+        {
+            findings.Add(new("scope.binary",
+                $"Binary files changed; the gate cannot count or read them, so a person must check: {Names(binary)}.", HighRisk: true));
+        }
+
         // ---------- Paths ----------
 
         var touched = changes
@@ -91,7 +98,12 @@ public static class MergeGate
                 findings.Add(new("tests.pass", "Tests failed on a clean checkout of the branch. See the gate log."));
             }
 
-            if (tests.TestCountAfter < tests.TestCountBefore)
+            if (!tests.TestCountsKnown)
+            {
+                findings.Add(new("tests.count",
+                    "Could not count tests: no TRX results were found for the base or the branch run. See the gate log."));
+            }
+            else if (tests.TestCountAfter < tests.TestCountBefore)
             {
                 findings.Add(new("tests.count",
                     $"Test count dropped from {tests.TestCountBefore} to {tests.TestCountAfter}."));
@@ -150,11 +162,12 @@ public static class MergeGate
         if (gate.RequireTestChange)
         {
             var sourceChanged = changes.Any(c => !IsTest(c.Path));
-            var testChanged = changes.Any(c => c.Kind != FileChangeKind.Deleted && IsTest(c.Path));
+            // A test must gain at least one line; removing or renaming tests proves nothing.
+            var testChanged = changes.Any(c => c.Kind != FileChangeKind.Deleted && IsTest(c.Path) && c.AddedLines > 0);
             if (sourceChanged && !testChanged)
             {
                 findings.Add(new("evidence.test-change",
-                    "Code outside tests changed but no test file was added or changed."));
+                    "Code outside tests changed but no line was added to a test file."));
             }
         }
 

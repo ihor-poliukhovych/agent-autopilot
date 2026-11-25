@@ -19,6 +19,12 @@ public static class PreToolUseHook
 
     public const string LogFileName = "hook-log.jsonl";
 
+    /// <summary>Readable log lines: quotes and '+' are not escaped.</summary>
+    private static readonly JsonSerializerOptions LogJsonOptions = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
     /// <summary>
     /// Entry point of <c>autopilot hook pre-tool-use --policy &lt;file&gt;</c>. Reads Claude Code's hook
     /// JSON from stdin, writes the decision, returns the process exit code. Fails closed.
@@ -150,7 +156,7 @@ public static class PreToolUseHook
                 ["call"] = callNumber,
                 ["decision"] = decision.Allowed ? "allow" : "deny",
                 ["reason"] = decision.Reason,
-            }.ToJsonString();
+            }.ToJsonString(LogJsonOptions);
 
             File.AppendAllText(Path.Combine(directory, LogFileName), line + Environment.NewLine);
         }

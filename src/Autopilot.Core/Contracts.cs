@@ -47,7 +47,12 @@ public sealed record AgentRunRequest(
     /// <summary>JSON schema text for structured output, or null for free text.</summary>
     string? OutputJsonSchema,
     /// <summary>Folder for this run's files: policy, settings, logs. Must be outside the worktree.</summary>
-    string RunDirectory);
+    string RunDirectory,
+    /// <summary>
+    /// Extra glob patterns the agent may never write, on top of <see cref="Gate.MergeGate.ProtectedPaths"/>.
+    /// The pipeline passes the config's risk paths here, so build files, settings and auth code are read-only.
+    /// </summary>
+    IReadOnlyList<string>? ProtectedPaths = null);
 
 public sealed record TokenUsage(long InputTokens, long OutputTokens, long CacheReadInputTokens, long CacheCreationInputTokens)
 {

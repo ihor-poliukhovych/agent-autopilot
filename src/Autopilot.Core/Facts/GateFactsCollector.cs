@@ -22,7 +22,10 @@ public sealed class GateFactsCollector(GitClient git, AutopilotConfig config, st
 
     public TimeSpan CommandTimeout { get; init; } = TimeSpan.FromMinutes(30);
 
-    /// <summary>Environment for build and test runs: English output, no build servers that hold files open.</summary>
+    /// <summary>
+    /// Set on top of the clean <see cref="ChildEnvironment"/> for build and test runs: English output,
+    /// no build servers that hold files open.
+    /// </summary>
     public static IReadOnlyDictionary<string, string?> CommandEnvironment { get; } = new Dictionary<string, string?>
     {
         ["DOTNET_CLI_UI_LANGUAGE"] = "en",
@@ -44,16 +47,23 @@ public sealed class GateFactsCollector(GitClient git, AutopilotConfig config, st
         var tests = new TestFacts(
             BuildSucceeded: after.BuildSucceeded,
             TestsSucceeded: after.BuildSucceeded && after.TestsSucceeded,
-            TestCountBefore: before.Summary.Total,
-            TestCountAfter: after.Summary.Total,
-            SkipsAdded: Math.Max(0, after.Summary.Skipped - before.Summary.Skipped),
-            Log: log.ToString());
+            TestCountBefore: before.Counts.Total,
+            TestCountAfter: after.Counts.Total,
+            SkipsAdded: Math.Max(0, after.Counts.Skipped - before.Counts.Skipped),
+            Log: log.ToString(),
+            TestCountsKnown: before.Counts.Found && after.Counts.Found);
         return new GateInput(changes, tests, evidence);
     }
 
+    /// <summary>
+    /// Internal folder names start with '@', which work item ids may not contain, so they can never
+    /// collide with an agent worktree named after an id.
+    /// </summary>
+    public static string InternalName(string workItemId, string label) => $"@{label}-{workItemId}";
+
     private async Task<StepResult> BuildAndTestAsync(string workItemId, string label, string commit, StringBuilder log, CancellationToken ct)
     {
-        var path = Path.Combine(worktreeRoot, $"{workItemId}-{label}");
+        var path = Path.Combine(worktreeRoot, InternalName(workItemId, label));
         if (Directory.Exists(path))
         {
             await git.RemoveWorktreeAsync(path, ct).ConfigureAwait(false);
@@ -63,21 +73,68 @@ public sealed class GateFactsCollector(GitClient git, AutopilotConfig config, st
         try
         {
             log.AppendLine($"== {label} ({commit[..Math.Min(12, commit.Length)]}): {config.Commands.Build}");
-            var build = await ShellRunner.RunAsync(config.Commands.Build, path, CommandTimeout, CommandEnvironment, ct).ConfigureAwait(false);
+            var build = await ShellRunner.RunAsync(config.Commands.Build, path, CommandTimeout, CommandEnvironment, ct, config.PassEnvironment).ConfigureAwait(false);
             AppendLog(log, build);
             if (!build.Succeeded)
             {
-                return new StepResult(false, false, TestSummary.None);
+                return new StepResult(false, false, TrxCounts.None);
             }
 
-            log.AppendLine($"== {label}: {config.Commands.Test}");
-            var test = await ShellRunner.RunAsync(config.Commands.Test, path, CommandTimeout, CommandEnvironment, ct).ConfigureAwait(false);
-            AppendLog(log, test);
-            return new StepResult(true, test.Succeeded, TestSummaryParser.Parse(test.Output));
+            // A fresh results folder that only the harness knows, outside every worktree: only TRX files
+            // this run wrote are counted. Console text is never used for counting.
+            var results = Path.Combine(worktreeRoot, InternalName(workItemId, label + "-trx-" + Guid.NewGuid().ToString("N")[..8]));
+            DeleteFolder(results);
+            Directory.CreateDirectory(results);
+            try
+            {
+                var testCommand = TrxTestCounts.WithTrxLogger(config.Commands.Test, results) ?? config.Commands.Test;
+                log.AppendLine($"== {label}: {testCommand}");
+                var started = DateTime.UtcNow.AddSeconds(-2);
+                var test = await ShellRunner.RunAsync(testCommand, path, CommandTimeout, CommandEnvironment, ct, config.PassEnvironment).ConfigureAwait(false);
+                AppendLog(log, test);
+                var counts = ReadCounts(results, started, log);
+                return new StepResult(true, test.Succeeded, counts);
+            }
+            finally
+            {
+                DeleteFolder(results);
+            }
         }
         finally
         {
             await git.RemoveWorktreeAsync(path, CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    private static TrxCounts ReadCounts(string results, DateTime started, StringBuilder log)
+    {
+        try
+        {
+            var counts = TrxTestCounts.Read(results, started);
+            log.AppendLine(counts.Found
+                ? $"-> TRX: {counts.Files} file(s), {counts.Total} tests, {counts.Skipped} skipped, {counts.Failed} failed"
+                : "-> TRX: no result files, so the tests could not be counted");
+            return counts;
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            log.AppendLine($"-> TRX could not be read, so the tests could not be counted: {ex.Message}");
+            return TrxCounts.None;
+        }
+    }
+
+    private static void DeleteFolder(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A leftover results folder is harmless: the next run uses a new name.
         }
     }
 
@@ -93,5 +150,5 @@ public sealed class GateFactsCollector(GitClient git, AutopilotConfig config, st
         log.AppendLine(result.TimedOut ? "-> timed out" : $"-> exit code {result.ExitCode}");
     }
 
-    private sealed record StepResult(bool BuildSucceeded, bool TestsSucceeded, TestSummary Summary);
+    private sealed record StepResult(bool BuildSucceeded, bool TestsSucceeded, TrxCounts Counts);
 }

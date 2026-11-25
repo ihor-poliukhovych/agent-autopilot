@@ -117,6 +117,7 @@ public sealed class PipelineTests
 
         // The agent works outside the project, with the configured writable paths.
         var implementer = runner.Requests[1];
+        Assert.Equal(Config.RiskPaths, implementer.ProtectedPaths);
         Assert.Equal(Path.Combine(repo.WorktreeRoot, "001"), implementer.WorkingDirectory);
         Assert.Equal(Config.WritablePaths, implementer.WritablePaths);
         Assert.NotNull(implementer.OutputJsonSchema);
@@ -134,21 +135,27 @@ public sealed class PipelineTests
         // Branch kept with two harness commits, worktrees gone.
         Assert.Equal("2", (await repo.GitAsync("rev-list", "--count", "main..autopilot/001")).Trim());
         Assert.False(Directory.Exists(Path.Combine(repo.WorktreeRoot, "001")));
-        Assert.False(Directory.Exists(Path.Combine(repo.WorktreeRoot, "_triage")));
+        Assert.False(Directory.Exists(Path.Combine(repo.WorktreeRoot, AutopilotPipeline.TriageWorktreeName)));
         Assert.Single((await repo.GitAsync("worktree", "list", "--porcelain")).Split('\n'), l => l.StartsWith("worktree ", StringComparison.Ordinal));
     }
 
     [Fact]
     public async Task Real_gate_and_facts_collector_pass_a_small_tested_change()
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            return; // The fake dotnet that writes TRX files is a cmd script.
+        }
+
+        using var fake = new GateFactsCollectorTests.FakeDotnetOnPath();
         using var repo = await TestRepo.CreateAsync(new Dictionary<string, string>
         {
             [".gitignore"] = ".autopilot/out/\n",
             ["src/Calc.cs"] = "public static class Calc { }\n",
-            ["summary.txt"] = "Passed!  - Failed: 0, Passed: 2, Skipped: 0, Total: 2\n",
+            ["result.trx"] = GateFactsCollectorTests.Trx(2, 0),
         });
         repo.Write(".autopilot/tasks/001-add.md", "# Add numbers\nCalc.Add(a, b) should return a + b.\n");
-        var config = Config with { Commands = new CommandsConfig { Build = "echo build", Test = Shell.PrintFile("summary.txt") } };
+        var config = Config with { Commands = new CommandsConfig { Build = "echo build", Test = "dotnet test" } };
         var pipeline = new AutopilotPipeline(new AutopilotPipelineOptions
         {
             ProjectRoot = repo.Root,
@@ -259,5 +266,100 @@ public sealed class PipelineTests
         var result = Assert.Single(results);
         Assert.False(result.Succeeded);
         Assert.Contains("runner not built", result.Error);
+    }
+
+    [Fact]
+    public async Task Implement_refuses_when_the_work_item_changed_after_triage()
+    {
+        using var repo = await CreateProjectAsync();
+        var runner = ScriptedRunner();
+        var pipeline = CreatePipeline(repo, runner, new FakeFactsCollector(), PassWhenApproved);
+        await pipeline.TriageAsync("001", CancellationToken.None);
+
+        repo.Write(".autopilot/tasks/001-add.md", "# Add numbers\nCalc.Add(a, b) should return a * b.\n");
+        var result = await pipeline.ImplementAsync("001", CancellationToken.None);
+
+        Assert.Equal(ImplementOutcome.NotReady, result.Outcome);
+        Assert.Contains("changed since it was triaged", result.Message);
+        Assert.Contains("autopilot triage 001", result.Message);
+        Assert.DoesNotContain(runner.Requests, r => r.Role == AgentRole.Implementer);
+        Assert.False(await repo.Git.BranchExistsAsync("autopilot/001"));
+    }
+
+    [Fact]
+    public async Task Triage_record_stores_a_hash_of_title_and_body()
+    {
+        using var repo = await CreateProjectAsync();
+        var pipeline = CreatePipeline(repo, ScriptedRunner(), new FakeFactsCollector(), PassWhenApproved);
+        await pipeline.TriageAsync("001", CancellationToken.None);
+
+        var record = await new TriageStore(repo.Root).LoadRecordAsync("001", CancellationToken.None);
+        var item = await new LocalWorkItemSource(repo.Root).GetAsync("001", CancellationToken.None);
+
+        Assert.NotNull(record?.TextHash);
+        Assert.Equal(TriageStore.TextHash(item!), record!.TextHash);
+        Assert.Equal(64, record.TextHash!.Length);
+        Assert.NotEqual(TriageStore.TextHash(item! with { Body = item.Body + "!" }), record.TextHash);
+    }
+
+    [Fact]
+    public async Task Invalid_ids_are_reported_and_skipped_without_stopping_the_run()
+    {
+        using var repo = await CreateProjectAsync();
+        repo.Write(".autopilot/tasks/bad id.md", "# Bad\nbody\n");
+        repo.Write(".autopilot/tasks/_hidden.md", "# Hidden\nbody\n");
+        var runner = ScriptedRunner(reviewerAsksForChanges: false);
+        var pipeline = CreatePipeline(repo, runner, new FakeFactsCollector(), PassWhenApproved);
+
+        var summary = await pipeline.RunAsync(null, CancellationToken.None);
+
+        Assert.Equal(3, summary.Triage.Count);
+        Assert.Contains(summary.Triage, t => t.WorkItemId == "bad id" && t.Error!.Contains("not valid", StringComparison.Ordinal));
+        Assert.Contains(summary.Triage, t => t.WorkItemId == "_hidden" && t.Error!.Contains("not valid", StringComparison.Ordinal));
+        Assert.Equal(ImplementOutcome.Published, Assert.Single(summary.Implemented).Outcome);
+        Assert.Equal(1, runner.Requests.Count(r => r.Role == AgentRole.Triage));
+
+        var direct = await pipeline.ImplementAsync("../x", CancellationToken.None);
+        Assert.Equal(ImplementOutcome.Failed, direct.Outcome);
+        Assert.Contains("not valid", direct.Message);
+        var triageOne = Assert.Single(await pipeline.TriageAsync("a/b", CancellationToken.None));
+        Assert.Contains("not valid", triageOne.Error);
+    }
+}
+
+public sealed class WorkItemIdTests
+{
+    [Theory]
+    [InlineData("001")]
+    [InlineData("fix-404")]
+    [InlineData("Bug_12")]
+    [InlineData("a")]
+    public void Valid_ids(string id) => Assert.True(ProjectPaths.IsValidId(id));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    [InlineData("_triage")]
+    [InlineData(".hidden")]
+    [InlineData("a b")]
+    [InlineData("a/b")]
+    [InlineData("..")]
+    [InlineData("@triage")]
+    [InlineData("café")]
+    [InlineData("a.b")]
+    public void Invalid_ids(string? id) => Assert.False(ProjectPaths.IsValidId(id));
+
+    [Fact]
+    public void Ids_are_at_most_64_characters()
+    {
+        Assert.True(ProjectPaths.IsValidId(new string('a', 64)));
+        Assert.False(ProjectPaths.IsValidId(new string('a', 65)));
+    }
+
+    [Fact]
+    public void Internal_worktree_names_cannot_be_ids()
+    {
+        Assert.False(ProjectPaths.IsValidId(AutopilotPipeline.TriageWorktreeName));
+        Assert.False(ProjectPaths.IsValidId(GateFactsCollector.InternalName("001", "gate-base")));
     }
 }

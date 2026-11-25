@@ -9,36 +9,117 @@ public sealed class GateFactsCollectorTests
 {
     private static readonly Evidence NoEvidence = new("001", null, null, null);
 
-    [Fact]
-    public async Task Runs_build_and_tests_on_clean_checkouts_of_base_and_branch()
+    /// <summary>
+    /// A stand-in for dotnet, put first on PATH: "dotnet test ..." runs this script. It copies result.trx
+    /// of the checked-out commit (the current folder) into the --results-directory it was given and prints
+    /// a misleading summary line that must not be used for counting.
+    /// </summary>
+    private const string FakeDotnet = """
+        @echo off
+        set RD=
+        :loop
+        if "%~1"=="" goto done
+        if "%~1"=="--results-directory" set "RD=%~2"
+        shift
+        goto loop
+        :done
+        echo Passed!  - Failed: 0, Passed: 999, Skipped: 0, Total: 999
+        if "%RD%"=="" exit /b 7
+        copy /y "%CD%\result.trx" "%RD%\r.trx" >nul
+        """;
+
+    internal static string Trx(int total, int notExecuted, int failed = 0) => $"""
+        <?xml version="1.0" encoding="utf-8"?>
+        <TestRun id="1" name="run" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+          <ResultSummary outcome="Completed">
+            <Counters total="{total}" executed="{total - notExecuted}" passed="{total - notExecuted - failed}" failed="{failed}" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="{notExecuted}" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+          </ResultSummary>
+        </TestRun>
+        """;
+
+    private static Dictionary<string, string> Files(string trx) => new() { ["result.trx"] = trx };
+
+    /// <summary>
+    /// Puts the fake dotnet first on PATH until disposed. PATH is shared by the whole test process, so
+    /// only one test at a time may hold it; no other test of this assembly runs dotnet.
+    /// </summary>
+    internal sealed class FakeDotnetOnPath : IDisposable
     {
-        using var repo = await TestRepo.CreateAsync(new Dictionary<string, string>
+        private static readonly SemaphoreSlim PathLock = new(1, 1);
+        private readonly TempFolder _tools;
+        private readonly string? _path;
+
+        public FakeDotnetOnPath()
         {
-            ["summary.txt"] = "Passed!  - Failed: 0, Passed: 3, Skipped: 0, Total: 3\n",
-        });
+            PathLock.Wait();
+            _tools = new TempFolder();
+            _path = Environment.GetEnvironmentVariable("PATH");
+            _tools.Write("dotnet.cmd", FakeDotnet.Replace("\n", "\r\n", StringComparison.Ordinal));
+            Environment.SetEnvironmentVariable("PATH", _tools.Path + Path.PathSeparator + _path);
+        }
+
+        public void Dispose()
+        {
+            Environment.SetEnvironmentVariable("PATH", _path);
+            _tools.Dispose();
+            PathLock.Release();
+        }
+    }
+
+    [Fact]
+    public async Task Counts_tests_from_trx_files_on_clean_checkouts_of_base_and_branch()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return; // The fake dotnet is a cmd script.
+        }
+
+        using var fake = new FakeDotnetOnPath();
+        using var repo = await TestRepo.CreateAsync(Files(Trx(3, 0)));
         var baseCommit = await repo.Git.GetCommitAsync("main");
         var agentWorktree = Path.Combine(repo.WorktreeRoot, "001");
         await repo.Git.AddWorktreeAsync(agentWorktree, "autopilot/001", "main");
-        File.WriteAllText(Path.Combine(agentWorktree, "summary.txt"), "Passed!  - Failed: 0, Passed: 4, Skipped: 1, Total: 5\n");
+        File.WriteAllText(Path.Combine(agentWorktree, "result.trx"), Trx(5, 1));
         var head = await repo.Git.CommitAllAsync(agentWorktree, "change");
         // Uncommitted work in the agent's worktree must not reach the gate.
-        File.WriteAllText(Path.Combine(agentWorktree, "summary.txt"), "Passed!  - Failed: 0, Passed: 99, Skipped: 0, Total: 99\n");
+        File.WriteAllText(Path.Combine(agentWorktree, "result.trx"), Trx(99, 0));
 
-        var config = new AutopilotConfig { Commands = new CommandsConfig { Build = "echo built", Test = Shell.PrintFile("summary.txt") } };
+        var config = new AutopilotConfig { Commands = new CommandsConfig { Build = "echo built", Test = "dotnet test" } };
         var collector = new GateFactsCollector(repo.Git, config, repo.WorktreeRoot);
 
         var input = await collector.CollectAsync("001", baseCommit, head!, NoEvidence, CancellationToken.None);
         await repo.Git.RemoveWorktreeAsync(agentWorktree);
 
         Assert.True(input.Tests.BuildSucceeded);
-        Assert.True(input.Tests.TestsSucceeded);
+        Assert.True(input.Tests.TestsSucceeded, input.Tests.Log);
+        Assert.True(input.Tests.TestCountsKnown, input.Tests.Log);
         Assert.Equal(3, input.Tests.TestCountBefore);
         Assert.Equal(5, input.Tests.TestCountAfter);
         Assert.Equal(1, input.Tests.SkipsAdded);
         Assert.Contains("built", input.Tests.Log);
-        Assert.Equal(new FileChange("summary.txt", FileChangeKind.Modified, 1, 1), Assert.Single(input.Changes));
+        Assert.Contains("--logger trx --results-directory", input.Tests.Log);
+        Assert.Equal("result.trx", Assert.Single(input.Changes).Path);
         Assert.Same(NoEvidence, input.Evidence);
         Assert.Empty(Directory.GetDirectories(repo.WorktreeRoot));
+    }
+
+    [Fact]
+    public async Task Summary_text_without_trx_leaves_the_counts_unknown()
+    {
+        using var repo = await TestRepo.CreateAsync(new Dictionary<string, string>
+        {
+            ["summary.txt"] = "Passed!  - Failed: 0, Passed: 3, Skipped: 0, Total: 3\n",
+        });
+        var commit = await repo.Git.GetCommitAsync("main");
+        var config = new AutopilotConfig { Commands = new CommandsConfig { Build = "echo ok", Test = Shell.PrintFile("summary.txt") } };
+
+        var input = await new GateFactsCollector(repo.Git, config, repo.WorktreeRoot).CollectAsync("001", commit, commit, NoEvidence, CancellationToken.None);
+
+        Assert.True(input.Tests.TestsSucceeded);
+        Assert.False(input.Tests.TestCountsKnown);
+        Assert.Equal(0, input.Tests.TestCountBefore);
+        Assert.Contains("could not be counted", input.Tests.Log);
+        Assert.Contains("tests.count", MergeGate.Evaluate(input, config).Findings.Select(f => f.RuleId));
     }
 
     [Fact]
@@ -52,6 +133,7 @@ public sealed class GateFactsCollectorTests
 
         Assert.False(input.Tests.BuildSucceeded);
         Assert.False(input.Tests.TestsSucceeded);
+        Assert.False(input.Tests.TestCountsKnown);
         Assert.Equal(0, input.Tests.TestCountAfter);
         Assert.DoesNotContain("should not run", input.Tests.Log);
         Assert.Contains("exit code 3", input.Tests.Log);
@@ -60,19 +142,118 @@ public sealed class GateFactsCollectorTests
     [Fact]
     public async Task Skips_added_never_goes_below_zero()
     {
-        using var repo = await TestRepo.CreateAsync(new Dictionary<string, string>
+        if (!OperatingSystem.IsWindows())
         {
-            ["summary.txt"] = "Test summary: total: 4, failed: 0, succeeded: 2, skipped: 2, duration: 1s\n",
-        });
+            return;
+        }
+
+        using var fake = new FakeDotnetOnPath();
+        using var repo = await TestRepo.CreateAsync(Files(Trx(4, 2)));
         var baseCommit = await repo.Git.GetCommitAsync("main");
-        repo.Write("summary.txt", "Test summary: total: 4, failed: 1, succeeded: 3, skipped: 0, duration: 1s\n");
+        repo.Write("result.trx", Trx(4, 0, failed: 1));
         var head = await repo.Git.CommitAllAsync(repo.Root, "unskip");
-        var config = new AutopilotConfig { Commands = new CommandsConfig { Build = "echo ok", Test = Shell.PrintFile("summary.txt") } };
+        var config = new AutopilotConfig { Commands = new CommandsConfig { Build = "echo ok", Test = "dotnet test" } };
 
         var input = await new GateFactsCollector(repo.Git, config, repo.WorktreeRoot).CollectAsync("001", baseCommit, head!, NoEvidence, CancellationToken.None);
 
+        Assert.True(input.Tests.TestCountsKnown, input.Tests.Log);
         Assert.Equal(0, input.Tests.SkipsAdded);
         Assert.Equal(4, input.Tests.TestCountBefore);
         Assert.Equal(4, input.Tests.TestCountAfter);
+    }
+
+    [Fact]
+    public async Task Build_and_test_commands_get_a_clean_environment()
+    {
+        var secret = "AUTOPILOT_TEST_SECRET_" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var other = "SOME_TOKEN_" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        Environment.SetEnvironmentVariable(secret, "leaked-autopilot");
+        Environment.SetEnvironmentVariable(other, "leaked-other");
+        Environment.SetEnvironmentVariable("MY_PASSED_VAR_X", "passed");
+        try
+        {
+            using var repo = await TestRepo.CreateAsync();
+            var commit = await repo.Git.GetCommitAsync("main");
+            var print = OperatingSystem.IsWindows() ? "set" : "env";
+            var config = new AutopilotConfig
+            {
+                Commands = new CommandsConfig { Build = print, Test = print },
+                PassEnvironment = ["MY_PASSED_VAR_X"],
+            };
+
+            var input = await new GateFactsCollector(repo.Git, config, repo.WorktreeRoot).CollectAsync("001", commit, commit, NoEvidence, CancellationToken.None);
+
+            Assert.DoesNotContain("leaked-", input.Tests.Log);
+            Assert.Contains("MY_PASSED_VAR_X=passed", input.Tests.Log);
+            Assert.Contains("MSBUILDDISABLENODEREUSE=1", input.Tests.Log);
+            Assert.Contains("DOTNET_CLI_UI_LANGUAGE=en", input.Tests.Log);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(secret, null);
+            Environment.SetEnvironmentVariable(other, null);
+            Environment.SetEnvironmentVariable("MY_PASSED_VAR_X", null);
+        }
+    }
+}
+
+public sealed class TrxTestCountsTests
+{
+    [Theory]
+    [InlineData("dotnet test", true)]
+    [InlineData("  dotnet test --no-build ", true)]
+    [InlineData("Dotnet Test", true)]
+    [InlineData("dotnet testx", false)]
+    [InlineData("npm test", false)]
+    [InlineData("make test", false)]
+    public void Trx_logger_is_added_only_to_dotnet_test(string command, bool added)
+    {
+        var result = TrxTestCounts.WithTrxLogger(command, @"C:\r\@trx");
+
+        if (added)
+        {
+            Assert.NotNull(result);
+            Assert.EndsWith(" --logger trx --results-directory \"C:\\r\\@trx\"", result);
+            Assert.StartsWith(command.Trim(), result);
+        }
+        else
+        {
+            Assert.Null(result);
+        }
+    }
+
+    [Fact]
+    public void Counts_are_summed_over_files_and_old_files_are_ignored()
+    {
+        using var temp = new TempFolder();
+        temp.Write("a/one.trx", GateFactsCollectorTests.Trx(10, 2, failed: 1));
+        temp.Write("b/two.trx", GateFactsCollectorTests.Trx(5, 0));
+        var old = temp.Write("old.trx", GateFactsCollectorTests.Trx(100, 50));
+        File.SetLastWriteTimeUtc(old, DateTime.UtcNow.AddHours(-1));
+        temp.Write("notes.txt", "Passed!  - Failed: 0, Passed: 1, Skipped: 0, Total: 1");
+
+        var counts = TrxTestCounts.Read(temp.Path, DateTime.UtcNow.AddMinutes(-5));
+
+        Assert.Equal(new TrxCounts(2, 15, 2, 1), counts);
+        Assert.True(counts.Found);
+    }
+
+    [Fact]
+    public void Missing_folder_or_no_files_is_not_found()
+    {
+        using var temp = new TempFolder();
+        Assert.False(TrxTestCounts.Read(temp.Path, DateTime.MinValue).Found);
+        Assert.False(TrxTestCounts.Read(temp.Combine("missing"), DateTime.MinValue).Found);
+    }
+
+    [Fact]
+    public void Broken_trx_throws_so_the_caller_fails_closed()
+    {
+        using var temp = new TempFolder();
+        temp.Write("bad.trx", "<TestRun><ResultSummary /></TestRun>");
+        temp.Write("worse.trx", "not xml");
+
+        Assert.Throws<InvalidDataException>(() => TrxTestCounts.ReadFile(temp.Combine("bad.trx")));
+        Assert.Throws<InvalidDataException>(() => TrxTestCounts.ReadFile(temp.Combine("worse.trx")));
     }
 }

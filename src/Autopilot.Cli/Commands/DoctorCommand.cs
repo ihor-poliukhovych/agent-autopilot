@@ -136,7 +136,7 @@ public static class DoctorCommand
         }
         else
         {
-            var build = await ShellRunner.RunAsync(config.Commands.Build, projectRoot, BuildTimeout, GateFactsCollector.CommandEnvironment, ct).ConfigureAwait(false);
+            var build = await ShellRunner.RunAsync(config.Commands.Build, projectRoot, BuildTimeout, GateFactsCollector.CommandEnvironment, ct, config.PassEnvironment).ConfigureAwait(false);
             await Report(build.Succeeded
                 ? new CheckResult(CheckStatus.Ok, "build command", $"{config.Commands.Build} ({build.Duration.TotalSeconds:0}s)")
                 : new CheckResult(CheckStatus.Fail, "build command", $"{config.Commands.Build} {Failure(build)}", "Make the build pass on the base branch, or fix commands.build.")).ConfigureAwait(false);
@@ -147,7 +147,7 @@ public static class DoctorCommand
             }
             else
             {
-                var test = await ShellRunner.RunAsync(config.Commands.Test, projectRoot, BuildTimeout, GateFactsCollector.CommandEnvironment, ct).ConfigureAwait(false);
+                var test = await ShellRunner.RunAsync(config.Commands.Test, projectRoot, BuildTimeout, GateFactsCollector.CommandEnvironment, ct, config.PassEnvironment).ConfigureAwait(false);
                 var summary = TestSummaryParser.Parse(test.Output);
                 var counts = summary.Found ? $", {summary.Total} tests, {summary.Skipped} skipped" : ", no test summary found";
                 await Report(test.Succeeded

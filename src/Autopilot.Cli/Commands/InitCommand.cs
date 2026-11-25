@@ -180,6 +180,12 @@ public static class InitCommand
         - `writablePaths`: glob patterns (relative to the project root) the implementer may write.
           `.autopilot/**` is always protected, whatever this list says.
         - `riskPaths`: glob patterns that make a change high risk. Such a change is rejected and goes to a person.
+          The agent can never write these files (project files, `*.props`, `*.targets`, settings, auth code).
+        - `passEnvironment`: extra environment variable names passed to Claude Code and to build and test
+          commands. Everything else is removed except a short built-in list (PATH, TEMP, the user folders,
+          `DOTNET_*`, `NUGET_*`, `MSBUILD*`, ...). `ANTHROPIC_*` and `AUTOPILOT_*` are never passed.
+        - `commands.test`: when it starts with `dotnet test`, the gate adds a TRX logger and counts tests
+          from the TRX files. With any other test command the gate cannot count tests and rejects the change.
         - `gate.maxFilesChanged`: most files one change may touch.
         - `gate.maxSourceLinesChanged`: most added plus removed lines outside test files.
         - `gate.maxTestLinesChanged`: most added plus removed lines in test files.

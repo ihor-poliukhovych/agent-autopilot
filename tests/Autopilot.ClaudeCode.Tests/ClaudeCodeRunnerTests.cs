@@ -5,28 +5,84 @@ namespace Autopilot.ClaudeCode.Tests;
 public class ClaudeEnvironmentTests
 {
     [Fact]
-    public void Api_key_and_auth_token_are_removed_in_any_case()
+    public void Only_the_allow_list_is_kept_and_anthropic_variables_are_always_removed()
     {
-        var env = new Dictionary<string, string?>
+        var env = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["ANTHROPIC_API_KEY"] = "k",
             ["anthropic_auth_token"] = "t",
-            ["ANTHROPIC_MODEL"] = "keep",
-            ["PATH"] = "/usr/bin",
+            ["ANTHROPIC_MODEL"] = "m",
+            ["AUTOPILOT_ADO_PAT"] = "p",
+            ["Path"] = "/usr/bin",
+            ["DOTNET_ROOT"] = "/dotnet",
+            ["MSBUILDDEBUGPATH"] = "/x",
+            ["GITHUB_TOKEN"] = "secret",
+            ["MY_TOOL_HOME"] = "/tool",
         };
 
-        ClaudeEnvironment.Scrub(env);
+        ClaudeEnvironment.Apply(env, ["MY_TOOL_HOME", "AUTOPILOT_ADO_PAT", "ANTHROPIC_MODEL"]);
 
-        Assert.Equal(["ANTHROPIC_MODEL", "PATH"], env.Keys.OrderBy(k => k));
+        Assert.Equal(["DOTNET_ROOT", "MSBUILDDEBUGPATH", "MY_TOOL_HOME", "Path"], env.Keys.Order(StringComparer.Ordinal));
     }
 
     [Fact]
-    public void Scrub_works_on_process_start_info_environment()
+    public void Apply_works_on_process_start_info_environment()
     {
         var psi = new System.Diagnostics.ProcessStartInfo("x");
         psi.Environment["ANTHROPIC_API_KEY"] = "k";
-        ClaudeEnvironment.Scrub(psi.Environment);
+        psi.Environment["SOME_SECRET"] = "s";
+        psi.Environment["TEMP"] = "t";
+
+        ClaudeEnvironment.Apply(psi.Environment);
+
         Assert.False(psi.Environment.ContainsKey("ANTHROPIC_API_KEY"));
+        Assert.False(psi.Environment.ContainsKey("SOME_SECRET"));
+        Assert.True(psi.Environment.ContainsKey("TEMP"));
+    }
+}
+
+public class HookRanCheckTests : IDisposable
+{
+    private readonly string _dir = TestData.NewTempDirectory();
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_dir, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    private static Autopilot.Core.AgentRunResult Result(int turns) =>
+        new(true, "done", null, turns, Autopilot.Core.TokenUsage.Zero, TimeSpan.FromSeconds(1), "m", null);
+
+    [Fact]
+    public void Several_turns_without_a_hook_log_fail_the_run()
+    {
+        var checkedResult = ClaudeCodeRunner.CheckHookRan(Result(3), ClaudeRunFiles.For(_dir));
+
+        Assert.False(checkedResult.Succeeded);
+        Assert.Contains("the policy hook did not run", checkedResult.Error);
+    }
+
+    [Fact]
+    public void Empty_hook_log_fails_the_run()
+    {
+        File.WriteAllText(Path.Combine(_dir, Autopilot.ClaudeCode.Hooks.PreToolUseHook.LogFileName), string.Empty);
+
+        Assert.False(ClaudeCodeRunner.CheckHookRan(Result(2), ClaudeRunFiles.For(_dir)).Succeeded);
+    }
+
+    [Fact]
+    public void Hook_log_with_entries_or_a_single_turn_keeps_the_result()
+    {
+        Assert.True(ClaudeCodeRunner.CheckHookRan(Result(1), ClaudeRunFiles.For(_dir)).Succeeded);
+
+        File.WriteAllText(Path.Combine(_dir, Autopilot.ClaudeCode.Hooks.PreToolUseHook.LogFileName), "{\"tool\":\"Read\"}\n");
+        Assert.True(ClaudeCodeRunner.CheckHookRan(Result(5), ClaudeRunFiles.For(_dir)).Succeeded);
     }
 }
 

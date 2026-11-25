@@ -13,8 +13,37 @@ public static class ToolPolicyEvaluator
         "Write", "Edit", "MultiEdit", "NotebookEdit",
     };
 
-    /// <summary>Shell text that could chain, redirect or substitute commands.</summary>
-    private static readonly string[] ForbiddenShellText = [";", "&", "|", ">", "<", "`", "$(", "\n", "\r"];
+    /// <summary>Claude Code's built-in tool for returning a --json-schema answer.</summary>
+    public const string StructuredOutputTool = "StructuredOutput";
+
+    /// <summary>
+    /// Tools the evaluator has rules for. Any other tool (PowerShell, Task, Agent, WebFetch, ...)
+    /// is denied even when a role lists it, because nothing here checks what it does.
+    /// MCP tools (<c>mcp__*</c>) are also known; they are checked like any other tool.
+    /// </summary>
+    public static IReadOnlyList<string> KnownTools { get; } =
+        ["Read", "Grep", "Glob", "Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", StructuredOutputTool];
+
+    /// <summary>
+    /// Shell text that could chain, redirect or substitute commands, expand variables or the home
+    /// folder (<c>$</c>, <c>%</c>, <c>~</c>), or hide a token boundary inside quotes.
+    /// </summary>
+    private static readonly string[] ForbiddenShellText =
+        [";", "&", "|", ">", "<", "`", "$", "%", "~", "\"", "'", "\n", "\r"];
+
+    /// <summary>
+    /// Argument prefixes denied after an allowed command prefix. They write output to a chosen place
+    /// (<c>--output</c>, <c>-o</c>), compare or run files outside git's control (<c>--no-index</c>,
+    /// <c>--ext-diff</c>, <c>--exec</c>), change git's or MSBuild's configuration or target folder
+    /// (<c>--config</c>, <c>-c</c>, <c>--git-dir</c>, <c>--work-tree</c>, <c>-C</c>), or load code and
+    /// properties from elsewhere (<c>--source</c>, <c>--property</c>, <c>-p:</c>, <c>/p:</c>).
+    /// Matching ignores case, so <c>/P:</c> is covered by <c>/p:</c>.
+    /// </summary>
+    public static IReadOnlyList<string> ForbiddenArgumentPrefixes { get; } =
+    [
+        "--output", "-o", "--no-index", "--ext-diff", "--exec", "--config", "-c",
+        "--git-dir", "--work-tree", "-C", "--source", "--property", "-p:", "/p:",
+    ];
 
     /// <summary>Decides one tool call. callNumber is 1 for the first call of the run.</summary>
     public static PolicyDecision Evaluate(ToolCall call, ToolPolicy policy, int callNumber)
@@ -37,12 +66,24 @@ public static class ToolPolicyEvaluator
             return PolicyDecision.Deny("no tool call or no policy");
         }
 
+        // Claude Code returns --json-schema answers through this tool. It only carries the
+        // final answer, touches no files, and must work even at the call limit so a run can end.
+        if (string.Equals(call.ToolName, StructuredOutputTool, StringComparison.Ordinal))
+        {
+            return PolicyDecision.Allow("final structured answer");
+        }
+
+        var tool = call.ToolName ?? string.Empty;
+        if (!IsKnownTool(tool))
+        {
+            return PolicyDecision.Deny($"no policy for tool {tool}");
+        }
+
         if (callNumber > policy.MaxToolCalls)
         {
             return PolicyDecision.Deny($"tool call limit {policy.MaxToolCalls} reached");
         }
 
-        var tool = call.ToolName ?? string.Empty;
         if (!(policy.AllowedTools ?? []).Contains(tool, StringComparer.Ordinal))
         {
             return PolicyDecision.Deny($"tool '{tool}' is not allowed for the {policy.Role} role");
@@ -160,7 +201,7 @@ public static class ToolPolicyEvaluator
                     _ => $"'{forbidden}'",
                 };
                 return PolicyDecision.Deny(
-                    $"shell command contains {shown}; chaining, redirection and substitution are not allowed");
+                    $"shell command contains {shown}; chaining, redirection, substitution, variables and quotes are not allowed");
             }
         }
 
@@ -175,11 +216,71 @@ public static class ToolPolicyEvaluator
             if (command.Equals(prefix, StringComparison.Ordinal)
                 || command.StartsWith(prefix + " ", StringComparison.Ordinal))
             {
-                return PolicyDecision.Allow($"shell command matches allowed '{prefix}'");
+                var argumentProblem = CheckArguments(command[prefix.Length..]);
+                return argumentProblem is null
+                    ? PolicyDecision.Allow($"shell command matches allowed '{prefix}'")
+                    : PolicyDecision.Deny($"shell command '{command}': {argumentProblem}");
             }
         }
 
         return PolicyDecision.Deny($"shell command '{command}' is not on the allowed list");
+    }
+
+    public static bool IsKnownTool(string tool) =>
+        (tool.StartsWith("mcp__", StringComparison.Ordinal) && tool.Length > "mcp__".Length)
+        || KnownTools.Contains(tool, StringComparer.Ordinal);
+
+    /// <summary>
+    /// Checks the arguments after the allowed prefix (the prefix itself comes from the project's own
+    /// config). Tokens are split on whitespace; quotes are already denied, so a token cannot hide a space.
+    /// Returns null when every token is fine.
+    /// </summary>
+    /// <summary>
+    /// Long options ("--output") match the exact token or "--output=value", so "--configuration"
+    /// is not mistaken for "--config". Short options ("-o") and options ending in ':' ("-p:")
+    /// also match with an attached value ("-obin", "-p:X=1").
+    /// </summary>
+    private static bool IsForbiddenOption(string token, string option)
+    {
+        if (token.Equals(option, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var isLong = option.StartsWith("--", StringComparison.Ordinal);
+        return isLong
+            ? token.StartsWith(option + "=", StringComparison.OrdinalIgnoreCase)
+            : token.StartsWith(option, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? CheckArguments(string arguments)
+    {
+        foreach (var token in arguments.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var prefix = ForbiddenArgumentPrefixes.FirstOrDefault(p => IsForbiddenOption(token, p));
+            if (prefix is not null)
+            {
+                return $"argument '{token}' is not allowed ('{prefix}' options can write, run or read outside the worktree)";
+            }
+
+            if (token.Contains("..", StringComparison.Ordinal))
+            {
+                return $"argument '{token}' contains '..'";
+            }
+
+            if (token.Contains(':', StringComparison.Ordinal))
+            {
+                return $"argument '{token}' contains ':'";
+            }
+
+            // Covers "/x", "\x" and "\\server\share"; drive paths already failed on ':'.
+            if (token.StartsWith('/') || token.StartsWith('\\') || Path.IsPathRooted(token))
+            {
+                return $"argument '{token}' is an absolute path";
+            }
+        }
+
+        return null;
     }
 
     private readonly record struct PathCheck(string? Relative, string? Error);
@@ -248,6 +349,47 @@ public static class ToolPolicyEvaluator
             return new(null, "access to .git is not allowed");
         }
 
+        var link = FindLink(root, relative);
+        if (link is not null)
+        {
+            return new(null, $"'{link}' is a link (symlink, junction or other reparse point); links are not followed");
+        }
+
         return new(relative, null);
+    }
+
+    /// <summary>
+    /// Walks every existing segment from the worktree root down to the target and returns the first
+    /// one that is a symlink, junction or other reparse point, or null. A link inside the worktree
+    /// could point anywhere, so the path check above would not hold for it.
+    /// </summary>
+    private static string? FindLink(string root, string relative)
+    {
+        var current = root;
+        var shown = string.Empty;
+        foreach (var segment in relative.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, segment);
+            shown = shown.Length == 0 ? segment : shown + "/" + segment;
+
+            var info = new FileInfo(current);
+            if (info.LinkTarget is not null)
+            {
+                return shown;
+            }
+
+            if (!info.Exists && !Directory.Exists(current))
+            {
+                // Nothing exists from here down, so nothing further can be a link.
+                return null;
+            }
+
+            if (File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
+            {
+                return shown;
+            }
+        }
+
+        return null;
     }
 }
