@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Autopilot.Core\Autopilot.Core.csproj" />
+    <ProjectReference Include="..\Autopilot.ClaudeCode\Autopilot.ClaudeCode.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" Version="3.0.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>autopilot</AssemblyName>
+    <RootNamespace>Autopilot.Cli</RootNamespace>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>autopilot</ToolCommandName>
+    <PackageId>AgentAutopilot</PackageId>
+    <Version>0.1.0</Version>
+    <Description>Runs a Claude Code agent over a project's backlog behind a merge gate written in code.</Description>
+  </PropertyGroup>
+
+</Project>
