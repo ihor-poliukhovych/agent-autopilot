@@ -60,3 +60,8 @@ MIT.
 
 The GitHub repository starts private. It becomes public only after the owner has
 reviewed it and the checks in `VERIFY.md` pass.
+
+## D-010 Publishing is allowed (accepted, 2026-11-26)
+
+The author confirmed that his work agreements allow publishing this tool, which was
+written from scratch without any employer or client code or data. The repository is public.
