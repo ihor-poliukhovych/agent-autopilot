@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Autopilot.Core.Config;
+using Autopilot.Core.Diagnostics;
 using Autopilot.Core.Facts;
 using Autopilot.Core.Gate;
 using Autopilot.Core.Git;
@@ -31,6 +32,12 @@ public sealed record AutopilotPipelineOptions
 
     /// <summary>Progress lines for a person. Null for silence.</summary>
     public TextWriter? Log { get; init; }
+
+    /// <summary>
+    /// The read-only diagnostics MCP server, or null when diagnostics is off. When set, triage and
+    /// implementer runs get it as the <c>diagnostics</c> server plus its four tools; the reviewer never does.
+    /// </summary>
+    public McpServerSpec? DiagnosticsServer { get; init; }
 }
 
 /// <summary>
@@ -282,19 +289,20 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         var input = await options.Facts.CollectAsync(id, baseCommit, headCommit, evidence, ct).ConfigureAwait(false);
         await File.WriteAllTextAsync(Path.Combine(runFolder, "gate-log.txt"), input.Tests.Log, ct).ConfigureAwait(false);
         var decision = options.EvaluateGate(input, _config);
+        var report = GateReport.Create(input, decision, _config);
         var diff = await _git.GetDiffAsync(baseCommit, headCommit, ct).ConfigureAwait(false);
 
         if (decision.Outcome != GateOutcome.Passed)
         {
             await File.WriteAllTextAsync(Path.Combine(runFolder, "change.patch"), diff, ct).ConfigureAwait(false);
-            await File.WriteAllTextAsync(Path.Combine(runFolder, "gate.json"), JsonSerializer.Serialize(decision, ConfigLoader.JsonOptions), ct).ConfigureAwait(false);
-            await WriteRejectedAsync(runFolder, item, branch, "The merge gate rejected the change.", decision.Findings, decision).ConfigureAwait(false);
+            await report.WriteAsync(runFolder, ct).ConfigureAwait(false);
+            await WriteRejectedAsync(runFolder, item, branch, "The merge gate rejected the change.", decision.Findings, decision, report).ConfigureAwait(false);
             return new ImplementResult(id, ImplementOutcome.Rejected,
                 $"The merge gate rejected the change ({decision.Findings.Count} finding(s)).", branch, runFolder, decision);
         }
 
         Write($"{id}: gate passed, publishing");
-        var published = await options.Publisher.PublishAsync(new PublishRequest(item, branch, diff, decision, evidence), ct).ConfigureAwait(false);
+        var published = await options.Publisher.PublishAsync(new PublishRequest(item, branch, diff, decision, evidence, report), ct).ConfigureAwait(false);
         if (!published.Succeeded)
         {
             return new ImplementResult(id, ImplementOutcome.Failed, $"The gate passed but publishing failed: {published.Error}", branch, runFolder, decision);
@@ -320,16 +328,25 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         var runDirectory = Path.Combine(runFolder, $"{number}-{roleName}");
         Directory.CreateDirectory(runDirectory);
 
+        var roleConfig = _config.Roles.For(role);
+        IReadOnlyDictionary<string, McpServerSpec>? mcpServers = null;
+        if (options.DiagnosticsServer is { } diagnostics && DiagnosticsMcp.RoleUsesDiagnostics(role))
+        {
+            roleConfig = DiagnosticsMcp.WithDiagnosticsTools(roleConfig);
+            mcpServers = new Dictionary<string, McpServerSpec> { [DiagnosticsMcp.ServerName] = diagnostics };
+        }
+
         var request = new AgentRunRequest(
             role,
             workingDirectory,
             PromptLibrary.SystemPrompt(role),
             prompt,
-            _config.Roles.For(role),
+            roleConfig,
             writablePaths,
             PromptLibrary.OutputSchema(role),
             runDirectory,
-            _config.RiskPaths);
+            _config.RiskPaths,
+            mcpServers);
 
         AgentRunResult result;
         try
@@ -390,7 +407,7 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
     }
 
     private static async Task WriteRejectedAsync(
-        string runFolder, WorkItem item, string branch, string reason, IReadOnlyList<GateFinding> findings, GateDecision? decision)
+        string runFolder, WorkItem item, string branch, string reason, IReadOnlyList<GateFinding> findings, GateDecision? decision, GateReport? report = null)
     {
         var text = new StringBuilder();
         text.AppendLine($"# Rejected: {item.Id} {item.Title}");
@@ -413,6 +430,13 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         {
             text.AppendLine("The change touches a risk path, so a person must look at it in any case.");
             text.AppendLine();
+        }
+
+        if (report is not null)
+        {
+            text.AppendLine("## Gate facts");
+            text.AppendLine();
+            text.Append(report.FactsTable());
         }
 
         text.AppendLine("## What a person can do");

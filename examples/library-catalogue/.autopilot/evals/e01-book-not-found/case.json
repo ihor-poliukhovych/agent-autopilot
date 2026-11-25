@@ -1,0 +1,9 @@
+{
+  "id": "e01-book-not-found",
+  "workItem": "001",
+  "description": "GET /books/{id} returns 404 with problem details for an unknown id instead of a 500.",
+  "expect": {
+    "triage": "agent-ready",
+    "outcome": ["published"]
+  }
+}

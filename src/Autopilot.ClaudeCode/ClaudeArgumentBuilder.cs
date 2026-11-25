@@ -28,7 +28,7 @@ public static class ClaudeArgumentBuilder
         ArgumentNullException.ThrowIfNull(options);
 
         IReadOnlyList<string> allowed = request.RoleConfig.AllowedTools;
-        bool hasMcp = options.McpConfigFiles.Count > 0;
+        bool hasMcp = options.McpConfigFiles.Count > 0 || request.McpServers is { Count: > 0 };
 
         var args = new List<string> { "-p", "--output-format", "json" };
 

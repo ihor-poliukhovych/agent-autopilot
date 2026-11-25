@@ -4,6 +4,7 @@ using Autopilot.Core.Facts;
 using Autopilot.Core.Git;
 using Autopilot.Core.Local;
 using Autopilot.Core.Process;
+using Autopilot.Diagnostics;
 
 namespace Autopilot.Cli.Commands;
 
@@ -165,7 +166,7 @@ public static class DoctorCommand
         {
             await Report(await WorkItemsCheckAsync(projectRoot, config.Modules.WorkItems.Type, ct).ConfigureAwait(false)).ConfigureAwait(false);
             await Report(PublisherCheck(config.Modules.Publisher.Type)).ConfigureAwait(false);
-            await Report(DiagnosticsCheck(config.Modules.Diagnostics.Type)).ConfigureAwait(false);
+            await Report(await DiagnosticsCheckAsync(projectRoot, config.Modules.Diagnostics, ct).ConfigureAwait(false)).ConfigureAwait(false);
         }
 
         return results;
@@ -214,10 +215,48 @@ public static class DoctorCommand
             ? new CheckResult(CheckStatus.Ok, "publisher", "local, drafts go to .autopilot/out/runs/<id>/")
             : new CheckResult(CheckStatus.Fail, "publisher", $"module \"{type}\" is not built yet", "Use \"local\" for modules.publisher.type for now.");
 
-    private static CheckResult DiagnosticsCheck(string type) =>
-        string.Equals(type, "none", StringComparison.OrdinalIgnoreCase)
-            ? new CheckResult(CheckStatus.Skip, "diagnostics", "off")
-            : new CheckResult(CheckStatus.Skip, "diagnostics", $"module \"{type}\" is not built yet; runs go ahead without diagnostics");
+    /// <summary>Reads the diagnostics source once: how many events, over which time range, how many bad lines.</summary>
+    public static async Task<CheckResult> DiagnosticsCheckAsync(string projectRoot, ModuleConfig module, CancellationToken ct)
+    {
+        const string Name = "diagnostics";
+        const string SettingFix = "Set modules.diagnostics.settings.path in .autopilot/autopilot.json to a JSON Lines file inside the project, or set modules.diagnostics.type to \"none\".";
+        JsonlDiagnosticsSource? source;
+        try
+        {
+            source = DiagnosticsSourceFactory.Create(projectRoot, module);
+        }
+        catch (DiagnosticsConfigException ex)
+        {
+            return new CheckResult(CheckStatus.Fail, Name, ex.Message, SettingFix);
+        }
+
+        if (source is null)
+        {
+            return new CheckResult(CheckStatus.Skip, Name, "off");
+        }
+
+        JsonlReadResult read;
+        try
+        {
+            read = await source.ReadAllAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new CheckResult(CheckStatus.Fail, Name, $"cannot read {source.FilePath}: {ex.Message}",
+                "Create the file (one JSON object per line with timestamp, level, message, exception, route, statusCode, durationMs), or fix modules.diagnostics.settings.path.");
+        }
+
+        var skipped = read.SkippedLines == 0 ? string.Empty : $", {read.SkippedLines} unreadable line(s) skipped";
+        if (read.Events.Count == 0)
+        {
+            return new CheckResult(CheckStatus.Fail, Name, $"no readable events in {source.FilePath}{skipped}",
+                "Each line must be a JSON object with at least a \"timestamp\" (ISO 8601). Check the file, or fix modules.diagnostics.settings.path.");
+        }
+
+        var from = read.Events.Min(e => e.Timestamp).ToString("u", System.Globalization.CultureInfo.InvariantCulture);
+        var to = read.Events.Max(e => e.Timestamp).ToString("u", System.Globalization.CultureInfo.InvariantCulture);
+        return new CheckResult(CheckStatus.Ok, Name, $"jsonl, {read.Events.Count} event(s) from {from} to {to}{skipped} in {source.FilePath}");
+    }
 
     private static string Failure(ProcessResult result) =>
         result.TimedOut ? "timed out" : $"failed with exit code {result.ExitCode}";

@@ -1,0 +1,13 @@
+{"timestamp":"2026-11-20T10:00:00Z","level":"Information","message":"GET /books served","route":"GET /books","statusCode":200,"durationMs":10}
+{"timestamp":"2026-11-20T10:01:00Z","level":"Information","message":"GET /books served","route":"GET /books","statusCode":200,"durationMs":20,"traceId":"abc","extra":{"nested":true}}
+{"timestamp":"2026-11-20T10:02:00Z","level":"Information","message":"GET /books served","route":"GET /books","statusCode":200,"durationMs":30}
+{"timestamp":"2026-11-20T10:03:00Z","level":"Information","message":"GET /books served","route":"GET /books","statusCode":200,"durationMs":40}
+this line is not json
+{"timestamp":"2026-11-20T11:00:00Z","level":"Error","message":"Book 42 lookup failed","route":"GET /books/{id}","statusCode":500,"durationMs":120,"exception":"System.InvalidOperationException: Sequence contains no elements\n   at LibraryCatalogue.BookService.Get(Int32 id) in BookService.cs:line 17\n   at LibraryCatalogue.Endpoints.GetBook(Int32 id)"}
+{"timestamp":"2026-11-20T12:00:00Z","level":"Error","message":"Book 7 lookup failed","route":"GET /books/{id}","statusCode":500,"durationMs":140,"exception":"System.InvalidOperationException: Sequence contains no elements\n   at LibraryCatalogue.BookService.Get(Int32 id) in BookService.cs:line 17"}
+{"level":"Error","message":"no timestamp, skipped"}
+[1,2,3]
+
+{"timestamp":"2026-11-20T13:00:00Z","level":"error","message":"Loan for book 3 failed","route":"POST /loans","statusCode":"500","durationMs":"55.5","exception":"System.NullReferenceException: Object reference not set to an instance of an object.\n   at LibraryCatalogue.LoanService.Create(LoanRequest request)"}
+{"timestamp":"2026-11-20T13:30:00Z","level":"Warning","message":"Slow query on loans table","route":"POST /loans","statusCode":201,"durationMs":900}
+{"Timestamp":"2026-11-20T14:00:00Z","Level":"Error","Message":"Background job crashed","exception":{"type":"TimeoutException","message":"job timed out"}}

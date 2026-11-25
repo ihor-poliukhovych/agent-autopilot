@@ -52,7 +52,15 @@ public sealed record AgentRunRequest(
     /// Extra glob patterns the agent may never write, on top of <see cref="Gate.MergeGate.ProtectedPaths"/>.
     /// The pipeline passes the config's risk paths here, so build files, settings and auth code are read-only.
     /// </summary>
-    IReadOnlyList<string>? ProtectedPaths = null);
+    IReadOnlyList<string>? ProtectedPaths = null,
+    /// <summary>
+    /// MCP servers for this run, by name. The runner writes them to the run's mcp.json (used with
+    /// --strict-mcp-config). Null or empty means no MCP server, and every <c>mcp__*</c> tool is denied.
+    /// </summary>
+    IReadOnlyDictionary<string, McpServerSpec>? McpServers = null);
+
+/// <summary>A stdio MCP server: the program and its arguments, one argv entry each.</summary>
+public sealed record McpServerSpec(string Command, IReadOnlyList<string> Args);
 
 public sealed record TokenUsage(long InputTokens, long OutputTokens, long CacheReadInputTokens, long CacheCreationInputTokens)
 {
@@ -87,7 +95,9 @@ public sealed record PublishRequest(
     string BranchName,
     string Diff,
     Gate.GateDecision Decision,
-    Evidence Evidence);
+    Evidence Evidence,
+    /// <summary>The decision with the facts behind it. Null when only the decision is known.</summary>
+    Local.GateReport? Report = null);
 
 public sealed record PublishResult(bool Succeeded, string Location, string? Error);
 

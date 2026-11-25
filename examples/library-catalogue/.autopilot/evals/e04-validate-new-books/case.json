@@ -1,0 +1,9 @@
+{
+  "id": "e04-validate-new-books",
+  "workItem": "004",
+  "description": "POST /books rejects an empty title and an ISBN that is not 10 or 13 digits with a 400 validation problem.",
+  "expect": {
+    "triage": "agent-ready",
+    "outcome": ["published"]
+  }
+}

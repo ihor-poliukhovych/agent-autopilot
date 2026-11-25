@@ -1,11 +1,14 @@
 using Autopilot.Cli.Commands;
 using Autopilot.ClaudeCode;
+using Autopilot.Core;
 using Autopilot.Core.Config;
+using Autopilot.Core.Diagnostics;
 using Autopilot.Core.Facts;
 using Autopilot.Core.Gate;
 using Autopilot.Core.Git;
 using Autopilot.Core.Local;
 using Autopilot.Core.Pipeline;
+using Autopilot.Diagnostics;
 
 namespace Autopilot.Cli;
 
@@ -36,6 +39,7 @@ public static class ProjectServices
         var repoRoot = await GitClient.FindRepositoryRootAsync(projectRoot, ct).ConfigureAwait(false)
             ?? throw new ProjectSetupException($"{projectRoot} is not in a git repository. Run 'git init' and commit your code first.");
 
+        var diagnosticsServer = DiagnosticsServerFor(projectRoot, config);
         var git = new GitClient(repoRoot);
         var worktreeRoot = context.WorktreeRoot ?? GitClient.DefaultWorktreeRoot(repoRoot);
         return new AutopilotPipeline(new AutopilotPipelineOptions
@@ -54,7 +58,33 @@ public static class ProjectServices
             WorktreeRoot = worktreeRoot,
             EvaluateGate = context.EvaluateGate ?? MergeGate.Evaluate,
             Log = context.Out,
+            DiagnosticsServer = diagnosticsServer,
         });
+    }
+
+    /// <summary>
+    /// The diagnostics MCP server for agent runs when modules.diagnostics.type is "jsonl", else null.
+    /// The path setting is checked here so a bad path stops the run before any agent starts.
+    /// </summary>
+    public static McpServerSpec? DiagnosticsServerFor(string projectRoot, AutopilotConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        if (!DiagnosticsMcp.IsEnabled(config.Modules.Diagnostics))
+        {
+            return null;
+        }
+
+        try
+        {
+            DiagnosticsSourceFactory.Create(projectRoot, config.Modules.Diagnostics);
+        }
+        catch (DiagnosticsConfigException ex)
+        {
+            throw new ProjectSetupException(ex.Message);
+        }
+
+        return DiagnosticsServerCommand.Build(
+            Environment.ProcessPath, System.Reflection.Assembly.GetEntryAssembly()?.Location, projectRoot);
     }
 }
 

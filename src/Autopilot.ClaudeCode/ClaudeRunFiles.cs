@@ -122,6 +122,39 @@ public static class ClaudeRunFileWriter
 
     public static string EmptyMcpConfigJson => "{\n  \"mcpServers\": {}\n}";
 
+    /// <summary>
+    /// The run's mcp.json: <c>{"mcpServers": {"&lt;name&gt;": {"type": "stdio", "command": ..., "args": [...]}}}</c>.
+    /// No <c>env</c> entry: the server inherits Claude Code's already filtered environment.
+    /// </summary>
+    public static string BuildMcpConfigJson(IReadOnlyDictionary<string, McpServerSpec>? servers)
+    {
+        if (servers is null || servers.Count == 0)
+        {
+            return EmptyMcpConfigJson;
+        }
+
+        var entries = new JsonObject();
+        foreach (var (name, server) in servers.OrderBy(s => s.Key, StringComparer.Ordinal))
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(name);
+            ArgumentException.ThrowIfNullOrWhiteSpace(server.Command);
+            var args = new JsonArray();
+            foreach (var arg in server.Args)
+            {
+                args.Add(arg);
+            }
+
+            entries[name] = new JsonObject
+            {
+                ["type"] = "stdio",
+                ["command"] = server.Command,
+                ["args"] = args,
+            };
+        }
+
+        return new JsonObject { ["mcpServers"] = entries }.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+    }
+
     /// <summary>Creates the run directory and writes policy, settings, MCP config and system prompt.</summary>
     public static ClaudeRunFiles Write(AgentRunRequest request, ClaudeCodeRunnerOptions options)
     {
@@ -135,7 +168,7 @@ public static class ClaudeRunFileWriter
         File.WriteAllText(
             files.SettingsFile,
             BuildSettingsJson(BuildHookCommand(options.HookCommand, files.PolicyFile), options.HookTimeoutSeconds));
-        File.WriteAllText(files.McpConfigFile, EmptyMcpConfigJson);
+        File.WriteAllText(files.McpConfigFile, BuildMcpConfigJson(request.McpServers));
         File.WriteAllText(files.SystemPromptFile, request.SystemPrompt ?? string.Empty);
 
         // A fresh counter for every run.

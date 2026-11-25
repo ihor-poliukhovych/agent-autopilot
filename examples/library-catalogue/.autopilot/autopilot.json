@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "baseBranch": "main",
+  "commands": {
+    "build": "dotnet build Catalogue.slnx",
+    "test": "dotnet test Catalogue.slnx"
+  },
+  "writablePaths": ["src/**", "tests/**"],
+  "roles": {
+    "triage": { "model": "sonnet" },
+    "implementer": { "model": "sonnet" },
+    "reviewer": { "model": "sonnet" }
+  },
+  "modules": {
+    "workItems": { "type": "local" },
+    "publisher": { "type": "local" },
+    "diagnostics": {
+      "type": "jsonl",
+      "settings": { "path": "telemetry/telemetry.jsonl" }
+    }
+  }
+}

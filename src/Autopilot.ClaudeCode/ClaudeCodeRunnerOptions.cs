@@ -31,7 +31,8 @@ public sealed record ClaudeCodeRunnerOptions
 
     /// <summary>
     /// Extra MCP config files passed to <c>--mcp-config</c> next to the run's own empty config.
-    /// When empty, every MCP tool is also denied with <c>--disallowedTools "mcp__*"</c>.
+    /// When empty and the request names no MCP servers, every MCP tool is also denied with
+    /// <c>--disallowedTools "mcp__*"</c>.
     /// </summary>
     public IReadOnlyList<string> McpConfigFiles { get; init; } = [];
 

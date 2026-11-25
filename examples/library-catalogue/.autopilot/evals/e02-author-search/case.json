@@ -1,0 +1,9 @@
+{
+  "id": "e02-author-search",
+  "workItem": "002",
+  "description": "GET /books?author= filters by author, case-insensitive substring; no match is an empty 200.",
+  "expect": {
+    "triage": "agent-ready",
+    "outcome": ["published"]
+  }
+}

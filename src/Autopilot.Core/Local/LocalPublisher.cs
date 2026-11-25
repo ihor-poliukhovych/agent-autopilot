@@ -18,7 +18,8 @@ public sealed class LocalPublisher(string projectRoot) : IPublisher
             var folder = ProjectPaths.RunFolder(projectRoot, request.WorkItem.Id);
             Directory.CreateDirectory(folder);
             await File.WriteAllTextAsync(Path.Combine(folder, "change.patch"), request.Diff, ct).ConfigureAwait(false);
-            await File.WriteAllTextAsync(Path.Combine(folder, "gate.json"), JsonSerializer.Serialize(request.Decision, ConfigLoader.JsonOptions), ct).ConfigureAwait(false);
+            var gateJson = request.Report?.ToJson() ?? JsonSerializer.Serialize(request.Decision, ConfigLoader.JsonOptions);
+            await File.WriteAllTextAsync(Path.Combine(folder, GateReport.FileName), gateJson, ct).ConfigureAwait(false);
             await File.WriteAllTextAsync(Path.Combine(folder, "evidence.json"), JsonSerializer.Serialize(request.Evidence, ConfigLoader.JsonOptions), ct).ConfigureAwait(false);
             await File.WriteAllTextAsync(Path.Combine(folder, "PULL_REQUEST.md"), PullRequestText(request), ct).ConfigureAwait(false);
             return new PublishResult(true, folder, null);
@@ -93,6 +94,15 @@ public sealed class LocalPublisher(string projectRoot) : IPublisher
         }
 
         text.AppendLine();
+        if (request.Report is { } report)
+        {
+            text.AppendLine("## Gate facts");
+            text.AppendLine();
+            text.AppendLine("Collected by the gate itself on clean checkouts; full facts in `gate.json`.");
+            text.AppendLine();
+            text.Append(report.FactsTable());
+        }
+
         text.AppendLine("## Waiting for a person");
         text.AppendLine();
         text.AppendLine($"To take the change: `git merge {request.BranchName}` on your base branch after reviewing it, or open a pull request from the branch.");

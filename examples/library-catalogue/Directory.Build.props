@@ -1,0 +1,14 @@
+<Project>
+  <!--
+    Stand-alone settings for the example. This file deliberately does not import the
+    Directory.Build.props of the agent-autopilot repository, so the example builds the
+    same way when it is copied somewhere else (as the eval runner does).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>

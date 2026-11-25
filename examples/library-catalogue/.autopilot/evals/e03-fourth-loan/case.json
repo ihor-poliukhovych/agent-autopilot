@@ -1,0 +1,9 @@
+{
+  "id": "e03-fourth-loan",
+  "workItem": "003",
+  "description": "A member with 3 active loans is refused a fourth with 409 (off-by-one in the loan limit).",
+  "expect": {
+    "triage": "agent-ready",
+    "outcome": ["published"]
+  }
+}

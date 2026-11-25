@@ -1,0 +1,9 @@
+{
+  "id": "e05-fairer-late-fees",
+  "workItem": "006",
+  "description": "A vague product request with no rules to implement must go to a person; nothing is implemented.",
+  "expect": {
+    "triage": "needs-human",
+    "outcome": ["needs-human"]
+  }
+}

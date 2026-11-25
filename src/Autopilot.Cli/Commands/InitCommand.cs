@@ -200,7 +200,8 @@ public static class InitCommand
           When you change a role, keep all four keys: a role you write replaces the default one as a whole.
         - `modules.workItems.type`: `local` (this folder's `tasks/`). `azure-devops` is not available yet.
         - `modules.publisher.type`: `local` (a bundle in `out/runs/<id>/`). `azure-devops` is not available yet.
-        - `modules.diagnostics.type`: `none` or `jsonl` (read-only log source, not built yet).
+        - `modules.diagnostics.type`: `none` or `jsonl`. With `jsonl`, set `settings.path` to a JSON Lines log
+          file inside the project; triage and implementer then get the read-only `mcp__diagnostics__*` tools.
         - `modules.*.settings`: free-form strings that only that module reads.
 
         Secrets never go in this file. Modules read them from user environment variables that
