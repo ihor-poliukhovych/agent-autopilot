@@ -4,6 +4,11 @@ Ideas that are planned but not built. Order may change.
 
 ## Next (in this order)
 
+0. **Project data outside the repository.** Settings, tasks, comments and run results
+   of a project live in a per-user workspace (markdown files first, a database later),
+   not in the project's repository and never in this one. `--workspace <path>` and a
+   default under the user profile; the repository-local `.autopilot/` stays as an option.
+
 1. **Backend for a task pool and background runs** (services the UI calls, plus CLI):
    - `autopilot list [--json]`: open work items with stored triage (stale when the text
      changed), last run, pool membership; optional `Url`, `State`, `AssignedTo` on work items.
