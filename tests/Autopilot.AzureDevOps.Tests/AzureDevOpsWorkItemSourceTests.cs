@@ -98,7 +98,7 @@ public class AzureDevOpsWorkItemSourceTests
 
         var comment = Assert.Single(handler.Requests, r => r.Uri.AbsolutePath.EndsWith("/comments", StringComparison.Ordinal));
         var text = JsonDocument.Parse(comment.Body).RootElement.GetProperty("text").GetString()!;
-        Assert.Contains("Written by Agent Autopilot", text, StringComparison.Ordinal);
+        Assert.Contains("Written by Dev Autopilot", text, StringComparison.Ordinal);
         Assert.Contains("agent-ready", text, StringComparison.Ordinal);
         Assert.Contains("Clear bug with &lt;one&gt; fix &amp; a test.", text, StringComparison.Ordinal);
         Assert.Contains("<li>GET /products/999 returns 404</li>", text, StringComparison.Ordinal);

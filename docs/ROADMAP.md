@@ -34,7 +34,7 @@ Ideas that are planned but not built. Order may change.
    owner review, then public.
 4. Harder eval cases, so the eval set can tell configurations apart.
 
-## Write and manage tasks inside Agent Autopilot
+## Write and manage tasks inside Dev Autopilot
 
 Some teams have no tracker they want to connect, or want to try the autopilot before
 connecting one. They should be able to create a project, write tasks, add comments

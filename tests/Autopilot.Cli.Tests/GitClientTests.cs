@@ -55,7 +55,7 @@ public sealed class GitClientTests
             Assert.Null(await repo.Git.CommitAllAsync(worktree, "nothing"));
 
             var author = await repo.GitAsync("log", "-1", "--format=%an <%ae>", "autopilot/001");
-            Assert.Equal("Agent Autopilot <autopilot@localhost>", author.Trim());
+            Assert.Equal("Dev Autopilot <autopilot@localhost>", author.Trim());
 
             var changes = (await repo.Git.GetChangesAsync(baseCommit, "autopilot/001")).ToDictionary(c => c.Path);
             Assert.Equal(4, changes.Count);

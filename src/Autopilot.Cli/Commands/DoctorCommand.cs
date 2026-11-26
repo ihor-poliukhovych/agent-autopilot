@@ -121,7 +121,7 @@ public static partial class DoctorCommand
         }
         else if (!isRepoRoot)
         {
-            await Report(new CheckResult(CheckStatus.Fail, "git repository", $"{projectRoot} is inside {repoRoot}, not its root.", $"Run Agent Autopilot from the repository root: --project \"{repoRoot}\".")).ConfigureAwait(false);
+            await Report(new CheckResult(CheckStatus.Fail, "git repository", $"{projectRoot} is inside {repoRoot}, not its root.", $"Run Dev Autopilot from the repository root: --project \"{repoRoot}\".")).ConfigureAwait(false);
         }
         else
         {

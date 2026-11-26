@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\Autopilot.Core\Autopilot.Core.csproj" />
@@ -17,7 +17,7 @@
     <RootNamespace>Autopilot.Cli</RootNamespace>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>autopilot</ToolCommandName>
-    <PackageId>AgentAutopilot</PackageId>
+    <PackageId>DevAutopilot</PackageId>
     <Version>0.1.0</Version>
     <Description>Runs a Claude Code agent over a project's backlog behind a merge gate written in code.</Description>
   </PropertyGroup>

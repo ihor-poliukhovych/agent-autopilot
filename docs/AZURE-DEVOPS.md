@@ -1,6 +1,6 @@
 # Azure DevOps
 
-Agent Autopilot can read work items from Azure Boards and publish a passed change as a
+Dev Autopilot can read work items from Azure Boards and publish a passed change as a
 **draft pull request** in Azure Repos. The agent never merges: a branch policy on the
 target branch needs a person's approval, and the agent's own identity has no right to
 get around it. This page sets that up step by step.
@@ -96,7 +96,7 @@ in the settings and store the token under that name.
 
 Install the Azure CLI, sign in as the agent identity (`az login`, or
 `az login --service-principal ...` for a service principal) and set `"auth": "az"`.
-Agent Autopilot then runs
+Dev Autopilot then runs
 `az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv`
 for each command and sends the result as a Bearer token.
 
@@ -170,7 +170,7 @@ refused.
   into plain text.
 - **Triage** replaces any tag that starts with `autopilot:` by `autopilot:agent-ready`
   or `autopilot:needs-human` (other tags stay) and adds one comment, marked
-  "Written by Agent Autopilot", with the reason, the acceptance criteria and the risk.
+  "Written by Dev Autopilot", with the reason, the acceptance criteria and the risk.
   With `"recordTriage": "local"` it does neither: the result is only written to
   `.autopilot/out/triage/<id>.md` and `.json`, and the module sends no PATCH and no
   comment. Reading items still uses the query and batch endpoints (both POST requests

@@ -32,7 +32,7 @@ public sealed class InitCommandTests
         Assert.Empty(ConfigLoader.Validate(config));
         Assert.True(File.Exists(temp.Combine(".autopilot", "README.md")));
         Assert.True(File.Exists(temp.Combine(".autopilot", "tasks", "001-example.md")));
-        Assert.Equal("bin/\nobj/\n# Agent Autopilot run results\n.autopilot/out/\n", File.ReadAllText(temp.Combine(".gitignore")).Replace("\r\n", "\n"));
+        Assert.Equal("bin/\nobj/\n# Dev Autopilot run results\n.autopilot/out/\n", File.ReadAllText(temp.Combine(".gitignore")).Replace("\r\n", "\n"));
     }
 
     [Fact]

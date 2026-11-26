@@ -9,7 +9,7 @@ Checks run on 2026-11-26 before the repository was made public.
 | Local paths | search of every commit's patch for the author's local user and drive paths | none found |
 | Commit identity | `git log --all --format='%an <%ae>\|%cn <%ce>'` | one personal identity only |
 | Project data | no `.autopilot/` folder of any real project in the repository; project settings and tasks live outside it | ok |
-| Tests | `dotnet test AgentAutopilot.slnx` | 689 passed, 0 failed |
+| Tests | `dotnet test DevAutopilot.slnx` | 689 passed, 0 failed |
 | Example tests | `dotnet test examples/library-catalogue/Catalogue.slnx` | 19 passed, 0 failed |
 
 ## Dependency licences

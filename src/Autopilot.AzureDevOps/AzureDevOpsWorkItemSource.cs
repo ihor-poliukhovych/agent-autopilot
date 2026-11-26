@@ -16,7 +16,7 @@ public sealed class AzureDevOpsWorkItemSource(AzureDevOpsClient client, AzureDev
     public const string NeedsHumanTag = "needs-human";
 
     /// <summary>First line of every comment the module writes, so people can tell it apart.</summary>
-    public const string CommentMarker = "Written by Agent Autopilot";
+    public const string CommentMarker = "Written by Dev Autopilot";
 
     public async Task<IReadOnlyList<WorkItem>> ListOpenAsync(CancellationToken ct)
     {

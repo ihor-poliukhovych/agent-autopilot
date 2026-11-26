@@ -1,11 +1,11 @@
 # Decisions
 
-Short records of choices made while building Agent Autopilot. Newest at the bottom.
+Short records of choices made while building Dev Autopilot. Newest at the bottom.
 Status is one of: proposed, accepted, rejected, superseded.
 
 ## D-001 A tool, not a demo (accepted)
 
-Agent Autopilot is a reusable tool that anyone can install and connect to their own
+Dev Autopilot is a reusable tool that anyone can install and connect to their own
 project, not a one-off showcase. The example project in `examples/` exists to try the
 tool and to run evals.
 
@@ -65,3 +65,9 @@ reviewed it and the checks in `VERIFY.md` pass.
 
 The author confirmed that his work agreements allow publishing this tool, which was
 written from scratch without any employer or client code or data. The repository is public.
+
+## D-011 Name: Dev Autopilot (accepted, 2026-11-26)
+
+Product name "Dev Autopilot", repository `dev-autopilot`, NuGet package `DevAutopilot`.
+The command stays `autopilot`, the settings folder stays `.autopilot/`, and the code
+namespaces stay `Autopilot.*`.

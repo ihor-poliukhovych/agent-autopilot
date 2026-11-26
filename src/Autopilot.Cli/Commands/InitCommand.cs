@@ -12,7 +12,7 @@ public static class InitCommand
 
     public static Command Create(Option<string> projectOption, CliContext context)
     {
-        var force = new Option<bool>("--force") { Description = "Overwrite existing Agent Autopilot files." };
+        var force = new Option<bool>("--force") { Description = "Overwrite existing Dev Autopilot files." };
         var baseBranch = new Option<string?>("--base-branch")
         {
             Description = "Branch agent work starts from and drafts target. Default: main, else master, else the current branch.",
@@ -37,7 +37,7 @@ public static class InitCommand
         var configPath = ConfigLoader.ConfigPath(projectRoot);
         if (File.Exists(configPath) && !force)
         {
-            await error.WriteLineAsync($"{configPath} already exists. Nothing was changed. Use --force to overwrite the Agent Autopilot files.").ConfigureAwait(false);
+            await error.WriteLineAsync($"{configPath} already exists. Nothing was changed. Use --force to overwrite the Dev Autopilot files.").ConfigureAwait(false);
             return ExitCodes.Failure;
         }
 
@@ -123,7 +123,7 @@ public static class InitCommand
         }
 
         var prefix = existing.Length == 0 || existing.EndsWith('\n') ? string.Empty : Environment.NewLine;
-        await File.AppendAllTextAsync(path, $"{prefix}# Agent Autopilot run results{Environment.NewLine}{GitIgnoreEntry}{Environment.NewLine}", ct).ConfigureAwait(false);
+        await File.AppendAllTextAsync(path, $"{prefix}# Dev Autopilot run results{Environment.NewLine}{GitIgnoreEntry}{Environment.NewLine}", ct).ConfigureAwait(false);
         return true;
     }
 
@@ -247,7 +247,7 @@ public static class InitCommand
     private const string ReadmeText = """
         # .autopilot
 
-        Settings and inputs for Agent Autopilot in this project. The agent can never write to this
+        Settings and inputs for Dev Autopilot in this project. The agent can never write to this
         folder: the PreToolUse hook denies the write, and the merge gate rejects any change that
         touches it.
 
@@ -293,7 +293,7 @@ public static class InitCommand
           A role you write only partly keeps the defaults for the keys you leave out.
         - `modules.workItems.type`: `local` (this folder's `tasks/`) or `azure-devops` (work items from a query).
         - `modules.publisher.type`: `local` (a bundle in `out/runs/<id>/`) or `azure-devops` (the bundle, then a draft pull request).
-          Azure DevOps settings and the agent identity setup are in docs/AZURE-DEVOPS.md of Agent Autopilot.
+          Azure DevOps settings and the agent identity setup are in docs/AZURE-DEVOPS.md of Dev Autopilot.
         - `modules.diagnostics.type`: `none` or `jsonl`. With `jsonl`, set `settings.path` to a JSON Lines log
           file inside the project; triage and implementer then get the read-only `mcp__diagnostics__*` tools.
         - `modules.*.settings`: free-form strings that only that module reads.

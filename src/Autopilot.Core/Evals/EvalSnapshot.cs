@@ -14,7 +14,7 @@ namespace Autopilot.Core.Evals;
 public sealed class EvalSnapshot
 {
     /// <summary>The fixed author and date of the snapshot commit, so every run gets the same commit hash.</summary>
-    public static GitIdentity Author { get; } = new("Agent Autopilot Eval", "eval@localhost");
+    public static GitIdentity Author { get; } = new("Dev Autopilot Eval", "eval@localhost");
 
     public const string CommitDate = "2000-01-01T00:00:00Z";
 

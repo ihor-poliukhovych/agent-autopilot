@@ -1,6 +1,6 @@
 # Example: library catalogue
 
-A small .NET 10 minimal API for a lending library, set up so you can try Agent Autopilot on
+A small .NET 10 minimal API for a lending library, set up so you can try Dev Autopilot on
 a real backlog without touching your own code. It has an in-memory store (no database),
 passing xUnit tests, a backlog of eight seeded work items, fake request telemetry, and eval
 cases with hidden acceptance tests.

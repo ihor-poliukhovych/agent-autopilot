@@ -2,7 +2,7 @@ using Autopilot.Core.Config;
 
 namespace Autopilot.Core.Local;
 
-/// <summary>Where Agent Autopilot keeps its files inside a project's <c>.autopilot/</c> folder.</summary>
+/// <summary>Where Dev Autopilot keeps its files inside a project's <c>.autopilot/</c> folder.</summary>
 public static class ProjectPaths
 {
     public const int MaxIdLength = 64;

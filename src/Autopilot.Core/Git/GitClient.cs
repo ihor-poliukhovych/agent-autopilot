@@ -8,7 +8,7 @@ namespace Autopilot.Core.Git;
 /// <summary>The name and email the harness commits under.</summary>
 public sealed record GitIdentity(string Name, string Email)
 {
-    public static GitIdentity Default { get; } = new("Agent Autopilot", "autopilot@localhost");
+    public static GitIdentity Default { get; } = new("Dev Autopilot", "autopilot@localhost");
 }
 
 /// <summary>Thin wrapper over the git command line for one repository.</summary>

@@ -1,10 +1,10 @@
-# Agent Autopilot: design
+# Dev Autopilot: design
 
 Status: draft for review. Nothing here is built yet.
 
 ## 1. What it is
 
-Agent Autopilot is a local command-line tool that runs an AI coding agent over your
+Dev Autopilot is a local command-line tool that runs an AI coding agent over your
 project's backlog. It sorts work items into "an agent can do this" and "a person must
 decide", implements the safe ones in isolated git worktrees, reviews them with a
 second agent, and passes the result through a merge gate written in code. The best
@@ -125,7 +125,7 @@ How the limits are enforced, not just asked for:
 
 **Limits of the sandbox.** The hook controls the agent's tools, not the code the agent
 writes. That code runs during build and test (the agent's own runs and the gate's), with
-the rights of the user who started Agent Autopilot. Run it on a machine, or as an OS
+the rights of the user who started Dev Autopilot. Run it on a machine, or as an OS
 user, without access to secrets you care about. A stronger sandbox (a container or a
 separate OS user) is future work.
 

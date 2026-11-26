@@ -44,7 +44,7 @@ public static class CliApp
             Recursive = true,
         };
 
-        var root = new RootCommand("Agent Autopilot runs a Claude Code agent over your backlog behind a merge gate written in code. A person approves every merge.");
+        var root = new RootCommand("Dev Autopilot runs a Claude Code agent over your backlog behind a merge gate written in code. A person approves every merge.");
         root.Options.Add(projectOption);
 
         root.Subcommands.Add(InitCommand.Create(projectOption, context));

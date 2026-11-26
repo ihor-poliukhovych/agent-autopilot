@@ -1,6 +1,8 @@
-# Agent Autopilot
+# Dev Autopilot
 
-Agent Autopilot runs an AI coding agent over a project's backlog and turns the safe
+**AI agents from draft work item to reviewed pull request.**
+
+Dev Autopilot runs an AI coding agent over a project's backlog and turns the safe
 tasks into draft pull requests, while a person keeps the final say on every merge.
 
 It is a local .NET tool. The agent is Claude Code in headless mode, signed in with a

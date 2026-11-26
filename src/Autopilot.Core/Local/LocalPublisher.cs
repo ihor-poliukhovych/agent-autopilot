@@ -40,7 +40,7 @@ public sealed class LocalPublisher(string projectRoot) : IPublisher
         var text = new StringBuilder();
         text.AppendLine($"# {item.Title}");
         text.AppendLine();
-        text.AppendLine("**Status: waiting for a person.** This is a draft. Agent Autopilot never merges; review the change and merge it yourself if it is right.");
+        text.AppendLine("**Status: waiting for a person.** This is a draft. Dev Autopilot never merges; review the change and merge it yourself if it is right.");
         text.AppendLine();
         text.AppendLine($"- Work item: {item.Id}");
         text.AppendLine($"- Branch: `{request.BranchName}`");
