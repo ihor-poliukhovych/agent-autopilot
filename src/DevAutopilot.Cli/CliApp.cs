@@ -38,14 +38,10 @@ public static class CliApp
 
     private static async Task<int> RunCommandAsync(string[] args, CliContext context, CancellationToken ct)
     {
-        var projectOption = new Option<string>("--project")
-        {
-            Description = "Project folder (the git repository root). Default: the current folder.",
-            Recursive = true,
-        };
+        var projectOption = new ProjectOptions();
 
         var root = new RootCommand("Dev Autopilot runs a Claude Code agent over your backlog behind a merge gate written in code. A person approves every merge.");
-        root.Options.Add(projectOption);
+        projectOption.AddTo(root);
 
         root.Subcommands.Add(InitCommand.Create(projectOption, context));
         root.Subcommands.Add(DoctorCommand.Create(projectOption, context));
@@ -53,6 +49,7 @@ public static class CliApp
         root.Subcommands.Add(PipelineCommands.CreateImplement(projectOption, context));
         root.Subcommands.Add(PipelineCommands.CreateRun(projectOption, context));
         root.Subcommands.Add(EvalCommand.Create(projectOption, context));
+        root.Subcommands.Add(ProjectCommand.Create(projectOption, context));
         root.Subcommands.Add(HookCommand.Create(context));
         root.Subcommands.Add(McpCommand.Create(projectOption, context));
 

@@ -52,7 +52,7 @@ public static class EvalCaseLoader
     public const int DefaultRuns = 3;
     public const int MaxRuns = 100;
 
-    public static string EvalsFolder(string projectRoot) => Path.Combine(ProjectPaths.AutopilotFolder(projectRoot), "evals");
+    public static string EvalsFolder(string projectRoot, string? dataFolder = null) => Path.Combine(ProjectPaths.AutopilotFolder(projectRoot, dataFolder), "evals");
 
     public static string OutcomeName(EvalOutcome outcome) => outcome switch
     {
@@ -62,10 +62,10 @@ public static class EvalCaseLoader
         _ => "failed",
     };
 
-    public static async Task<EvalCaseSet> LoadAsync(string projectRoot, IWorkItemSource workItems, CancellationToken ct)
+    public static async Task<EvalCaseSet> LoadAsync(string projectRoot, IWorkItemSource workItems, CancellationToken ct, string? dataFolder = null)
     {
         ArgumentNullException.ThrowIfNull(workItems);
-        var folder = EvalsFolder(projectRoot);
+        var folder = EvalsFolder(projectRoot, dataFolder);
         var cases = new List<EvalCase>();
         var problems = new List<EvalCaseProblem>();
         if (!Directory.Exists(folder))

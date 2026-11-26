@@ -72,3 +72,18 @@ Product name "Dev Autopilot", repository `dev-autopilot`, NuGet package `DevAuto
 Projects and code namespaces are `DevAutopilot.*`, and the default Azure DevOps tag and
 the local working folders are `dev-autopilot`. The command stays `autopilot` and the
 settings folder stays `.autopilot/`, because people type them by hand.
+
+
+## D-012 Project data lives in a per-user workspace (accepted, 2026-11-26)
+
+Dev Autopilot is generic: projects are added at run time and none is built in. Settings,
+tasks and run output of a project live in a per-user workspace, `%USERPROFILE%\.dev-autopilot`
+(`--workspace` or `AUTOPILOT_WORKSPACE` override it), never in the project's repository.
+The workspace has one SQLite database `autopilot.db` (Microsoft.Data.Sqlite, numbered
+embedded SQL migrations, a `schema_version` table) holding the project registry (key,
+display name, repository folder, base branch, task source `local` or `azure-devops`,
+settings json), and a `projects/<key>/` folder with `autopilot.json`, `tasks/` and `out/`.
+Removing a project only unlinks it; its data is deleted only with `--delete-data --yes`.
+`--project` takes a registered key first and otherwise a repository folder, so the
+repository-local `.autopilot/` flow keeps working unchanged. Rejected: files only (no
+way to list or query projects), and a database per project (harder to list and move).

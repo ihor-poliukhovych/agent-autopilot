@@ -9,13 +9,13 @@ namespace DevAutopilot.Core.Local;
 /// Publishes a passed change as a local bundle in <c>.autopilot/out/runs/&lt;id&gt;/</c>: the patch,
 /// the gate result, the evidence and a pull request description. Nothing leaves the machine.
 /// </summary>
-public sealed class LocalPublisher(string projectRoot) : IPublisher
+public sealed class LocalPublisher(string projectRoot, string? dataFolder = null) : IPublisher
 {
     public async Task<PublishResult> PublishAsync(PublishRequest request, CancellationToken ct)
     {
         try
         {
-            var folder = ProjectPaths.RunFolder(projectRoot, request.WorkItem.Id);
+            var folder = ProjectPaths.RunFolder(projectRoot, request.WorkItem.Id, dataFolder);
             Directory.CreateDirectory(folder);
             await File.WriteAllTextAsync(Path.Combine(folder, "change.patch"), request.Diff, ct).ConfigureAwait(false);
             var gateJson = request.Report?.ToJson() ?? JsonSerializer.Serialize(request.Decision, ConfigLoader.JsonOptions);

@@ -8,12 +8,12 @@ namespace DevAutopilot.Cli.Commands;
 /// <summary><c>triage [id]</c>, <c>implement &lt;id&gt;</c> and <c>run [--limit N]</c>.</summary>
 public static class PipelineCommands
 {
-    public static Command CreateTriage(Option<string> projectOption, CliContext context)
+    public static Command CreateTriage(ProjectOptions projectOption, CliContext context)
     {
         var id = new Argument<string?>("id") { Description = "One work item id. Default: every open item.", Arity = ArgumentArity.ZeroOrOne };
         var source = SourceOption();
         var command = new Command("triage", "Sort work items into agent-ready and needs-human.") { id, source };
-        command.SetAction((parse, ct) => WithPipelineAsync(parse.GetValue(projectOption), parse.GetValue(source), context, ct, async pipeline =>
+        command.SetAction((parse, ct) => WithPipelineAsync(projectOption.Resolve(parse), parse.GetValue(source), context, ct, async pipeline =>
         {
             var results = await pipeline.TriageAsync(parse.GetValue(id), ct).ConfigureAwait(false);
             await PrintTriageAsync(context.Out, results).ConfigureAwait(false);
@@ -22,12 +22,12 @@ public static class PipelineCommands
         return command;
     }
 
-    public static Command CreateImplement(Option<string> projectOption, CliContext context)
+    public static Command CreateImplement(ProjectOptions projectOption, CliContext context)
     {
         var id = new Argument<string>("id") { Description = "Work item id; triage must have marked it agent-ready." };
         var source = SourceOption();
         var command = new Command("implement", "Implement one agent-ready item: worktree, implementer, reviewer, merge gate, draft. Exit code 0 only when a draft was published.") { id, source };
-        command.SetAction((parse, ct) => WithPipelineAsync(parse.GetValue(projectOption), parse.GetValue(source), context, ct, async pipeline =>
+        command.SetAction((parse, ct) => WithPipelineAsync(projectOption.Resolve(parse), parse.GetValue(source), context, ct, async pipeline =>
         {
             var result = await pipeline.ImplementAsync(parse.GetRequiredValue(id), ct).ConfigureAwait(false);
             await PrintImplementAsync(context.Out, result).ConfigureAwait(false);
@@ -36,7 +36,7 @@ public static class PipelineCommands
         return command;
     }
 
-    public static Command CreateRun(Option<string> projectOption, CliContext context)
+    public static Command CreateRun(ProjectOptions projectOption, CliContext context)
     {
         var limit = new Option<int?>("--limit") { Description = "Implement at most this many items." };
         var source = SourceOption();
@@ -49,7 +49,7 @@ public static class PipelineCommands
                 throw new UsageException("--limit must be greater than 0.");
             }
 
-            return WithPipelineAsync(parse.GetValue(projectOption), parse.GetValue(source), context, ct, async pipeline =>
+            return WithPipelineAsync(projectOption.Resolve(parse), parse.GetValue(source), context, ct, async pipeline =>
             {
                 var summary = await pipeline.RunAsync(max, ct).ConfigureAwait(false);
                 await PrintTriageAsync(context.Out, summary.Triage).ConfigureAwait(false);
@@ -82,13 +82,12 @@ public static class PipelineCommands
         return option;
     }
 
-    private static async Task<int> WithPipelineAsync(string? projectValue, string? source, CliContext context, CancellationToken ct, Func<AutopilotPipeline, Task<int>> body)
+    private static async Task<int> WithPipelineAsync(ProjectTarget target, string? source, CliContext context, CancellationToken ct, Func<AutopilotPipeline, Task<int>> body)
     {
-        var project = CliApp.ResolveProject(projectValue);
-        AutopilotPipeline pipeline;
+                AutopilotPipeline pipeline;
         try
         {
-            pipeline = await ProjectServices.CreatePipelineAsync(project, context, ct, source).ConfigureAwait(false);
+            pipeline = await ProjectServices.CreatePipelineAsync(target.RepoRoot, context, ct, source, target.DataFolder).ConfigureAwait(false);
         }
         catch (ProjectSetupException ex)
         {

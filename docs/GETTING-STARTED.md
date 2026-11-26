@@ -104,3 +104,31 @@ folder inside the clone. See [EVALS.md](EVALS.md).
 
 - Connect your own project: [ADOPT.md](ADOPT.md).
 - Use Azure DevOps work items and draft pull requests: [AZURE-DEVOPS.md](AZURE-DEVOPS.md).
+
+
+## Keeping project data outside the repository (workspace)
+
+`autopilot init` puts settings and tasks into `.autopilot/` inside the repository. If
+you would rather not add anything to a repository, register it in your workspace instead:
+
+```powershell
+autopilot project add shop --repo D:\code\shop --name "Shop"
+autopilot project list
+autopilot project show shop --json
+autopilot doctor --project shop
+autopilot run --project shop
+```
+
+The workspace is `%USERPROFILE%\.dev-autopilot` (override with `--workspace <path>` on any
+command or the `AUTOPILOT_WORKSPACE` environment variable). It holds one SQLite database,
+`autopilot.db`, and a `projects/<key>/` folder per project with `autopilot.json`, `tasks/`
+and `out/`. Nothing is written into the repository. `--project` takes a registered key; a
+folder path still works the old way, with `.autopilot/` inside that repository.
+
+- `--source azure-devops` on `project add` registers the project with Azure DevOps as the
+  task source; fill in its settings in `projects/<key>/autopilot.json` (see AZURE-DEVOPS.md).
+- `autopilot project import-local <folder>` copies an existing `.autopilot/` (settings and
+  tasks) into the workspace and leaves the source untouched.
+- `autopilot project remove <key>` only unlinks the project. Add `--delete-data --yes` to
+  delete its workspace folder too. The repository is never touched.
+- `eval` still needs a repository-local `.autopilot/`.

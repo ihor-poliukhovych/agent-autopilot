@@ -7,19 +7,24 @@ public static class ProjectPaths
 {
     public const int MaxIdLength = 64;
 
-    public static string AutopilotFolder(string projectRoot) => Path.Combine(projectRoot, AutopilotConfig.FolderName);
+    /// <summary>
+    /// The folder with settings, tasks and out/. <paramref name="dataFolder"/> is a workspace project folder;
+    /// null means the repository-local <c>.autopilot/</c> of <paramref name="projectRoot"/>.
+    /// </summary>
+    public static string AutopilotFolder(string projectRoot, string? dataFolder = null) =>
+        dataFolder ?? Path.Combine(projectRoot, AutopilotConfig.FolderName);
 
-    public static string TasksFolder(string projectRoot) => Path.Combine(AutopilotFolder(projectRoot), "tasks");
+    public static string TasksFolder(string projectRoot, string? dataFolder = null) => Path.Combine(AutopilotFolder(projectRoot, dataFolder), "tasks");
 
-    public static string OutFolder(string projectRoot) => Path.Combine(AutopilotFolder(projectRoot), "out");
+    public static string OutFolder(string projectRoot, string? dataFolder = null) => Path.Combine(AutopilotFolder(projectRoot, dataFolder), "out");
 
-    public static string TriageFolder(string projectRoot) => Path.Combine(OutFolder(projectRoot), "triage");
+    public static string TriageFolder(string projectRoot, string? dataFolder = null) => Path.Combine(OutFolder(projectRoot, dataFolder), "triage");
 
     /// <summary>Cached build and test facts of base commits, one JSON file per key.</summary>
-    public static string GateBaseCacheFolder(string projectRoot) => Path.Combine(OutFolder(projectRoot), "cache", "gate-base");
+    public static string GateBaseCacheFolder(string projectRoot, string? dataFolder = null) => Path.Combine(OutFolder(projectRoot, dataFolder), "cache", "gate-base");
 
-    public static string RunFolder(string projectRoot, string workItemId) =>
-        Path.Combine(OutFolder(projectRoot), "runs", SafeId(workItemId));
+    public static string RunFolder(string projectRoot, string workItemId, string? dataFolder = null) =>
+        Path.Combine(OutFolder(projectRoot, dataFolder), "runs", SafeId(workItemId));
 
     /// <summary>
     /// True for ids made of ASCII letters, digits, '-' and '_', at most <see cref="MaxIdLength"/> long,

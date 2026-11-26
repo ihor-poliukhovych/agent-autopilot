@@ -17,6 +17,9 @@ public sealed record AutopilotPipelineOptions
     /// <summary>Project root; must be the git repository's top-level folder.</summary>
     public required string ProjectRoot { get; init; }
 
+    /// <summary>Folder with the project's tasks and out/. Null means <c>.autopilot/</c> in the project root.</summary>
+    public string? DataFolder { get; init; }
+
     public required AutopilotConfig Config { get; init; }
     public required IWorkItemSource WorkItems { get; init; }
     public required IAgentRunner Runner { get; init; }
@@ -48,7 +51,7 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
 {
     private readonly AutopilotConfig _config = options.Config;
     private readonly GitClient _git = options.Git;
-    private readonly TriageStore _triageStore = new(options.ProjectRoot);
+    private readonly TriageStore _triageStore = new(options.ProjectRoot, options.DataFolder);
     private readonly string _projectRoot = Path.GetFullPath(options.ProjectRoot);
 
     /// <summary>Worktree for triage. '@' cannot appear in an id, so no agent worktree can have this name.</summary>
@@ -184,7 +187,7 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
             return new ImplementResult(id, ImplementOutcome.Failed, ContextMissingMessage(context));
         }
 
-        var runFolder = ProjectPaths.RunFolder(_projectRoot, id);
+        var runFolder = ProjectPaths.RunFolder(_projectRoot, id, options.DataFolder);
         Directory.CreateDirectory(runFolder);
         DeleteIfExists(Path.Combine(runFolder, "REJECTED.md"));
         DeleteIfExists(Path.Combine(runFolder, "PULL_REQUEST.md"));
@@ -336,7 +339,7 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
     private async Task<AgentRunResult> RunAgentAsync(
         string id, AgentRole role, string workingDirectory, string prompt, IReadOnlyList<string> writablePaths, CancellationToken ct)
     {
-        var runFolder = ProjectPaths.RunFolder(_projectRoot, id);
+        var runFolder = ProjectPaths.RunFolder(_projectRoot, id, options.DataFolder);
         var number = NextRunNumber(runFolder);
         var roleName = role.ToString().ToLowerInvariant();
         var runDirectory = Path.Combine(runFolder, $"{number}-{roleName}");
