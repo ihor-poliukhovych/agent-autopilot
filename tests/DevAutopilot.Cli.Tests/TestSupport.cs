@@ -80,6 +80,7 @@ public sealed class TestRepo : IDisposable
         var repo = new TestRepo();
         var init = await ProcessRunner.RunAsync("git", ["init", "--quiet", "-b", "main"], repo.Root);
         Assert.True(init.Succeeded, init.Output);
+        await repo.GitAsync("config", "core.longpaths", "true");
         foreach (var (path, content) in files ?? new Dictionary<string, string> { ["README.md"] = "hello\n" })
         {
             repo.Write(path, content);
