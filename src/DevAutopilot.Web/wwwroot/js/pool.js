@@ -28,7 +28,7 @@ export async function render({ view, key }) {
             h('td', { class: 'actions' }, h('div', { class: 'row' },
               h('button', { type: 'button', 'aria-label': 'Move up', disabled: index === 0, onclick: () => move(key, p, items[index - 1].position, load) }, '↑'),
               h('button', { type: 'button', 'aria-label': 'Move down', disabled: index === items.length - 1, onclick: () => move(key, p, items[index + 1].position, load) }, '↓'),
-              h('button', { type: 'button', class: 'danger', onclick: async () => { try { await del(`${base(key)}/pool/${encodeURIComponent(p.id)}`); await load(); } catch (e) { toast(e.message, true); } } }, 'Remove')))))))))),
+              h('button', { type: 'button', class: 'danger', onclick: async () => { try { await del(`${base(key)}/pool/${encodeURIComponent(p.id)}`); await load(); } catch (e) { toast(e.message, true); } } }, 'Remove'))))))))),
       h('section', { class: 'card stack' },
         h('h2', {}, 'Run now'),
         h('p', { class: 'muted' }, 'Starts the pool in the background. Only one run can be active in a project at a time.'),

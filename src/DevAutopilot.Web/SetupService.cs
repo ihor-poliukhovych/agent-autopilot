@@ -30,6 +30,11 @@ public sealed partial class SetupService(WebUiOptions options)
     {
         var path = FullFolder(folder);
         var config = await options.Checker.DetectDefaultsAsync(path, baseBranch, ct).ConfigureAwait(false);
+        if (config.WritablePaths.Count == 0)
+        {
+            config = config with { WritablePaths = new AutopilotConfig().WritablePaths };
+        }
+
         var key = SuggestKey(path);
         return ProjectDraft.FromConfig(config, key, key, path, ProjectRegistry.LocalSource);
     }
@@ -58,10 +63,13 @@ public sealed partial class SetupService(WebUiOptions options)
             var useSource = step is 4 or LastStep;
             var checkDraft = useSource ? draft : draft with { TaskSource = ProjectRegistry.LocalSource };
             var all = await RunDoctorAsync(checkDraft, folder, skipBuild: step is not (2 or LastStep), ct).ConfigureAwait(false);
-            lines.AddRange(step == LastStep ? all : all.Where(l => Belongs(step, l.Name)));
+            // In the steps that run the build, a broken config is shown too: the build and test checks are skipped while it is broken.
+            lines.AddRange(step == LastStep ? all : all.Where(l => Belongs(step, l.Name) || (step == 2 && l.Name == "config" && l.Status == CheckLine.Fail)));
         }
 
-        var passed = lines.All(l => l.Status != CheckLine.Fail);
+        // A check that was skipped did not prove anything, so it does not count as passed.
+        var passed = lines.All(l => l.Status != CheckLine.Fail)
+            && Required(step).All(name => lines.Any(l => l.Name == name && l.Status is CheckLine.Ok or CheckLine.Warn));
         return new StepCheckResult(step, passed, lines);
     }
 
@@ -157,6 +165,12 @@ public sealed partial class SetupService(WebUiOptions options)
             }
         }
 
+        if (step is 3 or LastStep && draft.WritablePaths.All(string.IsNullOrWhiteSpace))
+        {
+            lines.Add(new CheckLine(CheckLine.Fail, "writable paths", "No path is listed, so the agent could not change anything.",
+                "Add the folders the agent may change, one pattern per line, for example src/** and tests/**."));
+        }
+
         if (step is 4 or LastStep)
         {
             lines.AddRange(TaskSourceLines(draft));
@@ -245,7 +259,11 @@ public sealed partial class SetupService(WebUiOptions options)
             Directory.CreateDirectory(Path.Combine(temp, "out"));
             ConfigLoader.Save(config, folder, temp);
             var lines = await options.Checker.RunAsync(new SetupCheckRequest(folder, temp, skipBuild), ct).ConfigureAwait(false);
-            return [.. lines.Select(l => l with { Fix = PlainFix(l) })];
+            return [.. lines.Select(l => l with
+            {
+                Detail = l.Name == "config" && l.Status == CheckLine.Ok ? "The settings are valid." : l.Detail.Replace(temp, "(draft settings)", StringComparison.OrdinalIgnoreCase),
+                Fix = PlainFix(l),
+            })];
         }
         finally
         {
@@ -278,6 +296,16 @@ public sealed partial class SetupService(WebUiOptions options)
         }
     }
 
+    private static IEnumerable<string> Required(int step) => step switch
+    {
+        1 => ["folder", "git repository", "base branch"],
+        2 => ["build command", "test command"],
+        3 => ["writable paths"],
+        5 => ["identity", "config"],
+        LastStep => ["folder", "git repository", "base branch", "build command", "test command", "writable paths", "identity", "config"],
+        _ => [],
+    };
+
     private static bool Belongs(int step, string name) =>
         StepChecks.TryGetValue(step, out var names)
         && names.Any(n => name.Equals(n, StringComparison.Ordinal) || (n == "azure devops" && name.StartsWith("azure devops", StringComparison.Ordinal)));
@@ -290,26 +318,26 @@ public sealed partial class SetupService(WebUiOptions options)
             return line.Fix;
         }
 
-        if (!line.Fix.Contains(".autopilot", StringComparison.Ordinal) && !line.Fix.Contains("'autopilot", StringComparison.Ordinal)
-            && !line.Fix.Contains("--project", StringComparison.Ordinal))
-        {
-            return line.Fix;
-        }
-
         return line.Name switch
         {
             "git repository" => "Choose the folder that has the .git folder inside (the top of the repository), and make sure it is committed.",
             "base branch" => "Use the name of a branch that exists in that repository, for example main. If it only exists on the server, run 'git fetch' first.",
-            "writable paths" => "Change the writable paths in the next step so that each one points at a folder or file that exists.",
+            "writable paths" => "Change the writable paths above so that each one points at a folder or file that exists in the repository.",
             "context" => "Commit the listed context files to the base branch, or remove them from the context list.",
             "build command" => "Make the build pass on the base branch, or change the build command above.",
             "test command" => "Make the tests pass on the base branch, or change the test command above.",
-            "config" => "Fix the values listed above; they are the ones the settings file would have.",
-            _ => line.Fix.Contains("azure", StringComparison.OrdinalIgnoreCase) || line.Name.StartsWith("azure", StringComparison.Ordinal)
-                ? "Fix the Azure DevOps values in this step (organization, project, repository, query or the variable names)."
-                : "Fix the value in this step and run the check again.",
+            "config" => "Fix the value the line above names. It may be in an earlier step; the build and tests cannot be checked until the settings are valid.",
+            _ when MentionsFiles(line.Fix) && line.Name.StartsWith("azure devops", StringComparison.Ordinal) =>
+                "Fix the Azure DevOps values in this step (organization, project, repository, query or the variable names), then check again.",
+            _ when MentionsFiles(line.Fix) => "Fix the value in this step and run the check again.",
+            _ => line.Fix,
         };
     }
+
+    /// <summary>True when a fix names the settings file or a command line, which the page does not show.</summary>
+    private static bool MentionsFiles(string fix) =>
+        fix.Contains(".autopilot", StringComparison.Ordinal) || fix.Contains("'autopilot", StringComparison.Ordinal)
+        || fix.Contains("--project", StringComparison.Ordinal) || fix.Contains("commands.", StringComparison.Ordinal);
 
     private static string NameOf(ProjectDraft draft) => string.IsNullOrWhiteSpace(draft.DisplayName) ? draft.Key : draft.DisplayName.Trim();
 

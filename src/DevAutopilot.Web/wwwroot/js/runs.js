@@ -1,5 +1,5 @@
 import { get, post } from './api.js';
-import { h, clear, toast, badge, ago, emptyState, busy, ask } from './dom.js';
+import { h, clear, toast, badge, ago, emptyState, busy, ask, put } from './dom.js';
 
 const base = key => `/projects/${encodeURIComponent(key)}`;
 
@@ -50,7 +50,7 @@ async function renderOverview({ view, key }) {
           h('td', { 'data-label': 'Outcome' }, r.outcome),
           h('td', { 'data-label': 'Gate' }, r.gateVerdict ? badge(r.gateVerdict, verdictKind(r.gateVerdict)) : h('span', { class: 'muted' }, 'none')),
           h('td', { 'data-label': 'Person' }, r.humanDecision ? badge(r.humanDecision, r.humanDecision === 'merged' ? 'ok' : 'bad') : h('span', { class: 'muted' }, 'not decided')),
-          h('td', { 'data-label': 'When' }, ago(r.finishedAt))))))))));
+          h('td', { 'data-label': 'When' }, ago(r.finishedAt)))))))))
     return data;
   }
 
@@ -94,13 +94,13 @@ async function show(holder, key, id) {
     try { await post(`${base(key)}/runs/${r.id}/decision`, { decision }); toast('Recorded.'); await show(holder, key, id); }
     catch (e) { toast(e.message, true); }
   };
-  holder.append(
+  put(holder,
     h('p', {}, h('a', { href: `#/p/${encodeURIComponent(key)}/runs` }, '← All runs')),
     h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, `Run #${r.id} for task #${r.workItemId}`),
       h('p', {}, `${r.outcome}${r.branch ? ` on branch ${r.branch}` : ''}, ${ago(r.finishedAt)}`)),
       h('div', { class: 'row' }, r.gateVerdict ? badge(`gate ${r.gateVerdict}`, verdictKind(r.gateVerdict)) : badge('no gate verdict'),
         r.humanDecision ? badge(decisionText(r.humanDecision), r.humanDecision === 'merged' ? 'ok' : 'bad') : null)),
-    r.message ? h('div', { class: 'banner' }, r.message) : null,
+    r.message ? h('div', { class: 'banner info' }, r.message) : null,
     h('section', { class: 'card stack' }, h('h2', {}, 'Your decision'),
       h('p', { class: 'muted' }, 'Merging is always done by a person, in your own tool. Record here what you did, so the gate can be compared with your judgement.'),
       h('div', { class: 'row' },

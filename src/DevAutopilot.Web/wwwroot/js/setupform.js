@@ -166,7 +166,7 @@ export function renderChecks(result) {
   for (const c of result.checks) {
     box.append(h('div', { class: `check ${c.status}` },
       h('span', { class: 'name' }, c.name), h('span', {}, badge(c.status, c.status === 'ok' ? 'ok' : c.status === 'fail' ? 'bad' : c.status === 'warn' ? 'warn' : '')),
-      c.detail ? h('div', { class: 'detail' }, c.detail) : null,
+      c.detail ? h('div', { class: 'detail' }, c.detail.split('\n').map(l => l.trim()).filter(Boolean).join('\n')) : null,
       c.fix && c.status !== 'ok' ? h('div', { class: 'fix' }, h('b', {}, 'How to fix: '), c.fix) : null));
   }
   if (!result.checks.length) box.append(h('p', { class: 'muted' }, 'No checks for this step.'));

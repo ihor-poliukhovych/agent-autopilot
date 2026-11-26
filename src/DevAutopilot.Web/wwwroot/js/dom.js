@@ -5,6 +5,7 @@ export function h(tag, attrs, ...children) {
     if (value === undefined || value === null || value === false) continue;
     if (key === 'class') el.className = value;
     else if (key.startsWith('on') && typeof value === 'function') el.addEventListener(key.slice(2), value);
+    else if (key === 'style') el.style.cssText = value; // set through the CSSOM: the content policy blocks style attributes
     else if (key === 'value') el.value = value;
     else if (key === 'checked' || key === 'disabled' || key === 'selected' || key === 'open') el[key] = !!value;
     else el.setAttribute(key, value === true ? '' : String(value));
@@ -20,6 +21,9 @@ export function append(el, children) {
   }
   return el;
 }
+
+/** Like el.append, but skips null, undefined and false (native append would print "null"). */
+export function put(el, ...children) { return append(el, children); }
 
 export function clear(el) { el.replaceChildren(); return el; }
 

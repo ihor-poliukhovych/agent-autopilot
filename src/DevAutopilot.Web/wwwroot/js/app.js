@@ -59,45 +59,54 @@ switcher.addEventListener('change', () => {
   else go('projects');
 });
 
+let generation = 0;
+
 async function route() {
+  const mine = ++generation;
   if (cleanup) { try { cleanup(); } catch { /* ignore */ } cleanup = null; }
   const r = parse();
-  clear(view);
-  clear(tabs);
-  switcher.value = r.name === 'project' ? r.key : '';
+  // Each route draws into its own stage; only the newest route may put its stage on the page.
+  const stage = h('div');
+  const tabBar = h('div', { class: 'tabs-inner', style: 'display:contents' });
+  let stop = null;
   document.title = 'Dev Autopilot';
   try {
     if (r.name === 'project') {
       if (!state.projects.some(p => p.key === r.key)) await refreshState();
       const project = state.projects.find(p => p.key === r.key);
-      if (!project) { view.append(h('div', { class: 'banner bad' }, `There is no project "${r.key}".`)); return; }
-      switcher.value = r.key;
-      lastTab = r.tab === 'run' ? 'runs' : (TABS.some(t => t[0] === r.tab) ? r.tab : 'tasks');
-      renderTabs(r);
-      const screen = (TABS.find(t => t[0] === lastTab) || TABS[0])[2];
-      document.title = `${project.displayName} · Dev Autopilot`;
-      cleanup = await screen.render({ view, project, key: r.key, rest: r.rest, state, go, refreshState }) || null;
+      if (!project) {
+        stage.append(h('div', { class: 'banner bad' }, `There is no project "${r.key}".`));
+      } else {
+        lastTab = r.tab === 'run' ? 'runs' : (TABS.some(t => t[0] === r.tab) ? r.tab : 'tasks');
+        renderTabs(tabBar, r);
+        const screen = (TABS.find(t => t[0] === lastTab) || TABS[0])[2];
+        document.title = `${project.displayName} · Dev Autopilot`;
+        stop = await screen.render({ view: stage, project, key: r.key, rest: r.rest, state, go, refreshState }) || null;
+      }
     } else if (r.name === 'new') {
-      cleanup = await wizard.render({ view, mode: 'new', state, go, refreshState }) || null;
+      stop = await wizard.render({ view: stage, mode: 'new', state, go, refreshState }) || null;
     } else {
       await refreshState();
-      cleanup = await projects.render({ view, state, go }) || null;
+      stop = await projects.render({ view: stage, state, go }) || null;
     }
   } catch (e) {
-    if (e instanceof ApiError && e.status === 401) {
-      view.append(h('div', { class: 'banner bad' }, 'You are signed out. Start "autopilot ui" again and open the new link it prints.'));
-    } else {
-      view.append(h('div', { class: 'banner bad' }, e.message || 'Something went wrong.'));
-    }
+    stage.append(h('div', { class: 'banner bad' }, e instanceof ApiError && e.status === 401
+      ? 'You are signed out. Start "autopilot ui" again and open the new link it prints.'
+      : (e.message || 'Something went wrong.')));
   }
+  if (mine !== generation) { if (stop) stop(); return; }
+  cleanup = stop;
+  switcher.value = r.name === 'project' ? r.key : '';
+  clear(tabs).append(tabBar);
+  view.replaceChildren(stage);
   view.focus({ preventScroll: true });
 }
 
-function renderTabs(r) {
+function renderTabs(bar, r) {
   for (const [id, label] of TABS) {
     const link = h('a', { href: `#/p/${encodeURIComponent(r.key)}/${id}` }, label);
     if (id === lastTab) link.setAttribute('aria-current', 'page');
-    tabs.append(link);
+    bar.append(link);
     if (id === 'needs') {
       get(`/projects/${encodeURIComponent(r.key)}/needs-human`).then(items => {
         if (items.length) link.append(h('span', { class: 'count' }, String(items.length)));

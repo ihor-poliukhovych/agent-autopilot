@@ -1,5 +1,5 @@
 import { post } from './api.js';
-import { h, clear, toast, busy } from './dom.js';
+import { h, clear, toast, busy, badge } from './dom.js';
 import { STEPS, STEP_COUNT, runChecks, loadDefaults, renderChecks } from './setupform.js';
 
 function emptyDraft() {
@@ -17,6 +17,7 @@ export async function render({ view, go, refreshState }) {
   let draft = emptyDraft();
   let step = 1;
   const passed = new Set();
+  const last = new Map(); // the newest check result of each step, shown again when you come back
   const holder = h('div');
   view.append(holder);
 
@@ -26,6 +27,7 @@ export async function render({ view, go, refreshState }) {
       const keep = { key: draft.key, displayName: draft.displayName, taskSource: draft.taskSource, ado: draft.ado };
       draft = { ...found, ...(keep.key && keep.key !== found.key ? keep : { taskSource: draft.taskSource, ado: draft.ado }) };
       passed.clear();
+      last.clear();
       toast('Found the build and test commands and the paths for this folder. Check them in the next steps.');
       draw();
     } catch (e) { toast(e.message, true); }
@@ -43,10 +45,12 @@ export async function render({ view, go, refreshState }) {
 
   function drawStep(def) {
     const results = h('div', { 'aria-live': 'polite' });
+    if (last.has(def.id)) results.append(h('p', {}, last.get(def.id).passed ? badge('Last check passed', 'ok') : badge('Last check failed', 'bad')), renderChecks(last.get(def.id)));
     const next = h('button', { class: 'primary', type: 'button' }, step === STEPS.length ? 'Check and go to the summary' : 'Check and continue');
     const checkOnly = h('button', { type: 'button' }, 'Check this step');
     const run = async () => {
       const result = await runChecks(def.id, draft, results);
+      if (result) last.set(def.id, result);
       if (result?.passed) passed.add(def.id); else passed.delete(def.id);
       return result;
     };
