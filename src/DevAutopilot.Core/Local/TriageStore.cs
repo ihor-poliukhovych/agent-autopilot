@@ -9,9 +9,9 @@ namespace DevAutopilot.Core.Local;
 /// Keeps triage outcomes in <c>.autopilot/out/triage/&lt;id&gt;.json</c> (for the harness) and
 /// <c>&lt;id&gt;.md</c> (for a person). The pipeline reads the JSON back before implementing.
 /// </summary>
-public sealed class TriageStore(string projectRoot)
+public sealed class TriageStore(string projectRoot, string? dataFolder = null)
 {
-    public string Folder { get; } = ProjectPaths.TriageFolder(projectRoot);
+    public string Folder { get; } = ProjectPaths.TriageFolder(projectRoot, dataFolder);
 
     public string JsonPath(string id) => Path.Combine(Folder, ProjectPaths.SafeId(id) + ".json");
 

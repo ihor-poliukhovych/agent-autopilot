@@ -5,13 +5,13 @@ namespace DevAutopilot.Core.Local;
 /// (<c>001-fix-404.md</c> is "001"), the title is the first <c># </c> heading, and optional
 /// <c>Labels: a, b</c> and <c>Status: done</c> lines are read and kept out of the body.
 /// </summary>
-public sealed class LocalWorkItemSource(string projectRoot) : IWorkItemSource
+public sealed class LocalWorkItemSource(string projectRoot, string? dataFolder = null) : IWorkItemSource
 {
     private static readonly string[] ClosedStatuses = ["done", "closed"];
 
-    private readonly TriageStore _triage = new(projectRoot);
+    private readonly TriageStore _triage = new(projectRoot, dataFolder);
 
-    public string TasksFolder { get; } = ProjectPaths.TasksFolder(projectRoot);
+    public string TasksFolder { get; } = ProjectPaths.TasksFolder(projectRoot, dataFolder);
 
     public async Task<IReadOnlyList<WorkItem>> ListOpenAsync(CancellationToken ct)
     {

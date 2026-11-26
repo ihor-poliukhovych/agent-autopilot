@@ -19,13 +19,13 @@ public static class ConfigLoader
     /// <summary>camelCase, comments and trailing commas allowed, enums as kebab-case strings.</summary>
     public static JsonSerializerOptions JsonOptions { get; } = CreateOptions();
 
-    public static string ConfigPath(string projectRoot) =>
-        Path.Combine(projectRoot, AutopilotConfig.FolderName, AutopilotConfig.FileName);
+    public static string ConfigPath(string projectRoot, string? dataFolder = null) =>
+        Path.Combine(dataFolder ?? Path.Combine(projectRoot, AutopilotConfig.FolderName), AutopilotConfig.FileName);
 
-    public static bool Exists(string projectRoot) => File.Exists(ConfigPath(projectRoot));
+    public static bool Exists(string projectRoot, string? dataFolder = null) => File.Exists(ConfigPath(projectRoot, dataFolder));
 
     /// <summary>Loads the project's config. Throws <see cref="ConfigException"/> with a readable message.</summary>
-    public static AutopilotConfig Load(string projectRoot) => LoadFile(ConfigPath(projectRoot));
+    public static AutopilotConfig Load(string projectRoot, string? dataFolder = null) => LoadFile(ConfigPath(projectRoot, dataFolder));
 
     public static AutopilotConfig LoadFile(string path)
     {
@@ -93,7 +93,7 @@ public static class ConfigLoader
 
     public static string Serialize(AutopilotConfig config) => JsonSerializer.Serialize(config, JsonOptions);
 
-    public static void Save(AutopilotConfig config, string projectRoot) => SaveFile(config, ConfigPath(projectRoot));
+    public static void Save(AutopilotConfig config, string projectRoot, string? dataFolder = null) => SaveFile(config, ConfigPath(projectRoot, dataFolder));
 
     public static void SaveFile(AutopilotConfig config, string path)
     {

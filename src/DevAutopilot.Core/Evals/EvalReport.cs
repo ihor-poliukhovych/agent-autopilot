@@ -15,9 +15,9 @@ public static class EvalReport
     private static readonly CultureInfo Invariant = CultureInfo.InvariantCulture;
 
     /// <summary>Creates <c>&lt;project&gt;/.autopilot/out/evals/&lt;yyyyMMdd-HHmmss&gt;/</c> (with a suffix when it exists).</summary>
-    public static string CreateOutputFolder(string projectRoot, DateTimeOffset now)
+    public static string CreateOutputFolder(string projectRoot, DateTimeOffset now, string? dataFolder = null)
     {
-        var parent = Path.Combine(ProjectPaths.OutFolder(projectRoot), "evals");
+        var parent = Path.Combine(ProjectPaths.OutFolder(projectRoot, dataFolder), "evals");
         var name = now.ToString("yyyyMMdd-HHmmss", Invariant);
         var folder = Path.Combine(parent, name);
         for (var i = 2; Directory.Exists(folder); i++)
