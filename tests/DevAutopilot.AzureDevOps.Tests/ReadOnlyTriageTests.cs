@@ -15,6 +15,7 @@ public class ReadOnlyTriageTests
         .On(HttpMethod.Post, $"{Ado.Org}/Shop/_apis/wit/wiql", Ado.WiqlJson(42))
         .On(HttpMethod.Post, $"{Ado.Org}/Shop/_apis/wit/workitemsbatch", BatchJson)
         .On(HttpMethod.Patch, $"{Ado.Org}/Shop/_apis/wit/workitems/42", "{\"id\":42,\"rev\":6,\"fields\":{}}")
+        .On(HttpMethod.Get, $"{Ado.Org}/Shop/_apis/wit/workItems/42/comments", "{\"count\":0,\"comments\":[]}")
         .On(HttpMethod.Post, $"{Ado.Org}/Shop/_apis/wit/workItems/42/comments", "{\"workItemId\":42,\"id\":1,\"version\":1,\"text\":\"x\"}");
 
     /// <summary>Requests that change something in Azure DevOps: every PATCH, and every POST except the two read endpoints.</summary>
