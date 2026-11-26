@@ -47,6 +47,10 @@ public sealed class AzureDevOpsModule : IDisposable
         _pusher = pusher;
         WorkItems = new AzureDevOpsWorkItemSource(client, settings);
         Doctor = new AzureDevOpsDoctor(client, settings, baseBranch);
+        Reader = new AzureDevOpsReader(client, settings);
+        Writeback = new AzureDevOpsWriteback(client, settings);
+        PullRequests = new AzureDevOpsPullRequests(client, settings);
+        Checks = new AzureDevOpsConnectionChecker(client, settings, baseBranch);
     }
 
     public AzureDevOpsSettings Settings { get; }
@@ -56,6 +60,18 @@ public sealed class AzureDevOpsModule : IDisposable
     public IWorkItemSource WorkItems { get; }
 
     public AzureDevOpsDoctor Doctor { get; }
+
+    /// <summary>Preview of the query and full detail of one work item.</summary>
+    public IAzureDevOpsReader Reader { get; }
+
+    /// <summary>Tags, comments, states, assignee and pull request links on work items. Safe to repeat.</summary>
+    public IAzureDevOpsWriteback Writeback { get; }
+
+    /// <summary>Draft pull requests (needs the "repository" setting). Cannot mark ready or complete.</summary>
+    public IAzureDevOpsPullRequests PullRequests { get; }
+
+    /// <summary>Connection checks for doctor and for a setup wizard.</summary>
+    public IAzureDevOpsConnectionChecker Checks { get; }
 
     /// <summary>The draft pull request publisher. Throws <see cref="AzureDevOpsSettingsException"/> when "repository" is not set.</summary>
     public IPublisher CreatePublisher() =>

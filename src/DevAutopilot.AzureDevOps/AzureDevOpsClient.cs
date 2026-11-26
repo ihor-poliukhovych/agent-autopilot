@@ -28,6 +28,7 @@ public sealed class AzureDevOpsClient
     private static readonly TimeSpan MaxRetryWait = TimeSpan.FromSeconds(60);
     private const int MaxErrorTextLength = 300;
     private const int MaxPolicyPages = 20;
+    private const int MaxCommentPages = 10;
 
     private readonly HttpClient _http;
     private readonly IAzureDevOpsTokenProvider _tokens;
@@ -151,6 +152,99 @@ public sealed class AzureDevOpsClient
         using var _ = await SendJsonAsync($"add a comment to work item {workItemId}", HttpMethod.Post, url, Json(new { text = htmlText }), ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Sends a JSON Patch document to a work item. With <paramref name="expectedRev"/> the patch first tests the
+    /// revision. With <paramref name="validateOnly"/> Azure DevOps checks the change and the permissions but saves
+    /// nothing. Returns the new revision (the expected one when validating).
+    /// </summary>
+    public async Task<int> UpdateWorkItemAsync(
+        int workItemId, int? expectedRev, IReadOnlyList<WorkItemPatchOp> ops, bool validateOnly, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(ops);
+        var patch = new List<object>();
+        if (expectedRev is { } rev)
+        {
+            patch.Add(new { op = "test", path = "/rev", value = rev });
+        }
+
+        patch.AddRange(ops.Select(o => o.Value is null ? (object)new { op = o.Op, path = o.Path } : new { op = o.Op, path = o.Path, value = o.Value }));
+        var id = workItemId.ToString(CultureInfo.InvariantCulture);
+        var url = ProjectUrl($"_apis/wit/workitems/{id}", validateOnly ? [("validateOnly", "true")] : []);
+        var content = new StringContent(JsonSerializer.Serialize(patch), Encoding.UTF8, "application/json-patch+json");
+        using var doc = await SendJsonAsync($"update work item {workItemId}", HttpMethod.Patch, url, content, ct).ConfigureAwait(false);
+        return doc.RootElement.TryGetProperty("rev", out var revElement) && revElement.TryGetInt32(out var newRev) ? newRev : expectedRev ?? 0;
+    }
+
+    /// <summary>The relations (links) of a work item.</summary>
+    public async Task<IReadOnlyList<AdoRelation>> GetRelationsAsync(int workItemId, CancellationToken ct)
+    {
+        var url = ProjectUrl($"_apis/wit/workitems/{workItemId.ToString(CultureInfo.InvariantCulture)}", ("$expand", "relations"));
+        using var doc = await SendJsonAsync($"read the links of work item {workItemId}", HttpMethod.Get, url, null, ct).ConfigureAwait(false);
+        var result = new List<AdoRelation>();
+        if (doc.RootElement.TryGetProperty("relations", out var relations) && relations.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var relation in relations.EnumerateArray())
+            {
+                var rel = String(relation, "rel");
+                var target = String(relation, "url");
+                if (rel is null || target is null)
+                {
+                    continue;
+                }
+
+                string? name = null;
+                if (relation.TryGetProperty("attributes", out var attributes))
+                {
+                    name = String(attributes, "name");
+                }
+
+                result.Add(new AdoRelation(rel, target, name));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>The comments of a work item, oldest first, at most <paramref name="max"/>.</summary>
+    public async Task<IReadOnlyList<AdoComment>> GetCommentsAsync(int workItemId, int max, CancellationToken ct)
+    {
+        var result = new List<AdoComment>();
+        string? continuation = null;
+        for (var page = 0; page < MaxCommentPages && result.Count < max; page++)
+        {
+            var query = new List<(string, string)> { ("$top", Math.Min(200, max - result.Count).ToString(CultureInfo.InvariantCulture)), ("order", "asc") };
+            if (continuation is not null)
+            {
+                query.Add(("continuationToken", continuation));
+            }
+
+            var url = ProjectUrl($"_apis/wit/workItems/{workItemId.ToString(CultureInfo.InvariantCulture)}/comments", CommentsApiVersion, [.. query]);
+            using var doc = await SendJsonAsync($"read the comments of work item {workItemId}", HttpMethod.Get, url, null, ct).ConfigureAwait(false);
+            if (doc.RootElement.TryGetProperty("comments", out var comments) && comments.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var comment in comments.EnumerateArray())
+                {
+                    var author = comment.TryGetProperty("createdBy", out var by) ? String(by, "displayName") : null;
+                    DateTimeOffset? created = String(comment, "createdDate") is { } date
+                        && DateTimeOffset.TryParse(date, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed) ? parsed : null;
+                    result.Add(new AdoComment(
+                        comment.TryGetProperty("id", out var id) && id.TryGetInt32(out var number) ? number : 0,
+                        String(comment, "text") ?? string.Empty,
+                        author,
+                        created));
+                }
+            }
+
+            continuation = String(doc.RootElement, "continuationToken");
+            if (string.IsNullOrEmpty(continuation))
+            {
+                break;
+            }
+        }
+
+        return result;
+    }
+
     // ---------- Project and repository ----------
 
     public async Task<AdoProject> GetProjectAsync(CancellationToken ct)
@@ -201,10 +295,66 @@ public sealed class AzureDevOpsClient
             title = request.Title,
             description = request.Description,
             isDraft = true,
-            workItemRefs = new[] { new { id = request.WorkItemId } },
+            workItemRefs = string.IsNullOrWhiteSpace(request.WorkItemId) ? [] : new[] { new { id = request.WorkItemId } },
         });
         using var doc = await SendJsonAsync("create the draft pull request", HttpMethod.Post, url, body, ct).ConfigureAwait(false);
-        var root = doc.RootElement;
+        return ReadPullRequest(doc.RootElement);
+    }
+
+    /// <summary>Active pull requests from <paramref name="sourceBranch"/> into <paramref name="targetBranch"/>.</summary>
+    public async Task<IReadOnlyList<AdoPullRequest>> FindActivePullRequestsAsync(
+        string repositoryId, string sourceBranch, string targetBranch, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryId);
+        var url = ProjectUrl(
+            $"_apis/git/repositories/{Uri.EscapeDataString(repositoryId)}/pullrequests",
+            ("searchCriteria.sourceRefName", "refs/heads/" + sourceBranch),
+            ("searchCriteria.targetRefName", "refs/heads/" + targetBranch),
+            ("searchCriteria.status", "active"));
+        using var doc = await SendJsonAsync("look for an open pull request", HttpMethod.Get, url, null, ct).ConfigureAwait(false);
+        return Items(doc.RootElement).Select(ReadPullRequest).Where(p => p.PullRequestId > 0).ToList();
+    }
+
+    public async Task<AdoPullRequest> GetPullRequestAsync(string repositoryId, int pullRequestId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryId);
+        var url = ProjectUrl($"_apis/git/repositories/{Uri.EscapeDataString(repositoryId)}/pullrequests/{pullRequestId.ToString(CultureInfo.InvariantCulture)}");
+        using var doc = await SendJsonAsync($"read pull request {pullRequestId}", HttpMethod.Get, url, null, ct).ConfigureAwait(false);
+        return ReadPullRequest(doc.RootElement);
+    }
+
+    /// <summary>
+    /// Changes the title and/or description of a pull request. This is the only update the module can make:
+    /// the body has no draft, status, vote or completion field, so a pull request can never be marked ready
+    /// or completed from here.
+    /// </summary>
+    public async Task<AdoPullRequest> UpdatePullRequestTextAsync(
+        string repositoryId, int pullRequestId, string? title, string? description, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryId);
+        var body = new Dictionary<string, string>();
+        if (title is not null)
+        {
+            body["title"] = title;
+        }
+
+        if (description is not null)
+        {
+            body["description"] = description;
+        }
+
+        if (body.Count == 0)
+        {
+            throw new ArgumentException("Give a title or a description to change.");
+        }
+
+        var url = ProjectUrl($"_apis/git/repositories/{Uri.EscapeDataString(repositoryId)}/pullrequests/{pullRequestId.ToString(CultureInfo.InvariantCulture)}");
+        using var doc = await SendJsonAsync($"update pull request {pullRequestId}", HttpMethod.Patch, url, Json(body), ct).ConfigureAwait(false);
+        return ReadPullRequest(doc.RootElement);
+    }
+
+    private static AdoPullRequest ReadPullRequest(JsonElement root)
+    {
         var id = root.TryGetProperty("pullRequestId", out var idElement) && idElement.TryGetInt32(out var value) ? value : 0;
         string? webUrl = null;
         if (root.TryGetProperty("repository", out var repo))
@@ -216,7 +366,16 @@ public sealed class AzureDevOpsClient
             }
         }
 
-        return new AdoPullRequest(id, webUrl);
+        static string? Branch(string? name) => name is not null && name.StartsWith("refs/heads/", StringComparison.Ordinal) ? name["refs/heads/".Length..] : name;
+        return new AdoPullRequest(
+            id,
+            webUrl,
+            !root.TryGetProperty("isDraft", out var draft) || draft.ValueKind != JsonValueKind.False,
+            String(root, "status"),
+            String(root, "title"),
+            String(root, "description"),
+            Branch(String(root, "sourceRefName")),
+            Branch(String(root, "targetRefName")));
     }
 
     // ---------- Policies and permissions ----------
