@@ -17,6 +17,20 @@ autopilot run       # triage the backlog, implement the agent-ready tasks
 autopilot eval      # measure it on known tasks, several runs each
 ```
 
+For a registered project (`--project <key>`) there is also a task pool and background runs:
+
+```
+autopilot list                      # open tasks: triage (stale when the text changed), last run, pool
+autopilot pool add 12 14            # queue tasks; also: remove, list, move, clear
+autopilot pool run --limit 3        # one at a time; stops on infrastructure errors; writes POOL-REPORT.md
+autopilot implement 12 --detach     # run in the background; then: job list | job show <id> --log | job cancel <id>
+autopilot schedule set --at 02:30 --yes   # night run (Task Scheduler on Windows, crontab elsewhere)
+autopilot stats                     # how often a person agreed with the gate (record it: autopilot decide <run> merged)
+```
+
+Without `--yes`, `schedule set` only prints what it would install. One run per project at a
+time; cancelling a job stops that job only.
+
 ## The problem
 
 Coding agents are good enough to fix a real bug in a minute. The hard part is
