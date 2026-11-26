@@ -55,10 +55,13 @@ public sealed class FakeAdo : IAzureDevOpsProbe
 {
     public ModuleConfig? Seen { get; private set; }
 
-    public Task<IReadOnlyList<WorkItem>> PreviewAsync(ModuleConfig module, string repositoryFolder, CancellationToken ct)
+    public int SeenSkip { get; private set; }
+
+    public Task<WorkItemPreviewPage> PreviewAsync(ModuleConfig module, string repositoryFolder, int skip, int take, CancellationToken ct)
     {
         Seen = module;
-        return Task.FromResult<IReadOnlyList<WorkItem>>([new WorkItem("101", "Fix the login page", string.Empty, [], null, "Active")]);
+        SeenSkip = skip;
+        return Task.FromResult(new WorkItemPreviewPage([new WorkItemPreview("101", "Fix the login page", "Bug", "Active", null, null)], 11, skip, take, HasMore: true, Truncated: false));
     }
 }
 

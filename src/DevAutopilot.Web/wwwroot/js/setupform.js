@@ -95,19 +95,28 @@ export const STEPS = [
         };
         auth.addEventListener('change', () => { draft.ado.auth = auth.value; drawAuth(); });
         drawAuth();
-        const previewBtn = h('button', { type: 'button', onclick: async ev => {
-          await busy(ev.currentTarget, async () => {
+        const showPage = async (button, skip) => {
+          await busy(button, async () => {
             clear(preview);
             preview.append(h('span', { class: 'spinner' }), ' Reading work items…');
             try {
-              const items = await post('/wizard/azure-devops/preview', draft);
+              const page = await post('/wizard/azure-devops/preview', { draft, skip });
               clear(preview);
-              preview.append(items.length
-                ? h('div', {}, h('p', {}, `${items.length} work item(s) found. The first ones:`), h('ul', {}, items.map(i => h('li', {}, `#${i.id} ${i.title}`, i.state ? h('span', { class: 'muted' }, ` (${i.state})`) : null))))
-                : h('p', { class: 'banner' }, 'The connection works but the query returned no open items. Check the query, or tag an item "dev-autopilot".'));
+              if (!page.items.length) {
+                preview.append(h('p', { class: 'banner' }, 'The connection works but the query returned no open items. Check the query, or tag an item "dev-autopilot".'));
+                return;
+              }
+              const last = page.skip + page.items.length;
+              preview.append(h('div', { class: 'stack' },
+                h('p', {}, `Items ${page.skip + 1} to ${last} of ${page.total}${page.truncated ? ' (the query matches more; only the first are counted)' : ''}. Nothing was changed.`),
+                h('ul', {}, page.items.map(i => h('li', {}, `#${i.id} ${i.title}`, h('span', { class: 'muted' }, ` (${[i.type, i.state].filter(Boolean).join(', ')})`)))),
+                h('div', { class: 'row' },
+                  page.skip > 0 ? h('button', { type: 'button', onclick: ev => showPage(ev.currentTarget, Math.max(0, page.skip - page.take)) }, 'Previous') : null,
+                  page.hasMore ? h('button', { type: 'button', onclick: ev => showPage(ev.currentTarget, page.skip + page.take) }, 'Next') : null)));
             } catch (e) { clear(preview); preview.append(h('div', { class: 'banner bad' }, e.message)); }
           });
-        } }, 'Preview work items');
+        };
+        const previewBtn = h('button', { type: 'button', onclick: ev => showPage(ev.currentTarget, 0) }, 'Preview work items');
         adoBox.append(h('div', { class: 'form-grid' },
           field('Organization address', text(draft, 'ado.organizationUrl', { mono: true, placeholder: 'https://dev.azure.com/your-organization' })),
           field('Azure DevOps project', text(draft, 'ado.project')),

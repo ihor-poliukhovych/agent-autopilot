@@ -35,6 +35,8 @@ public sealed record AzureDevOpsSettings
     public const string DefaultRemote = "origin";
     public const string DefaultTagPrefix = "autopilot:";
     public const string RequiredTokenVariablePrefix = "AUTOPILOT_";
+    public const int DefaultMaxItems = 50;
+    public const int MaxMaxItems = 500;
     public const string DefaultTenantVariable = "AUTOPILOT_ADO_TENANT_ID";
     public const string DefaultClientIdVariable = "AUTOPILOT_ADO_CLIENT_ID";
     public const string DefaultClientSecretVariable = "AUTOPILOT_ADO_CLIENT_SECRET";
@@ -66,6 +68,12 @@ public sealed record AzureDevOpsSettings
     public string TagPrefix { get; init; } = DefaultTagPrefix;
 
     public AzureDevOpsAuth Auth { get; init; } = AzureDevOpsAuth.Pat;
+
+    /// <summary>How many items the configured query may return at most (the WIQL <c>$top</c>).</summary>
+    public int MaxItems { get; init; } = DefaultMaxItems;
+
+    /// <summary>Work item state to move to for each <see cref="WorkflowEvent"/>. An event that is not listed changes no state.</summary>
+    public IReadOnlyDictionary<WorkflowEvent, string> StateMap { get; init; } = new Dictionary<WorkflowEvent, string>();
 
     public string TokenVariable { get; init; } = DefaultTokenVariable;
 
@@ -196,6 +204,16 @@ public sealed record AzureDevOpsSettings
                 break;
         }
 
+        var maxItems = DefaultMaxItems;
+        if (Get("maxItems") is { } maxText
+            && (!int.TryParse(maxText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out maxItems) || maxItems < 1 || maxItems > MaxMaxItems))
+        {
+            problems.Add($"\"maxItems\" must be a whole number from 1 to {MaxMaxItems}; got \"{maxText}\".");
+            maxItems = DefaultMaxItems;
+        }
+
+        var stateMap = ParseStateMap(Get("stateMap"), problems);
+
         var tagPrefix = Get("tagPrefix") ?? DefaultTagPrefix;
         if (tagPrefix.Contains(';', StringComparison.Ordinal))
         {
@@ -221,7 +239,36 @@ public sealed record AzureDevOpsSettings
             ClientIdVariable = clientIdVariable,
             ClientSecretVariable = clientSecretVariable,
             RecordTriage = recordTriage,
+            MaxItems = maxItems,
+            StateMap = stateMap,
         };
+    }
+
+    /// <summary>
+    /// Reads <c>agent-ready=Active; needs-human=New; draft-pr=Resolved</c>: the event names are listed in
+    /// <see cref="WorkflowEvents.Names"/>, the state is the exact state name of the work item type.
+    /// </summary>
+    internal static IReadOnlyDictionary<WorkflowEvent, string> ParseStateMap(string? text, List<string> problems)
+    {
+        var map = new Dictionary<WorkflowEvent, string>();
+        if (text is null)
+        {
+            return map;
+        }
+
+        foreach (var entry in text.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = entry.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length != 2 || parts[1].Length == 0 || !WorkflowEvents.TryParse(parts[0], out var workflowEvent))
+            {
+                problems.Add($"\"stateMap\" entry \"{entry}\" must look like \"agent-ready=Active\"; the events are {string.Join(", ", WorkflowEvents.Names)}.");
+                continue;
+            }
+
+            map[workflowEvent] = parts[1];
+        }
+
+        return map;
     }
 }
 

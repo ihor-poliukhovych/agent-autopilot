@@ -18,6 +18,8 @@ public sealed record DecisionBody(string? Decision);
 
 public sealed record StepBody(int Step, ProjectDraft Draft);
 
+public sealed record PreviewBody(ProjectDraft Draft, int? Skip);
+
 public sealed record FolderBody(string? Folder, string? BaseBranch);
 
 public sealed record ContextFileBody(string? Path, string? Text);
@@ -42,7 +44,7 @@ internal static class Endpoints
         api.MapGet("/projects", (WebUiOptions o) => new ProjectRegistry(o.Workspace).List().Select(Summary));
         api.MapPost("/wizard/defaults", (FolderBody b, SetupService s, CancellationToken ct) => s.DefaultsAsync(b.Folder ?? string.Empty, b.BaseBranch, ct));
         api.MapPost("/wizard/check", (StepBody b, SetupService s, CancellationToken ct) => s.CheckAsync(b.Step, b.Draft, ct));
-        api.MapPost("/wizard/azure-devops/preview", (ProjectDraft draft, SetupService s, CancellationToken ct) => s.PreviewAsync(draft, ct));
+        api.MapPost("/wizard/azure-devops/preview", (PreviewBody b, SetupService s, CancellationToken ct) => s.PreviewAsync(b.Draft, b.Skip ?? 0, ct));
         api.MapPost("/projects", async (ProjectDraft draft, SetupService s, CancellationToken ct) =>
             Results.Created($"/api/projects/{draft.Key}", await s.CreateAsync(draft, ct).ConfigureAwait(false)));
 

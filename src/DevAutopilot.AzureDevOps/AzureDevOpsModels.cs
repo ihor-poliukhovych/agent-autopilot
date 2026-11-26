@@ -33,7 +33,24 @@ public sealed record AdoProject(string Id, string Name);
 
 public sealed record AdoRepository(string Id, string Name, string ProjectId, string? WebUrl, string? RemoteUrl, string? DefaultBranch);
 
-public sealed record AdoPullRequest(int PullRequestId, string? WebUrl);
+public sealed record AdoPullRequest(
+    int PullRequestId,
+    string? WebUrl,
+    bool IsDraft = true,
+    string? Status = null,
+    string? Title = null,
+    string? Description = null,
+    string? SourceBranch = null,
+    string? TargetBranch = null);
+
+/// <summary>One comment of a work item as Azure DevOps returns it (the text is HTML).</summary>
+public sealed record AdoComment(int Id, string Html, string? Author, DateTimeOffset? CreatedAt);
+
+/// <summary>One relation of a work item (<c>rel</c> such as <c>System.LinkTypes.Hierarchy-Forward</c> or <c>ArtifactLink</c>).</summary>
+public sealed record AdoRelation(string Rel, string Url, string? Name);
+
+/// <summary>One operation of a JSON Patch document for a work item.</summary>
+public sealed record WorkItemPatchOp(string Op, string Path, object? Value);
 
 /// <summary>One policy configuration from the Git policy configurations endpoint.</summary>
 public sealed record AdoPolicyConfiguration(
@@ -51,7 +68,7 @@ public sealed record PullRequestCreate(
     string TargetBranch,
     string Title,
     string Description,
-    string WorkItemId);
+    string? WorkItemId);
 
 /// <summary>Permission bits of the Git Repositories security namespace (from Security Namespaces - Query).</summary>
 public static class GitRepositoryPermissions

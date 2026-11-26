@@ -68,17 +68,16 @@ public sealed class AzureDevOpsPublisher : IPublisher
             var credential = await _client.GetCredentialAsync(ct).ConfigureAwait(false);
             await _pusher.PushAsync(_projectRoot, _settings.Remote, request.BranchName, _branchPrefix, credential, ct).ConfigureAwait(false);
 
-            var pr = await _client.CreateDraftPullRequestAsync(
-                repository.Id,
-                new PullRequestCreate(
+            var pr = await new AzureDevOpsPullRequests(_client, _settings).EnsureDraftAsync(
+                new DraftPullRequestRequest(
                     request.BranchName,
                     StripHeads(_baseBranch),
                     Title(request.WorkItem.Title),
-                    Cut(_description(request)),
-                    request.WorkItem.Id),
+                    _description(request),
+                    int.TryParse(request.WorkItem.Id, NumberStyles.None, CultureInfo.InvariantCulture, out var workItemId) ? workItemId : null),
                 ct).ConfigureAwait(false);
 
-            return new PublishResult(true, WebUrl(pr, repository), null);
+            return new PublishResult(true, pr.WebUrl, null);
         }
         catch (Exception ex) when (ex is AzureDevOpsException or AzureDevOpsAuthException or AzureDevOpsPublishException)
         {
@@ -107,19 +106,6 @@ public sealed class AzureDevOpsPublisher : IPublisher
         return description.Length <= MaxDescriptionLength
             ? description
             : description[..(MaxDescriptionLength - note.Length)] + note;
-    }
-
-    private string WebUrl(AdoPullRequest pr, AdoRepository repository)
-    {
-        if (!string.IsNullOrEmpty(pr.WebUrl))
-        {
-            return pr.WebUrl;
-        }
-
-        var id = pr.PullRequestId.ToString(CultureInfo.InvariantCulture);
-        var repoWeb = repository.WebUrl
-            ?? $"{_client.OrganizationUrl.AbsoluteUri.TrimEnd('/')}/{Uri.EscapeDataString(_settings.Project)}/_git/{Uri.EscapeDataString(repository.Name)}";
-        return repoWeb.TrimEnd('/') + "/pullrequest/" + id;
     }
 
     private static string StripHeads(string branch) =>

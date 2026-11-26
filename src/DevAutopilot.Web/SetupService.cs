@@ -15,6 +15,7 @@ public sealed record StepCheckResult(int Step, bool Passed, IReadOnlyList<CheckL
 public sealed partial class SetupService(WebUiOptions options)
 {
     public const int LastStep = 6;
+    public const int PreviewPageSize = 10;
 
     private static readonly IReadOnlyDictionary<int, string[]> StepChecks = new Dictionary<int, string[]>
     {
@@ -74,7 +75,7 @@ public sealed partial class SetupService(WebUiOptions options)
     }
 
     /// <summary>Shows items from Azure DevOps for the draft's settings, so a person sees the query finds the right work.</summary>
-    public async Task<IReadOnlyList<WorkItemPreview>> PreviewAsync(ProjectDraft draft, CancellationToken ct)
+    public async Task<WorkItemPreviewPage> PreviewAsync(ProjectDraft draft, int skip, CancellationToken ct)
     {
         if (options.AzureDevOps is null)
         {
@@ -90,8 +91,7 @@ public sealed partial class SetupService(WebUiOptions options)
         var folder = SafeFolder(draft.RepositoryFolder) ?? throw new ArgumentException("Choose the repository folder first (step 1).");
         var config = draft with { TaskSource = ProjectRegistry.AzureDevOpsSource };
         var module = config.ApplyTo(new AutopilotConfig()).Modules.WorkItems;
-        var items = await options.AzureDevOps.PreviewAsync(module, folder, ct).ConfigureAwait(false);
-        return [.. items.Take(20).Select(i => new WorkItemPreview(i.Id, i.Title, i.State, i.AssignedTo, i.Url))];
+        return await options.AzureDevOps.PreviewAsync(module, folder, Math.Max(0, skip), PreviewPageSize, ct).ConfigureAwait(false);
     }
 
     /// <summary>Registers the project and writes its settings. Fails with every problem named when a check fails.</summary>
@@ -382,8 +382,6 @@ public sealed partial class SetupService(WebUiOptions options)
     [GeneratedRegex("^AUTOPILOT_[A-Za-z0-9_]{1,80}$")]
     private static partial Regex VariableNamePattern();
 }
-
-public sealed record WorkItemPreview(string Id, string Title, string? State, string? AssignedTo, string? Url);
 
 /// <summary>The setup was refused. <see cref="Problems"/> lists every reason in plain words (HTTP 400).</summary>
 public sealed class SetupRefusedException(IReadOnlyList<string> problems)

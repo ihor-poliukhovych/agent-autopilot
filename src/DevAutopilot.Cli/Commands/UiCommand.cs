@@ -90,16 +90,23 @@ public sealed class UiBackend(CliContext context) : ISetupChecker, IAzureDevOpsP
     public Task<AutopilotConfig> DetectDefaultsAsync(string repositoryFolder, string? baseBranch, CancellationToken ct) =>
         InitCommand.BuildDefaultsAsync(repositoryFolder, ct, string.IsNullOrWhiteSpace(baseBranch) ? null : baseBranch);
 
-    public async Task<IReadOnlyList<WorkItem>> PreviewAsync(ModuleConfig module, string repositoryFolder, CancellationToken ct)
+    public async Task<DevAutopilot.Web.WorkItemPreviewPage> PreviewAsync(ModuleConfig module, string repositoryFolder, int skip, int take, CancellationToken ct)
     {
         try
         {
             using var ado = AzureDevOpsModule.Create(module, repositoryFolder, "main", requireRepository: false);
-            return await ado.WorkItems.ListOpenAsync(ct).ConfigureAwait(false);
+            var page = await ado.Reader.PreviewAsync(new WorkItemPreviewRequest(null, skip, take), ct).ConfigureAwait(false);
+            return new DevAutopilot.Web.WorkItemPreviewPage(
+                [.. page.Items.Select(i => new DevAutopilot.Web.WorkItemPreview(i.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), i.Title, i.Type, i.State, i.AssignedTo, i.Url))],
+                page.Total, page.Skip, page.Take, page.HasMore, page.Truncated);
         }
         catch (AzureDevOpsSettingsException ex)
         {
             throw new ArgumentException(string.Join(" ", ex.Problems), ex);
+        }
+        catch (Exception ex) when (ex is AzureDevOpsException or AzureDevOpsAuthException)
+        {
+            throw new ArgumentException(ex.Message, ex);
         }
     }
 

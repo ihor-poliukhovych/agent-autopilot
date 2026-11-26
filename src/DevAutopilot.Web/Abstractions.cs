@@ -27,10 +27,16 @@ public interface ISetupChecker
     Task<AutopilotConfig> DetectDefaultsAsync(string repositoryFolder, string? baseBranch, CancellationToken ct);
 }
 
-/// <summary>Reads work items from Azure DevOps for the wizard's preview, from the settings of the draft.</summary>
+/// <summary>One work item of the preview, as the wizard shows it.</summary>
+public sealed record WorkItemPreview(string Id, string Title, string? Type, string? State, string? AssignedTo, string? Url);
+
+/// <summary>One page of the preview: the items, how many the query matches and whether there is a next page.</summary>
+public sealed record WorkItemPreviewPage(IReadOnlyList<WorkItemPreview> Items, int Total, int Skip, int Take, bool HasMore, bool Truncated);
+
+/// <summary>Reads work items from Azure DevOps for the wizard's preview, from the settings of the draft. Changes nothing.</summary>
 public interface IAzureDevOpsProbe
 {
-    Task<IReadOnlyList<WorkItem>> PreviewAsync(ModuleConfig module, string repositoryFolder, CancellationToken ct);
+    Task<WorkItemPreviewPage> PreviewAsync(ModuleConfig module, string repositoryFolder, int skip, int take, CancellationToken ct);
 }
 
 /// <summary>Builds the work item source of a project (the local tasks, the task files or a tracker).</summary>

@@ -145,9 +145,12 @@ public sealed class ProjectAndWizardTests
     {
         await using var ui = new UiFixture();
         var ado = new { organizationUrl = "https://dev.azure.com/acme", project = "Shop", repository = "shop", auth = "az" };
-        var (status, items) = await ui.PostAsync("/api/wizard/azure-devops/preview", ui.Draft("shop", "azure-devops", ado));
+        var (status, page) = await ui.PostAsync("/api/wizard/azure-devops/preview", new { draft = ui.Draft("shop", "azure-devops", ado), skip = 10 });
         Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Equal("Fix the login page", items[0].GetProperty("title").GetString());
+        Assert.Equal("Fix the login page", page.GetProperty("items")[0].GetProperty("title").GetString());
+        Assert.Equal(11, page.GetProperty("total").GetInt32());
+        Assert.True(page.GetProperty("hasMore").GetBoolean());
+        Assert.Equal(10, ui.Ado.SeenSkip);
         Assert.Equal("azure-devops", ui.Ado.Seen!.Type);
         Assert.Equal("Shop", ui.Ado.Seen.Settings["project"]);
     }

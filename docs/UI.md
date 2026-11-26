@@ -76,7 +76,7 @@ your draft, so nothing is saved until the end.
 | 1 Folder | repository folder, base branch, key | the folder exists and is a git repository root; the branch exists |
 | 2 Build and test | the two commands | both run on a clean copy of the base branch, like the gate does (this can take a while) |
 | 3 Paths | writable paths, risk paths, context documents | the writable paths exist |
-| 4 Task source | local tasks, or Azure DevOps | for Azure DevOps: the variable names, whether each variable is set on this computer (its value is never read into the page), the connection checks of `doctor`, and a preview of the work items the query returns |
+| 4 Task source | local tasks, or Azure DevOps | for Azure DevOps: the variable names, whether each variable is set on this computer (its value is never read into the page), the connection checks of `doctor`, and a paged preview of the work items the query returns |
 | 5 Agent | commit name and address, models, limits | the settings are valid |
 | 6 Summary | | every required check runs once more; *Create the project* is enabled only when none fails |
 
@@ -99,9 +99,9 @@ After setup the Settings page shows the same sections, each with its own *Check*
   project; the pool run is not a job, so *Stop* applies to jobs started with *Start*.
 - *Needs a person* can answer local tasks only. For Azure DevOps tasks, answer in the tracker.
 - The page does not refresh by itself except while a run is active.
-- The Azure DevOps step uses the existing module (`doctor` checks and the work item query). The
-  write-back checks of the Azure DevOps module arrive with that module and are listed by the same
-  *Check* button.
+- The Azure DevOps step shows what `doctor` and `autopilot ado check` report (sign-in, query, work
+  item read and write, branch rights, branch policy) and the same paged preview as
+  `autopilot ado preview`. The preview and the checks change nothing in Azure DevOps.
 
 ## For developers
 
