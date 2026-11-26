@@ -20,7 +20,7 @@ public sealed class AzureDevOpsWorkItemSource(AzureDevOpsClient client, AzureDev
 
     public async Task<IReadOnlyList<WorkItem>> ListOpenAsync(CancellationToken ct)
     {
-        var ids = await client.QueryWorkItemIdsAsync(settings.Query, AzureDevOpsClient.DefaultTop, ct).ConfigureAwait(false);
+        var ids = await client.QueryWorkItemIdsAsync(settings.Query, settings.MaxItems, ct).ConfigureAwait(false);
         if (ids.Count == 0)
         {
             return [];
@@ -56,17 +56,7 @@ public sealed class AzureDevOpsWorkItemSource(AzureDevOpsClient client, AzureDev
             throw new ArgumentException($"\"{id}\" is not an Azure DevOps work item number.", nameof(id));
         }
 
-        var item = await GetRawAsync(number, ct).ConfigureAwait(false)
-            ?? throw new AzureDevOpsException($"Work item {number} was not found in project \"{settings.Project}\".", HttpStatusCode.NotFound);
-
-        var current = item.GetString(WorkItemFields.Tags);
-        var updated = ReplaceTriageTag(current, settings.TagPrefix, result.Label);
-        if (!string.Equals(NormalizeTags(current), updated, StringComparison.Ordinal))
-        {
-            await client.UpdateTagsAsync(number, item.Rev, updated, ct).ConfigureAwait(false);
-        }
-
-        await client.AddCommentAsync(number, TriageComment(result), ct).ConfigureAwait(false);
+        await new AzureDevOpsWriteback(client, settings).RecordTriageAsync(number, result, ct).ConfigureAwait(false);
     }
 
     public static WorkItem ToWorkItem(AdoWorkItem item, AzureDevOpsSettings? settings = null)
@@ -89,10 +79,13 @@ public sealed class AzureDevOpsWorkItemSource(AzureDevOpsClient client, AzureDev
             item.GetString(WorkItemFields.Title) ?? $"Work item {item.Id}",
             body.ToString(),
             SplitTags(item.GetString(WorkItemFields.Tags)),
-            settings is null ? null : $"{settings.OrganizationUrl.AbsoluteUri.TrimEnd('/')}/{Uri.EscapeDataString(settings.Project)}/_workitems/edit/{item.Id}",
+            settings is null ? null : WebUrl(settings, item.Id),
             item.GetString(WorkItemFields.State),
             item.GetIdentityName(WorkItemFields.AssignedTo));
     }
+
+    public static string WebUrl(AzureDevOpsSettings settings, int id) =>
+        $"{settings.OrganizationUrl.AbsoluteUri.TrimEnd('/')}/{Uri.EscapeDataString(settings.Project)}/_workitems/edit/{id.ToString(CultureInfo.InvariantCulture)}";
 
     public static IReadOnlyList<string> SplitTags(string? tags) =>
         string.IsNullOrWhiteSpace(tags)

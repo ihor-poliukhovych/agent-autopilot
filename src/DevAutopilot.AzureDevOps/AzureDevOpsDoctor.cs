@@ -73,7 +73,7 @@ public sealed class AzureDevOpsDoctor(AzureDevOpsClient client, AzureDevOpsSetti
         // 3. Query
         try
         {
-            var ids = await client.QueryWorkItemIdsAsync(settings.Query, AzureDevOpsClient.DefaultTop, ct).ConfigureAwait(false);
+            var ids = await client.QueryWorkItemIdsAsync(settings.Query, settings.MaxItems, ct).ConfigureAwait(false);
             var selection = settings.UsesDefaultQuery
                 ? $"default query, tag \"{AzureDevOpsSettings.DefaultQueryTag}\""
                 : "custom query";

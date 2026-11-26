@@ -31,6 +31,7 @@ public class AzureDevOpsWorkItemSourceTests
         .On(HttpMethod.Post, $"{Ado.Org}/Shop/_apis/wit/wiql", Ado.WiqlJson(42))
         .On(HttpMethod.Post, $"{Ado.Org}/Shop/_apis/wit/workitemsbatch", BatchJson)
         .On(HttpMethod.Patch, $"{Ado.Org}/Shop/_apis/wit/workitems/42", "{\"id\":42,\"rev\":6,\"fields\":{}}")
+        .On(HttpMethod.Get, $"{Ado.Org}/Shop/_apis/wit/workItems/42/comments", "{\"count\":0,\"comments\":[]}")
         .On(HttpMethod.Post, $"{Ado.Org}/Shop/_apis/wit/workItems/42/comments", "{\"workItemId\":42,\"id\":1,\"version\":1,\"text\":\"x\"}");
 
     [Fact]
@@ -96,7 +97,7 @@ public class AzureDevOpsWorkItemSourceTests
         Assert.Equal(5, ops[0].GetProperty("value").GetInt32());
         Assert.Equal("dev-autopilot; backend; autopilot:agent-ready", ops[1].GetProperty("value").GetString());
 
-        var comment = Assert.Single(handler.Requests, r => r.Uri.AbsolutePath.EndsWith("/comments", StringComparison.Ordinal));
+        var comment = Assert.Single(handler.Requests, r => r.Method == HttpMethod.Post && r.Uri.AbsolutePath.EndsWith("/comments", StringComparison.Ordinal));
         var text = JsonDocument.Parse(comment.Body).RootElement.GetProperty("text").GetString()!;
         Assert.Contains("Written by Dev Autopilot", text, StringComparison.Ordinal);
         Assert.Contains("agent-ready", text, StringComparison.Ordinal);
@@ -115,7 +116,7 @@ public class AzureDevOpsWorkItemSourceTests
         await source.RecordTriageAsync("42", new TriageResult(TriageLabel.NeedsHuman, "Needs a product decision.", [], RiskLevel.Medium), default);
 
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch);
-        var comment = Assert.Single(handler.Requests, r => r.Uri.AbsolutePath.EndsWith("/comments", StringComparison.Ordinal));
+        var comment = Assert.Single(handler.Requests, r => r.Method == HttpMethod.Post && r.Uri.AbsolutePath.EndsWith("/comments", StringComparison.Ordinal));
         Assert.Contains("needs-human", comment.Body, StringComparison.Ordinal);
         Assert.Contains("(none)", comment.Body, StringComparison.Ordinal);
     }

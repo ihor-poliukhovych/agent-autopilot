@@ -459,6 +459,26 @@ public static partial class DoctorCommand
                 $"{Name}: {c.Name}",
                 c.Detail,
                 c.Fix)));
+
+            // Work item access is checked by the connection checker (the write check saves nothing).
+            if (checks.Where(c => c.Name is "Azure DevOps token" or "Azure DevOps project").All(c => c.Status == AzureDevOpsCheckStatus.Ok))
+            {
+                foreach (var access in new[] { await ado.Checks.CheckWorkItemReadAsync(ct).ConfigureAwait(false), await ado.Checks.CheckWorkItemWriteAsync(ct).ConfigureAwait(false) })
+                {
+                    results.Add(new CheckResult(
+                        access.Outcome switch
+                        {
+                            CheckOutcome.Ok => CheckStatus.Ok,
+                            CheckOutcome.Warn => CheckStatus.Warn,
+                            CheckOutcome.Fail => CheckStatus.Fail,
+                            _ => CheckStatus.Skip,
+                        },
+                        $"{Name}: {access.Title.ToLowerInvariant()}",
+                        access.Message,
+                        access.Fix));
+                }
+            }
+
             return results;
         }
         catch (AzureDevOpsSettingsException ex)

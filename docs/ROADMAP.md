@@ -19,6 +19,12 @@ Ideas that are planned but not built. Order may change.
    `auth: "service-principal"`; `ProjectSettingsService` for settings and context files.
    Left over for the UI step: calling these services from the web UI, and the behaviour
    behind `autoQueue` and `trust` (they are only read and checked now).
+1b. **Azure DevOps complete.** *(Done, see D-015.)* Query preview with paging, item detail with
+   comments and links, idempotent write-back (tags, comments, `stateMap`, assignee, link to the
+   pull request), draft pull request reuse and description update, connection checks with fix
+   hints (`autopilot ado preview|check`, also in `doctor`). Left over: the `IWorkItemTracker` adapter over
+   these services (mapping in docs/AZURE-DEVOPS.md); a UI wizard that calls the checks.
+
 2. **Local web UI** (`autopilot ui`, 127.0.0.1 only, one-time key in the URL):
    tasks (triage, Start, add to pool), pool (order, run now, run at night with
    confirmation), runs (live step, history, gate report, diff), project settings (who

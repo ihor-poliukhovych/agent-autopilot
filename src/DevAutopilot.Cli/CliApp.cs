@@ -50,6 +50,7 @@ public static class CliApp
         root.Subcommands.Add(PipelineCommands.CreateRun(projectOption, context));
         root.Subcommands.Add(EvalCommand.Create(projectOption, context));
         root.Subcommands.Add(ProjectCommand.Create(projectOption, context));
+        root.Subcommands.Add(AzureDevOpsCommand.Create(projectOption, context));
         root.Subcommands.Add(TaskCommand.Create(projectOption, context));
         foreach (var backend in BackendCommands.Create(projectOption, context))
         {

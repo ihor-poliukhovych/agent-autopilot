@@ -63,6 +63,20 @@ public sealed class BackendCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task Ado_commands_explain_when_the_project_does_not_use_azure_devops()
+    {
+        using var repo = await AddProjectAsync();
+
+        var preview = await RunAsync("ado", "preview", "--project", "demo");
+        var check = await RunAsync("ado", "check", "--project", "demo");
+
+        Assert.Equal(1, preview.Exit);
+        Assert.Contains("does not use Azure DevOps", preview.Err);
+        Assert.Equal(1, check.Exit);
+        Assert.Contains("ado", (await RunAsync("--help")).Out);
+    }
+
+    [Fact]
     public async Task Pool_needs_a_registered_project()
     {
         using var repo = await TestRepo.CreateAsync(new Dictionary<string, string> { ["a.cs"] = "x" });

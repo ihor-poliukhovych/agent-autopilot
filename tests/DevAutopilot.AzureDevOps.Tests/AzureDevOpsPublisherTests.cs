@@ -8,6 +8,7 @@ public class AzureDevOpsPublisherTests
 {
     private static FakeHandler Handler(HttpStatusCode prStatus = HttpStatusCode.Created, string? prJson = null) => new FakeHandler()
         .On(HttpMethod.Get, $"{Ado.Org}/Shop/_apis/git/repositories/shop-api", Ado.RepositoryJson)
+        .On(HttpMethod.Get, $"{Ado.Org}/Shop/_apis/git/repositories/{Ado.RepoId}/pullrequests", "{\"count\":0,\"value\":[]}")
         .On(HttpMethod.Post, $"{Ado.Org}/Shop/_apis/git/repositories/{Ado.RepoId}/pullrequests", prJson ?? AzureDevOpsClientTests.PullRequestJson, prStatus);
 
     private static AzureDevOpsPublisher Publisher(FakeHandler handler, RecordingPusher pusher) =>
