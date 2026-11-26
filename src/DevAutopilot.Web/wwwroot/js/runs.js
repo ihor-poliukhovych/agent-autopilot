@@ -114,7 +114,7 @@ async function show(holder, key, id) {
 
 function gateCard(detail) {
   const g = detail.gate;
-  if (!g) return h('section', { class: 'card' }, h('h2', {}, 'Gate report'), h('p', { class: 'muted' }, 'This run has no gate report (it did not reach the gate).'));
+  if (!g) return h('section', { class: 'card' }, h('h2', {}, 'Gate report'), h('p', { class: 'muted' }, detail.run.gateVerdict ? `The gate said ${detail.run.gateVerdict}; the detailed report is not stored for this run.` : 'This run has no gate report (it did not reach the gate).'));
   const yes = v => v ? badge('yes', 'ok') : badge('no', 'bad');
   return h('section', { class: 'card stack' }, h('h2', {}, 'Gate report'),
     h('div', { class: 'row' }, badge(`outcome: ${g.outcome}`, String(g.outcome).toLowerCase().includes('pass') ? 'ok' : 'bad'), g.highRisk ? badge('high risk: needs a person', 'warn') : null),
