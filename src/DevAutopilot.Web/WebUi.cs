@@ -8,7 +8,6 @@ using DevAutopilot.Core.Pool;
 using DevAutopilot.Core.Settings;
 using DevAutopilot.Core.Workspace;
 using Microsoft.AspNetCore.Http.Json;
-using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
 
 namespace DevAutopilot.Web;
@@ -51,9 +50,7 @@ public static class WebUi
         var app = builder.Build();
         guard.Use(app);
         app.Use(ErrorsToJson);
-        var files = new ManifestEmbeddedFileProvider(typeof(WebUi).Assembly, "wwwroot");
-        app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = files });
-        app.UseStaticFiles(new StaticFileOptions { FileProvider = files });
+        EmbeddedSite.Use(app);
         Endpoints.Map(app);
         return app;
     }
