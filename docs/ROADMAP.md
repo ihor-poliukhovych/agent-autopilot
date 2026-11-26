@@ -32,8 +32,7 @@ Ideas that are planned but not built. Order may change.
    gate report, diff, how often a person agreed with the gate), questions that need a person, and
    settings (trust, identity, models, limits, paths, context documents). Left over: the behaviour
    behind `trust` and `autoQueue`, stopping a pool run as a whole, answering needs-human questions
-   of tracker tasks, and wiring the Azure DevOps write-back checks into the wizard once that module
-   is merged.
+   of tracker tasks.
 3. **Verify and publish:** VERIFY.md (secret scan, forbidden words over files and history,
    licences, fresh clone and install by GETTING-STARTED), private GitHub repository,
    owner review, then public.
