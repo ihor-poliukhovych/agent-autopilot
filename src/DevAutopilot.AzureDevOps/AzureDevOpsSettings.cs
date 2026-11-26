@@ -10,6 +10,9 @@ public enum AzureDevOpsAuth
 
     /// <summary>An access token from the Azure CLI (<c>az account get-access-token</c>).</summary>
     AzureCli,
+
+    /// <summary>A Microsoft Entra service principal (client credentials); tenant, client id and secret come from environment variables.</summary>
+    ServicePrincipal,
 }
 
 /// <summary>Where triage results go when the work items come from Azure DevOps.</summary>
@@ -32,6 +35,9 @@ public sealed record AzureDevOpsSettings
     public const string DefaultRemote = "origin";
     public const string DefaultTagPrefix = "autopilot:";
     public const string RequiredTokenVariablePrefix = "AUTOPILOT_";
+    public const string DefaultTenantVariable = "AUTOPILOT_ADO_TENANT_ID";
+    public const string DefaultClientIdVariable = "AUTOPILOT_ADO_CLIENT_ID";
+    public const string DefaultClientSecretVariable = "AUTOPILOT_ADO_CLIENT_SECRET";
 
     /// <summary>The tag a person adds to a work item so that the default query picks it up.</summary>
     public const string DefaultQueryTag = "dev-autopilot";
@@ -62,6 +68,13 @@ public sealed record AzureDevOpsSettings
     public AzureDevOpsAuth Auth { get; init; } = AzureDevOpsAuth.Pat;
 
     public string TokenVariable { get; init; } = DefaultTokenVariable;
+
+    /// <summary>For <see cref="AzureDevOpsAuth.ServicePrincipal"/>: names of the variables, never their values.</summary>
+    public string TenantVariable { get; init; } = DefaultTenantVariable;
+
+    public string ClientIdVariable { get; init; } = DefaultClientIdVariable;
+
+    public string ClientSecretVariable { get; init; } = DefaultClientSecretVariable;
 
     /// <summary>
     /// <c>remote</c> (default): triage writes a tag and a comment on the work item. <c>local</c>: triage
@@ -130,8 +143,11 @@ public sealed record AzureDevOpsSettings
             case "az":
                 auth = AzureDevOpsAuth.AzureCli;
                 break;
+            case "service-principal":
+                auth = AzureDevOpsAuth.ServicePrincipal;
+                break;
             default:
-                problems.Add($"\"auth\" must be \"pat\" (token from a user environment variable) or \"az\" (Azure CLI sign-in); got \"{Get("auth")}\".");
+                problems.Add($"\"auth\" must be \"pat\" (token from a user environment variable), \"az\" (Azure CLI sign-in) or \"service-principal\" (Entra client credentials); got \"{Get("auth")}\".");
                 break;
         }
 
@@ -142,6 +158,23 @@ public sealed record AzureDevOpsSettings
         {
             problems.Add($"\"tokenVariable\" must be an environment variable name that starts with {RequiredTokenVariablePrefix} and has only letters, digits and '_', for example \"{DefaultTokenVariable}\"; got \"{tokenVariable}\".");
         }
+
+        string VariableName(string key, string fallback)
+        {
+            var name = Get(key) ?? fallback;
+            if (!name.StartsWith(RequiredTokenVariablePrefix, StringComparison.Ordinal)
+                || name.Length == RequiredTokenVariablePrefix.Length
+                || !name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
+            {
+                problems.Add($"\"{key}\" must be an environment variable name that starts with {RequiredTokenVariablePrefix} and has only letters, digits and '_', for example \"{fallback}\"; got \"{name}\". Put the name here, never the value.");
+            }
+
+            return name;
+        }
+
+        var tenantVariable = VariableName("tenantVariable", DefaultTenantVariable);
+        var clientIdVariable = VariableName("clientIdVariable", DefaultClientIdVariable);
+        var clientSecretVariable = VariableName("clientSecretVariable", DefaultClientSecretVariable);
 
         var remote = Get("remote") ?? DefaultRemote;
         if (remote.StartsWith('-') || !remote.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.'))
@@ -184,6 +217,9 @@ public sealed record AzureDevOpsSettings
             TagPrefix = tagPrefix,
             Auth = auth,
             TokenVariable = tokenVariable,
+            TenantVariable = tenantVariable,
+            ClientIdVariable = clientIdVariable,
+            ClientSecretVariable = clientSecretVariable,
             RecordTriage = recordTriage,
         };
     }

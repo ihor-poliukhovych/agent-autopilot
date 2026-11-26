@@ -87,13 +87,17 @@ public sealed class AzureDevOpsModule : IDisposable
         options ??= new AzureDevOpsModuleOptions();
 
         var settings = AzureDevOpsSettings.FromModule(module, requireRepository);
-        IAzureDevOpsTokenProvider tokens = options.Tokens ?? (settings.Auth == AzureDevOpsAuth.AzureCli
-            ? new AzureCliTokenProvider()
-            : new EnvironmentTokenProvider(settings.TokenVariable, options.EnvironmentLookup));
-
         var http = options.Handler is null
             ? new HttpClient()
             : new HttpClient(options.Handler, disposeHandler: false);
+        IAzureDevOpsTokenProvider tokens = options.Tokens ?? settings.Auth switch
+        {
+            AzureDevOpsAuth.AzureCli => new AzureCliTokenProvider(),
+            AzureDevOpsAuth.ServicePrincipal => new ServicePrincipalTokenProvider(
+                http, settings.TenantVariable, settings.ClientIdVariable, settings.ClientSecretVariable, options.EnvironmentLookup),
+            _ => new EnvironmentTokenProvider(settings.TokenVariable, options.EnvironmentLookup),
+        };
+
         http.Timeout = TimeSpan.FromSeconds(100);
         var client = new AzureDevOpsClient(http, settings.OrganizationUrl, settings.Project, tokens, options.Delay);
         return new AzureDevOpsModule(http, client, settings, Path.GetFullPath(projectRoot), baseBranch, branchPrefix, options.Pusher);

@@ -46,11 +46,44 @@ public sealed record AutopilotConfig
     /// </summary>
     public IReadOnlyList<string> Context { get; init; } = [];
 
+    /// <summary>Who merges. Only "human" exists: the agent never merges.</summary>
+    public MergeConfig Merge { get; init; } = new();
+
+    /// <summary>Whether triaged items may join the pool by themselves (the behaviour comes later; the setting is read and checked now).</summary>
+    public AutoQueueConfig AutoQueue { get; init; } = new();
+
+    /// <summary>How much of the gate's verdict to trust: "ask", "safe" or "high" (read and checked now; behaviour comes later).</summary>
+    public string Trust { get; init; } = TrustLevels.Ask;
+
     public GateConfig Gate { get; init; } = new();
 
     public RolesConfig Roles { get; init; } = new();
 
     public ModulesConfig Modules { get; init; } = new();
+}
+
+public sealed record MergeConfig
+{
+    public const string Human = "human";
+
+    public string By { get; init; } = Human;
+}
+
+public sealed record AutoQueueConfig
+{
+    public bool Enabled { get; init; }
+
+    /// <summary>The highest triage risk that may join the pool by itself.</summary>
+    public RiskLevel MaxRisk { get; init; } = RiskLevel.Low;
+}
+
+public static class TrustLevels
+{
+    public const string Ask = "ask";
+    public const string Safe = "safe";
+    public const string High = "high";
+
+    public static IReadOnlyList<string> All { get; } = [Ask, Safe, High];
 }
 
 public sealed record CommandsConfig

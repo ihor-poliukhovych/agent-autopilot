@@ -87,3 +87,29 @@ Removing a project only unlinks it; its data is deleted only with `--delete-data
 `--project` takes a registered key first and otherwise a repository folder, so the
 repository-local `.autopilot/` flow keeps working unchanged. Rejected: files only (no
 way to list or query projects), and a database per project (harder to list and move).
+
+
+## D-013 Pool, jobs, runs and schedule live in the workspace database (accepted, 2026-11-26)
+
+The task pool, background jobs, run history, the per-project run lock and the night schedule
+are tables in `autopilot.db` (migration 002), not json files next to the project. The
+logic is in services in `DevAutopilot.Core` (`PoolService`, `PoolRunner`, `JobService`,
+`RunStore`, `ScheduleService`, `ProjectSettingsService`, `WorkItemListService`); the CLI only
+parses arguments and prints, so the web UI calls the same services.
+
+- One run per project: a lock row with the process id; a row whose process is gone is stale
+  and is taken over. Pool runs, direct `implement` and jobs all take it.
+- A job is one detached process with a row (status, current step, times) and `log.txt`.
+  Cancel kills that process tree only and frees the lock it held.
+- A pool run stops on infrastructure errors (signed out, usage limit, program missing), because
+  every later item would fail the same way. Other failures are reported and the run goes on.
+- Every run stores the gate verdict ("would have merged") and, once a person records it
+  (`decide`), what they did. `stats` counts agreement; trust levels will use it later.
+- The schedule uses Task Scheduler (`schtasks`, current user, no administrator rights) or one
+  marked crontab line, behind `IScheduler`. Without `--yes` only the plan is printed.
+- `merge.by` accepts only `human`. `autoQueue` and `trust` are parsed and validated, with no
+  behaviour yet. Azure DevOps `auth: "service-principal"` takes tenant, client id and secret
+  from variables named in the settings; values are never stored.
+
+Rejected: a `pool.json` file (no safe concurrent writes, no query), and a job queue daemon
+(one detached process per job is enough for a local tool).

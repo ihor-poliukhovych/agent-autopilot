@@ -7,7 +7,14 @@ namespace DevAutopilot.Cli;
 /// Which project a command works on. <see cref="RepoRoot"/> is the git repository; <see cref="DataFolder"/> is the
 /// workspace folder of the project's settings, tasks and out/, or null for the repository-local <c>.autopilot/</c>.
 /// </summary>
-public sealed record ProjectTarget(string RepoRoot, string? DataFolder, ProjectRecord? Project = null);
+public sealed record ProjectTarget(string RepoRoot, string? DataFolder, ProjectRecord? Project = null, DevAutopilot.Core.Workspace.Workspace? Workspace = null)
+{
+    /// <summary>Pool, jobs, runs and schedules are kept per registered project; a repository-local folder has none.</summary>
+    public (ProjectRecord Project, DevAutopilot.Core.Workspace.Workspace Workspace) RequireRegistered() =>
+        Project is not null && Workspace is not null
+            ? (Project, Workspace)
+            : throw new UsageException("This command needs a registered project. Run 'autopilot project add <key> --repo <folder>' (or 'project import-local'), then pass --project <key>.");
+}
 
 /// <summary>The global <c>--project</c> and <c>--workspace</c> options.</summary>
 public sealed class ProjectOptions
@@ -57,7 +64,7 @@ public sealed class ProjectOptions
                     throw new UsageException($"The repository folder of project \"{value}\" no longer exists: {record.RepositoryFolder}");
                 }
 
-                return new ProjectTarget(record.RepositoryFolder, workspace.ProjectFolder(record.Key), record);
+                return new ProjectTarget(record.RepositoryFolder, workspace.ProjectFolder(record.Key), record, workspace);
             }
 
             if (!Directory.Exists(value))

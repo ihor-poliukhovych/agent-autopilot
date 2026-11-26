@@ -50,6 +50,11 @@ public static class CliApp
         root.Subcommands.Add(PipelineCommands.CreateRun(projectOption, context));
         root.Subcommands.Add(EvalCommand.Create(projectOption, context));
         root.Subcommands.Add(ProjectCommand.Create(projectOption, context));
+        foreach (var backend in BackendCommands.Create(projectOption, context))
+        {
+            root.Subcommands.Add(backend);
+        }
+
         root.Subcommands.Add(HookCommand.Create(context));
         root.Subcommands.Add(McpCommand.Create(projectOption, context));
 

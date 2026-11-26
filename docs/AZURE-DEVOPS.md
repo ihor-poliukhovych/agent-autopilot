@@ -100,6 +100,22 @@ Dev Autopilot then runs
 `az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv`
 for each command and sends the result as a Bearer token.
 
+### Option C: service principal (client credentials)
+
+For a machine that runs unattended, register an application (service principal) in
+Microsoft Entra ID, add it to the Azure DevOps organisation as the agent identity, and set
+`"auth": "service-principal"`. Dev Autopilot asks Entra for a token with the client
+credentials flow, scope `499b84ac-1321-427f-aa17-267ca6975798/.default`. The settings hold
+only the **names** of three user environment variables, never their values:
+
+| Setting | Default name | Holds |
+|---|---|---|
+| `tenantVariable` | `AUTOPILOT_ADO_TENANT_ID` | Tenant id or domain |
+| `clientIdVariable` | `AUTOPILOT_ADO_CLIENT_ID` | Application (client) id |
+| `clientSecretVariable` | `AUTOPILOT_ADO_CLIENT_SECRET` | Client secret |
+
+Every name must start with `AUTOPILOT_`.
+
 ## 5. Settings in `.autopilot/autopilot.json`
 
 The work item source and the publisher read the same settings block. Copy it into both:
@@ -138,7 +154,7 @@ The work item source and the publisher read the same settings block. Copy it int
 | `query` | no | see below | WIQL query that lists the items the agent may look at |
 | `tagPrefix` | no | `autopilot:` | Prefix of the triage tag |
 | `recordTriage` | no | `remote` | `remote`: triage writes a tag and a comment on the work item. `local`: results stay in `.autopilot/out/triage/` and nothing is written to Azure DevOps (read-only) |
-| `auth` | no | `pat` | `pat` (environment variable) or `az` (Azure CLI) |
+| `auth` | no | `pat` | `pat` (environment variable), `az` (Azure CLI) or `service-principal` (Entra client credentials, see option C) |
 | `tokenVariable` | no | `AUTOPILOT_ADO_PAT` | Name of the environment variable; must start with `AUTOPILOT_` |
 
 Default query: open items of the project (state not Closed, Done or Removed) that have

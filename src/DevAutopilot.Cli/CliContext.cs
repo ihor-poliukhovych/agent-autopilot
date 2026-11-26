@@ -2,6 +2,8 @@ using DevAutopilot.Core;
 using DevAutopilot.Core.Config;
 using DevAutopilot.Core.Facts;
 using DevAutopilot.Core.Gate;
+using DevAutopilot.Core.Jobs;
+using DevAutopilot.Core.Scheduling;
 
 namespace DevAutopilot.Cli;
 
@@ -19,6 +21,21 @@ public sealed record CliContext(TextReader In, TextWriter Out, TextWriter Error)
 
     /// <summary>Folder for worktrees. Null means the per-user default outside the project.</summary>
     public string? WorktreeRoot { get; init; }
+
+    /// <summary>The operating system's scheduler for <c>schedule</c>. Null means Task Scheduler on Windows, crontab elsewhere.</summary>
+    public IScheduler? Scheduler { get; init; }
+
+    /// <summary>Starts detached jobs. Null means a real detached process.</summary>
+    public IJobLauncher? JobLauncher { get; init; }
+
+    /// <summary>Stops a job's process. Null means a real process-tree kill.</summary>
+    public IProcessKiller? ProcessKiller { get; init; }
+
+    /// <summary>Tells whether a process id is alive (stale locks, dead jobs). Null means ask the operating system.</summary>
+    public Func<int, bool>? IsProcessAlive { get; init; }
+
+    /// <summary>The program that scheduled and detached runs start, as file and leading arguments. Null means this program.</summary>
+    public (string File, IReadOnlyList<string> Arguments)? Program { get; init; }
 
     /// <summary>False skips the dotnet, git and claude version checks in doctor (tests never start claude).</summary>
     public bool DoctorChecksTools { get; init; } = true;

@@ -174,3 +174,90 @@ public sealed class AzureCliTokenProvider : IAzureDevOpsTokenProvider
             new Dictionary<string, string?> { ["AZURE_CORE_ONLY_SHOW_ERRORS"] = "true" },
             ct);
 }
+
+/// <summary>
+/// Gets a Microsoft Entra access token for Azure DevOps with the client credentials flow of a service
+/// principal. Tenant id, client id and client secret are read from environment variables whose names the
+/// settings give; the values are never stored, logged or put in a message.
+/// </summary>
+public sealed class ServicePrincipalTokenProvider : IAzureDevOpsTokenProvider
+{
+    private readonly HttpClient _http;
+    private readonly string _tenantVariable;
+    private readonly string _clientIdVariable;
+    private readonly string _clientSecretVariable;
+    private readonly Func<string, string?> _lookup;
+
+    public ServicePrincipalTokenProvider(
+        HttpClient http, string tenantVariable, string clientIdVariable, string clientSecretVariable, Func<string, string?>? lookup = null)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        _http = http;
+        _tenantVariable = tenantVariable;
+        _clientIdVariable = clientIdVariable;
+        _clientSecretVariable = clientSecretVariable;
+        _lookup = lookup ?? DefaultLookup;
+    }
+
+    public async Task<AzureDevOpsCredential> GetCredentialAsync(CancellationToken ct)
+    {
+        var tenant = Require(_tenantVariable);
+        var clientId = Require(_clientIdVariable);
+        var secret = Require(_clientSecretVariable);
+        if (tenant.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '.')))
+        {
+            throw new AzureDevOpsAuthException($"The value of {_tenantVariable} is not a tenant id or domain name.");
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token")
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "client_credentials",
+                ["client_id"] = clientId,
+                ["client_secret"] = secret,
+                ["scope"] = AzureCliTokenProvider.AzureDevOpsResource + "/.default",
+            }),
+        };
+        using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            // The answer's error text can name the application; the secret is never part of it.
+            throw new AzureDevOpsAuthException(
+                $"Microsoft Entra refused the service principal (HTTP {(int)response.StatusCode}). Check the tenant id, client id and secret in {_tenantVariable}, {_clientIdVariable} and {_clientSecretVariable}, and that the secret has not expired.");
+        }
+
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(body);
+            var token = document.RootElement.TryGetProperty("access_token", out var value) ? value.GetString() : null;
+            return AzureDevOpsCredential.FromBearer(token ?? throw new AzureDevOpsAuthException("Microsoft Entra answered without an access token."));
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            throw new AzureDevOpsAuthException("Microsoft Entra answered with something that is not a token response.");
+        }
+    }
+
+    public string Describe() => $"service principal (variables {_tenantVariable}, {_clientIdVariable}, {_clientSecretVariable})";
+
+    private string Require(string variable)
+    {
+        var value = _lookup(variable);
+        return string.IsNullOrWhiteSpace(value)
+            ? throw new AzureDevOpsAuthException($"The environment variable {variable} is not set. The service principal needs {_tenantVariable}, {_clientIdVariable} and {_clientSecretVariable}; set them as user environment variables and open a new terminal.")
+            : value.Trim();
+    }
+
+    private static string? DefaultLookup(string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(value) && OperatingSystem.IsWindows())
+        {
+            value = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User);
+        }
+
+        return value;
+    }
+}
