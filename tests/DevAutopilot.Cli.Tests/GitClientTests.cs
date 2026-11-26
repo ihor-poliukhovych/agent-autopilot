@@ -132,6 +132,28 @@ public sealed class GitClientTests
     }
 
     [Fact]
+    public async Task Worktree_checks_out_files_whose_full_path_is_longer_than_260_characters()
+    {
+        var deep = string.Join('/', Enumerable.Repeat("a-rather-long-folder-name", 9));
+        using var repo = await TestRepo.CreateAsync(new Dictionary<string, string>
+        {
+            [$"{deep}/File.cs"] = "x\n",
+        });
+        await repo.GitAsync("config", "--unset", "core.longpaths");
+        var path = Path.Combine(repo.WorktreeRoot, "long");
+
+        await repo.Git.AddDetachedWorktreeAsync(path, await repo.Git.GetCommitAsync("main"));
+        try
+        {
+            Assert.True(File.Exists(Path.GetFullPath(Path.Combine(path, deep.Replace('/', Path.DirectorySeparatorChar), "File.cs"))));
+        }
+        finally
+        {
+            await repo.Git.RemoveWorktreeAsync(path);
+        }
+    }
+
+    [Fact]
     public async Task Worktree_can_start_from_a_remote_only_base_branch()
     {
         using var repo = await TestRepo.CreateAsync();

@@ -168,14 +168,14 @@ public sealed class GitClient
     public async Task AddWorktreeAsync(string path, string newBranch, string baseRevision, CancellationToken ct = default)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        await RunCheckedAsync(RepositoryPath, ["worktree", "add", "-b", newBranch, path, baseRevision], ct).ConfigureAwait(false);
+        await RunCheckedAsync(RepositoryPath, ["-c", "core.longpaths=true", "worktree", "add", "-b", newBranch, path, baseRevision], ct).ConfigureAwait(false);
     }
 
     /// <summary>Checks out a commit into a new worktree without creating a branch.</summary>
     public async Task AddDetachedWorktreeAsync(string path, string revision, CancellationToken ct = default)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        await RunCheckedAsync(RepositoryPath, ["worktree", "add", "--detach", path, revision], ct).ConfigureAwait(false);
+        await RunCheckedAsync(RepositoryPath, ["-c", "core.longpaths=true", "worktree", "add", "--detach", path, revision], ct).ConfigureAwait(false);
     }
 
     /// <summary>Removes a worktree (even with local changes), deletes its folder and prunes git's records.</summary>
