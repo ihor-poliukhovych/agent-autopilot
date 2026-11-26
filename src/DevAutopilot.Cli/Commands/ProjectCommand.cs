@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Text.Json;
+using DevAutopilot.Core.Analysis;
 using DevAutopilot.Core.Config;
 using DevAutopilot.Core.Local;
 using DevAutopilot.Core.Workspace;
@@ -16,6 +17,7 @@ public static class ProjectCommand
         var command = new Command("project", "Register projects in the workspace. Settings, tasks and run output live there, never in the repository.")
         {
             CreateAdd(options, context),
+            CreateAnalyze(context),
             CreateList(options, context),
             CreateShow(options, context),
             CreateRemove(options, context),
@@ -32,22 +34,36 @@ public static class ProjectCommand
         var baseBranch = new Option<string?>("--base-branch") { Description = "Branch agent work starts from. Default: main, else master, else the current branch." };
         var source = new Option<string>("--source") { Description = "Where tasks come from: 'local' (files in the workspace) or 'azure-devops'.", DefaultValueFactory = _ => ProjectRegistry.LocalSource };
         source.AcceptOnlyFromAmong(ProjectRegistry.LocalSource, ProjectRegistry.AzureDevOpsSource);
-        var command = new Command("add", "Register a project and create its folder in the workspace. Nothing is written to the repository.") { key, repo, name, baseBranch, source };
+        var detect = new Option<bool>("--detect") { Description = "Analyze the folder and use what it finds: base branch, build and test commands, paths, context documents and, for an Azure DevOps remote, the task source. Prints what was chosen and why. --name, --base-branch and --source still win." };
+        var command = new Command("add", "Register a project and create its folder in the workspace. Nothing is written to the repository.") { key, repo, name, baseBranch, source, detect };
         command.SetAction(async (parse, ct) =>
         {
             var registry = new ProjectRegistry(options.OpenWorkspace(parse));
             var repoFolder = Path.GetFullPath(parse.GetValue(repo) ?? Directory.GetCurrentDirectory());
-            var taskSource = parse.GetValue(source)!;
+            var detected = parse.GetValue(detect) ? await Analyze(repoFolder, ct).ConfigureAwait(false) : null;
+            repoFolder = detected?.Folder ?? repoFolder;
+            var sourceGiven = parse.GetResult(source) is { Implicit: false };
+            var taskSource = sourceGiven || detected is null ? parse.GetValue(source)! : detected.TaskSource.Value;
             var branch = parse.GetValue(baseBranch)?.Trim();
             var projectKey = parse.GetRequiredValue(key);
-            var first = registry.Validate(new NewProject(projectKey, repoFolder, BaseBranch: branch ?? "main", TaskSource: taskSource));
+            var first = registry.Validate(new NewProject(projectKey, repoFolder, BaseBranch: branch ?? detected?.BaseBranch.Value ?? "main", TaskSource: taskSource));
             if (first.Count > 0)
             {
                 throw new UsageException(string.Join(Environment.NewLine, first));
             }
 
-            var config = await InitCommand.BuildDefaultsAsync(repoFolder, ct, branch).ConfigureAwait(false);
-            if (taskSource == ProjectRegistry.AzureDevOpsSource)
+            AutopilotConfig config;
+            if (detected is not null)
+            {
+                config = AnalysisApplier.ToConfig(detected);
+                config = branch is null ? config : config with { BaseBranch = branch };
+            }
+            else
+            {
+                config = await InitCommand.BuildDefaultsAsync(repoFolder, ct, branch).ConfigureAwait(false);
+            }
+
+            if (taskSource == ProjectRegistry.AzureDevOpsSource && config.Modules.WorkItems.Type != ProjectRegistry.AzureDevOpsSource)
             {
                 config = config with
                 {
@@ -59,7 +75,7 @@ public static class ProjectCommand
                 };
             }
 
-            var record = registry.Add(new NewProject(projectKey, repoFolder, parse.GetValue(name), config.BaseBranch, taskSource));
+            var record = registry.Add(new NewProject(projectKey, repoFolder, parse.GetValue(name) ?? detected?.DisplayName.Value, config.BaseBranch, taskSource));
             var folder = registry.Workspace.ProjectFolder(record.Key);
             ConfigLoader.Save(config, record.RepositoryFolder, folder);
             await context.Out.WriteLineAsync($"Added project {record.Key} ({record.DisplayName}).").ConfigureAwait(false);
@@ -67,7 +83,41 @@ public static class ProjectCommand
             await context.Out.WriteLineAsync($"  Data folder:  {folder}").ConfigureAwait(false);
             await context.Out.WriteLineAsync($"  Settings:     {ConfigLoader.ConfigPath(record.RepositoryFolder, folder)}").ConfigureAwait(false);
             await context.Out.WriteLineAsync($"  Task source:  {record.TaskSource}").ConfigureAwait(false);
+            if (detected is not null)
+            {
+                await context.Out.WriteLineAsync().ConfigureAwait(false);
+                await context.Out.WriteLineAsync("What was detected, and why (values in brackets say how sure the analyzer is):").ConfigureAwait(false);
+                await context.Out.WriteLineAsync(AnalysisApplier.Describe(detected)).ConfigureAwait(false);
+                await context.Out.WriteLineAsync().ConfigureAwait(false);
+            }
+
             await context.Out.WriteLineAsync($"Next: 'autopilot doctor --project {record.Key}'.").ConfigureAwait(false);
+            return ExitCodes.Ok;
+        });
+        return command;
+    }
+
+    private static async Task<ProjectAnalysis> Analyze(string folder, CancellationToken ct)
+    {
+        try
+        {
+            return await ProjectAnalyzer.AnalyzeAsync(folder, ct).ConfigureAwait(false);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new UsageException(ex.Message);
+        }
+    }
+
+    private static Command CreateAnalyze(CliContext context)
+    {
+        var folder = new Argument<string>("folder") { Description = "A repository folder (or any folder inside one)." };
+        var json = new Option<bool>("--json") { Description = "Print JSON: every value with its evidence and confidence." };
+        var command = new Command("analyze", "Look at a folder and suggest every project setting, with the file or rule behind each value. Read-only: nothing is written and no model is used.") { folder, json };
+        command.SetAction(async (parse, ct) =>
+        {
+            var analysis = await Analyze(Path.GetFullPath(parse.GetRequiredValue(folder)), ct).ConfigureAwait(false);
+            await context.Out.WriteLineAsync(parse.GetValue(json) ? analysis.ToJson() : AnalysisApplier.Describe(analysis)).ConfigureAwait(false);
             return ExitCodes.Ok;
         });
         return command;
