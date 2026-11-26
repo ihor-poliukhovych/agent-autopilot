@@ -27,7 +27,7 @@ public sealed class AzureDevOpsWorkItemSource(AzureDevOpsClient client, AzureDev
         }
 
         var items = await client.GetWorkItemsAsync(ids, ct).ConfigureAwait(false);
-        return items.Select(ToWorkItem).ToList();
+        return items.Select(i => ToWorkItem(i, settings)).ToList();
     }
 
     public async Task<WorkItem?> GetAsync(string id, CancellationToken ct)
@@ -38,7 +38,7 @@ public sealed class AzureDevOpsWorkItemSource(AzureDevOpsClient client, AzureDev
         }
 
         var item = await GetRawAsync(number, ct).ConfigureAwait(false);
-        return item is null ? null : ToWorkItem(item);
+        return item is null ? null : ToWorkItem(item, settings);
     }
 
     public async Task RecordTriageAsync(string id, TriageResult result, CancellationToken ct)
@@ -69,7 +69,7 @@ public sealed class AzureDevOpsWorkItemSource(AzureDevOpsClient client, AzureDev
         await client.AddCommentAsync(number, TriageComment(result), ct).ConfigureAwait(false);
     }
 
-    public static WorkItem ToWorkItem(AdoWorkItem item)
+    public static WorkItem ToWorkItem(AdoWorkItem item, AzureDevOpsSettings? settings = null)
     {
         ArgumentNullException.ThrowIfNull(item);
         var body = new StringBuilder(HtmlText.ToPlainText(item.GetString(WorkItemFields.Description)));
@@ -88,7 +88,10 @@ public sealed class AzureDevOpsWorkItemSource(AzureDevOpsClient client, AzureDev
             item.Id.ToString(CultureInfo.InvariantCulture),
             item.GetString(WorkItemFields.Title) ?? $"Work item {item.Id}",
             body.ToString(),
-            SplitTags(item.GetString(WorkItemFields.Tags)));
+            SplitTags(item.GetString(WorkItemFields.Tags)),
+            settings is null ? null : $"{settings.OrganizationUrl.AbsoluteUri.TrimEnd('/')}/{Uri.EscapeDataString(settings.Project)}/_workitems/edit/{item.Id}",
+            item.GetString(WorkItemFields.State),
+            item.GetIdentityName(WorkItemFields.AssignedTo));
     }
 
     public static IReadOnlyList<string> SplitTags(string? tags) =>

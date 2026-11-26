@@ -11,9 +11,10 @@ public static class WorkItemFields
     public const string AcceptanceCriteria = "Microsoft.VSTS.Common.AcceptanceCriteria";
     public const string Tags = "System.Tags";
     public const string State = "System.State";
+    public const string AssignedTo = "System.AssignedTo";
     public const string WorkItemType = "System.WorkItemType";
 
-    public static IReadOnlyList<string> All { get; } = [Id, Title, Description, AcceptanceCriteria, Tags, State, WorkItemType];
+    public static IReadOnlyList<string> All { get; } = [Id, Title, Description, AcceptanceCriteria, Tags, State, WorkItemType, AssignedTo];
 }
 
 /// <summary>A work item as returned by the batch endpoint: id, revision and the requested fields.</summary>
@@ -21,6 +22,11 @@ public sealed record AdoWorkItem(int Id, int Rev, IReadOnlyDictionary<string, Js
 {
     public string? GetString(string field) =>
         Fields.TryGetValue(field, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    /// <summary>The display name of an identity field such as System.AssignedTo, or null.</summary>
+    public string? GetIdentityName(string field) =>
+        Fields.TryGetValue(field, out var value) && value.ValueKind == JsonValueKind.Object
+        && value.TryGetProperty("displayName", out var name) && name.ValueKind == JsonValueKind.String ? name.GetString() : null;
 }
 
 public sealed record AdoProject(string Id, string Name);
