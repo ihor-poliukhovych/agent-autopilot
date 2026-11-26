@@ -37,6 +37,9 @@ public sealed record DoctorOptions
     /// </summary>
     public bool InPlace { get; init; }
 
+    /// <summary>Workspace folder with the project's settings, tasks and out/. Null means <c>.autopilot/</c> in the project.</summary>
+    public string? DataFolder { get; init; }
+
     /// <summary>False skips the dotnet, git and claude version checks.</summary>
     public bool CheckTools { get; init; } = true;
 
@@ -56,7 +59,7 @@ public static partial class DoctorCommand
     /// <summary>Name of the clean checkout doctor builds in (internal names start with '@').</summary>
     public const string CheckoutName = "doctor";
 
-    public static Command Create(Option<string> projectOption, CliContext context)
+    public static Command Create(ProjectOptions projectOption, CliContext context)
     {
         var skipBuild = new Option<bool>("--skip-build") { Description = "Do not run the build and test commands." };
         var inPlace = new Option<bool>("--in-place")
@@ -66,13 +69,15 @@ public static partial class DoctorCommand
         var command = new Command("doctor", "Check the tools, the project and the settings. Prints OK, FAIL, WARN or SKIP for each check.") { skipBuild, inPlace };
         command.SetAction(async (parse, ct) =>
         {
-            var project = CliApp.ResolveProject(parse.GetValue(projectOption));
+            var target = projectOption.Resolve(parse);
+            var project = target.RepoRoot;
             var options = new DoctorOptions
             {
                 SkipBuild = parse.GetValue(skipBuild),
                 InPlace = parse.GetValue(inPlace),
                 CheckTools = context.DoctorChecksTools,
                 WorktreeRoot = context.WorktreeRoot,
+                DataFolder = target.DataFolder,
             };
             var results = await RunChecksAsync(project, options, context.Out, ct).ConfigureAwait(false);
             var failed = results.Count(r => r.Status == CheckStatus.Fail);
@@ -132,12 +137,12 @@ public static partial class DoctorCommand
         AutopilotConfig? config = null;
         try
         {
-            var loaded = ConfigLoader.Load(projectRoot);
+            var loaded = ConfigLoader.Load(projectRoot, options.DataFolder);
             var problems = ConfigLoader.Validate(loaded);
             if (problems.Count == 0)
             {
                 config = loaded;
-                await Report(new CheckResult(CheckStatus.Ok, "config", ConfigLoader.ConfigPath(projectRoot))).ConfigureAwait(false);
+                await Report(new CheckResult(CheckStatus.Ok, "config", ConfigLoader.ConfigPath(projectRoot, options.DataFolder))).ConfigureAwait(false);
             }
             else
             {
@@ -202,9 +207,9 @@ public static partial class DoctorCommand
             var adoForPublisher = AzureDevOpsModule.IsSelected(config.Modules.Publisher);
             if (!adoForItems)
             {
-                await Report(await WorkItemsCheckAsync(projectRoot, config.Modules.WorkItems.Type, ct).ConfigureAwait(false)).ConfigureAwait(false);
+                await Report(await WorkItemsCheckAsync(projectRoot, config.Modules.WorkItems.Type, ct, options.DataFolder).ConfigureAwait(false)).ConfigureAwait(false);
             }
-            else if (await LocalTasksCheckAsync(projectRoot, config.Modules.WorkItems.Type, ct).ConfigureAwait(false) is { } localTasks)
+            else if (await LocalTasksCheckAsync(projectRoot, config.Modules.WorkItems.Type, ct, options.DataFolder).ConfigureAwait(false) is { } localTasks)
             {
                 await Report(localTasks).ConfigureAwait(false);
             }
@@ -311,7 +316,7 @@ public static partial class DoctorCommand
             return [new(CheckStatus.Skip, "build command", "needs a valid config"), new(CheckStatus.Skip, "test command", "needs a valid config")];
         }
 
-        var logFolder = Path.Combine(ProjectPaths.OutFolder(projectRoot), "doctor");
+        var logFolder = Path.Combine(ProjectPaths.OutFolder(projectRoot, options.DataFolder), "doctor");
         Directory.CreateDirectory(logFolder);
         var buildLog = Path.Combine(logFolder, "build.log");
         var testLog = Path.Combine(logFolder, "test.log");
@@ -401,14 +406,14 @@ public static partial class DoctorCommand
             : new CheckResult(CheckStatus.Fail, name, $"'{command}' did not run", fix);
     }
 
-    private static async Task<CheckResult> WorkItemsCheckAsync(string projectRoot, string type, CancellationToken ct)
+    private static async Task<CheckResult> WorkItemsCheckAsync(string projectRoot, string type, CancellationToken ct, string? dataFolder = null)
     {
         if (!string.Equals(type, "local", StringComparison.OrdinalIgnoreCase))
         {
             return new CheckResult(CheckStatus.Fail, "work items", $"module \"{type}\" is not built yet", "Use \"local\" for modules.workItems.type for now.");
         }
 
-        var source = new LocalWorkItemSource(projectRoot);
+        var source = new LocalWorkItemSource(projectRoot, dataFolder);
         if (!Directory.Exists(source.TasksFolder))
         {
             return new CheckResult(CheckStatus.Fail, "work items", $"{source.TasksFolder} does not exist", "Run 'autopilot init' or create the folder and add a task file.");
@@ -419,9 +424,9 @@ public static partial class DoctorCommand
     }
 
     /// <summary>A warning when the work items come from elsewhere but open local task files exist; null otherwise.</summary>
-    public static async Task<CheckResult?> LocalTasksCheckAsync(string projectRoot, string type, CancellationToken ct)
+    public static async Task<CheckResult?> LocalTasksCheckAsync(string projectRoot, string type, CancellationToken ct, string? dataFolder = null)
     {
-        var open = await new LocalWorkItemSource(projectRoot).ListOpenAsync(ct).ConfigureAwait(false);
+        var open = await new LocalWorkItemSource(projectRoot, dataFolder).ListOpenAsync(ct).ConfigureAwait(false);
         return open.Count == 0
             ? null
             : new CheckResult(CheckStatus.Warn, "local tasks", $"{open.Count} local task files are not read while workItems is {type}",

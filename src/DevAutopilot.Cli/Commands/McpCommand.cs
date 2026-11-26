@@ -12,18 +12,19 @@ namespace DevAutopilot.Cli.Commands;
 /// </summary>
 public static class McpCommand
 {
-    public static Command Create(Option<string> projectOption, CliContext context)
+    public static Command Create(ProjectOptions projectOption, CliContext context)
     {
         var diagnostics = new Command(
             "diagnostics",
             "Serve the project's diagnostics source (modules.diagnostics) as a read-only MCP server over stdio.");
         diagnostics.SetAction(async (parse, ct) =>
         {
-            var project = CliApp.ResolveProject(parse.GetValue(projectOption));
+            var target = projectOption.Resolve(parse);
+            var project = target.RepoRoot;
             JsonlDiagnosticsSource? source;
             try
             {
-                var config = ConfigLoader.Load(project);
+                var config = ConfigLoader.Load(project, target.DataFolder);
                 source = DiagnosticsSourceFactory.Create(project, config.Modules.Diagnostics);
             }
             catch (Exception ex) when (ex is ConfigException or DiagnosticsConfigException)
@@ -54,7 +55,7 @@ public static class DiagnosticsServerCommand
     /// project (not a worktree, so it reads the project's log and settings). Like the hook, the apphost
     /// (<c>autopilot.exe</c>) is preferred when the tool runs on the dotnet host.
     /// </summary>
-    public static McpServerSpec Build(string? processPath, string? entryAssemblyPath, string projectRoot, Func<string, bool>? fileExists = null)
+    public static McpServerSpec Build(string? processPath, string? entryAssemblyPath, string projectRoot, Func<string, bool>? fileExists = null, string? dataFolder = null)
     {
         if (string.IsNullOrEmpty(processPath))
         {
@@ -63,7 +64,10 @@ public static class DiagnosticsServerCommand
 
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
         fileExists ??= File.Exists;
-        string[] serverArgs = ["mcp", "diagnostics", "--project", Path.GetFullPath(projectRoot)];
+        // A workspace project is named by key and workspace (its folder is <workspace>/projects/<key>).
+        string[] serverArgs = dataFolder is null
+            ? ["mcp", "diagnostics", "--project", Path.GetFullPath(projectRoot)]
+            : ["mcp", "diagnostics", "--project", Path.GetFileName(Path.GetFullPath(dataFolder)), "--workspace", Path.GetDirectoryName(Path.GetDirectoryName(Path.GetFullPath(dataFolder)))!];
         var host = Path.GetFileNameWithoutExtension(processPath);
         if (string.Equals(host, "dotnet", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(entryAssemblyPath))
         {

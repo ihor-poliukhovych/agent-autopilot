@@ -9,7 +9,7 @@ namespace DevAutopilot.Cli.Commands;
 /// <summary><c>eval [--case &lt;id&gt;] [--runs N] [--keep]</c>: runs the project's eval cases (docs/EVALS.md).</summary>
 public static class EvalCommand
 {
-    public static Command Create(Option<string> projectOption, CliContext context)
+    public static Command Create(ProjectOptions projectOption, CliContext context)
     {
         var caseOption = new Option<string?>("--case") { Description = "Run only this case (its folder name in .autopilot/evals/)." };
         var runsOption = new Option<int?>("--runs") { Description = $"Runs per case. Default: \"runs\" in .autopilot/evals/{EvalCaseLoader.SetFileName}, or {EvalCaseLoader.DefaultRuns}." };
@@ -23,18 +23,23 @@ public static class EvalCommand
             keepOption,
         };
         command.SetAction((parse, ct) => RunAsync(
-            parse.GetValue(projectOption), parse.GetValue(caseOption), parse.GetValue(runsOption), parse.GetValue(keepOption), context, ct));
+            projectOption.Resolve(parse), parse.GetValue(caseOption), parse.GetValue(runsOption), parse.GetValue(keepOption), context, ct));
         return command;
     }
 
-    private static async Task<int> RunAsync(string? projectValue, string? caseId, int? runsValue, bool keep, CliContext context, CancellationToken ct)
+    private static async Task<int> RunAsync(ProjectTarget target, string? caseId, int? runsValue, bool keep, CliContext context, CancellationToken ct)
     {
         if (runsValue is { } r && (r < 1 || r > EvalCaseLoader.MaxRuns))
         {
             throw new UsageException($"--runs must be from 1 to {EvalCaseLoader.MaxRuns}.");
         }
 
-        var project = CliApp.ResolveProject(projectValue);
+        if (target.DataFolder is not null)
+        {
+            throw new UsageException("eval does not support workspace projects yet; run it with --project <repository folder> on a repository-local .autopilot/.");
+        }
+
+        var project = target.RepoRoot;
         AutopilotConfig config;
         try
         {

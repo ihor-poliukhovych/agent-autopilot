@@ -24,12 +24,12 @@ public static class ProjectServices
     /// <c>.autopilot/tasks/</c> for this run whatever <c>modules.workItems</c> says, and then drafts stay
     /// local bundles too, so a local task id is never linked to an unrelated remote work item.
     /// </summary>
-    public static async Task<AutopilotPipeline> CreatePipelineAsync(string projectRoot, CliContext context, CancellationToken ct, string? source = null)
+    public static async Task<AutopilotPipeline> CreatePipelineAsync(string projectRoot, CliContext context, CancellationToken ct, string? source = null, string? dataFolder = null)
     {
         AutopilotConfig config;
         try
         {
-            config = ConfigLoader.Load(projectRoot);
+            config = ConfigLoader.Load(projectRoot, dataFolder);
         }
         catch (ConfigException ex)
         {
@@ -40,7 +40,7 @@ public static class ProjectServices
         if (problems.Count > 0)
         {
             throw new ProjectSetupException(
-                "The settings in .autopilot/autopilot.json have problems:" + Environment.NewLine
+                $"The settings in {ConfigLoader.ConfigPath(projectRoot, dataFolder)} have problems:" + Environment.NewLine
                 + string.Join(Environment.NewLine, problems.Select(p => "  - " + p)) + Environment.NewLine
                 + "Run 'autopilot doctor' for a full check.");
         }
@@ -48,7 +48,7 @@ public static class ProjectServices
         var repoRoot = await GitClient.FindRepositoryRootAsync(projectRoot, ct).ConfigureAwait(false)
             ?? throw new ProjectSetupException($"{projectRoot} is not in a git repository. Run 'git init' and commit your code first.");
 
-        var diagnosticsServer = DiagnosticsServerFor(projectRoot, config);
+        var diagnosticsServer = DiagnosticsServerFor(projectRoot, config, dataFolder);
         var git = new GitClient(repoRoot);
         var worktreeRoot = context.WorktreeRoot ?? GitClient.DefaultWorktreeRoot(repoRoot);
         var localSource = string.Equals(source, LocalSource, StringComparison.OrdinalIgnoreCase);
@@ -59,11 +59,12 @@ public static class ProjectServices
         }
 
         var (workItems, publisher) = localSource
-            ? ((IWorkItemSource)new LocalWorkItemSource(projectRoot), (IPublisher)new LocalPublisher(projectRoot))
-            : CreateModules(projectRoot, config);
+            ? ((IWorkItemSource)new LocalWorkItemSource(projectRoot, dataFolder), (IPublisher)new LocalPublisher(projectRoot, dataFolder))
+            : CreateModules(projectRoot, config, dataFolder);
         return new AutopilotPipeline(new AutopilotPipelineOptions
         {
             ProjectRoot = projectRoot,
+            DataFolder = dataFolder,
             Config = config,
             WorkItems = workItems,
             Publisher = publisher,
@@ -73,7 +74,7 @@ public static class ProjectServices
                 PassEnvironment = config.PassEnvironment,
             }),
             Git = git,
-            Facts = context.FactsCollectorFactory?.Invoke(config) ?? new GateFactsCollector(git, config, worktreeRoot) { BaseCacheFolder = ProjectPaths.GateBaseCacheFolder(projectRoot) },
+            Facts = context.FactsCollectorFactory?.Invoke(config) ?? new GateFactsCollector(git, config, worktreeRoot) { BaseCacheFolder = ProjectPaths.GateBaseCacheFolder(projectRoot, dataFolder) },
             WorktreeRoot = worktreeRoot,
             EvaluateGate = context.EvaluateGate ?? MergeGate.Evaluate,
             Log = context.Out,
@@ -86,11 +87,11 @@ public static class ProjectServices
     /// written; with Azure DevOps the draft pull request is opened after it.
     /// The module lives as long as the process (one command), so it is not disposed here.
     /// </summary>
-    public static (IWorkItemSource WorkItems, IPublisher Publisher) CreateModules(string projectRoot, AutopilotConfig config)
+    public static (IWorkItemSource WorkItems, IPublisher Publisher) CreateModules(string projectRoot, AutopilotConfig config, string? dataFolder = null)
     {
         ArgumentNullException.ThrowIfNull(config);
-        IWorkItemSource workItems = new LocalWorkItemSource(projectRoot);
-        IPublisher publisher = new LocalPublisher(projectRoot);
+        IWorkItemSource workItems = new LocalWorkItemSource(projectRoot, dataFolder);
+        IPublisher publisher = new LocalPublisher(projectRoot, dataFolder);
 
         var adoForItems = AzureDevOpsModule.IsSelected(config.Modules.WorkItems);
         var adoForPublisher = AzureDevOpsModule.IsSelected(config.Modules.Publisher);
@@ -126,7 +127,7 @@ public static class ProjectServices
     /// The diagnostics MCP server for agent runs when modules.diagnostics.type is "jsonl", else null.
     /// The path setting is checked here so a bad path stops the run before any agent starts.
     /// </summary>
-    public static McpServerSpec? DiagnosticsServerFor(string projectRoot, AutopilotConfig config)
+    public static McpServerSpec? DiagnosticsServerFor(string projectRoot, AutopilotConfig config, string? dataFolder = null)
     {
         ArgumentNullException.ThrowIfNull(config);
         if (!DiagnosticsMcp.IsEnabled(config.Modules.Diagnostics))
@@ -144,7 +145,7 @@ public static class ProjectServices
         }
 
         return DiagnosticsServerCommand.Build(
-            Environment.ProcessPath, System.Reflection.Assembly.GetEntryAssembly()?.Location, projectRoot);
+            Environment.ProcessPath, System.Reflection.Assembly.GetEntryAssembly()?.Location, projectRoot, dataFolder: dataFolder);
     }
 }
 

@@ -10,7 +10,7 @@ public static class InitCommand
 {
     public const string GitIgnoreEntry = ".autopilot/out/";
 
-    public static Command Create(Option<string> projectOption, CliContext context)
+    public static Command Create(ProjectOptions projectOption, CliContext context)
     {
         var force = new Option<bool>("--force") { Description = "Overwrite existing Dev Autopilot files." };
         var baseBranch = new Option<string?>("--base-branch")
@@ -20,7 +20,13 @@ public static class InitCommand
         var command = new Command("init", "Create .autopilot/ in the project: settings, an example task and a README.") { force, baseBranch };
         command.SetAction(async (parse, ct) =>
         {
-            var project = CliApp.ResolveProject(parse.GetValue(projectOption));
+            var target = projectOption.Resolve(parse);
+            if (target.DataFolder is not null)
+            {
+                throw new UsageException("init creates .autopilot/ inside a repository. A workspace project already has its settings; use 'autopilot project add' to register one.");
+            }
+
+            var project = target.RepoRoot;
             return await RunAsync(project, parse.GetValue(force), context.Out, context.Error, ct, parse.GetValue(baseBranch)).ConfigureAwait(false);
         });
         return command;
@@ -176,7 +182,7 @@ public static class InitCommand
         return found.Order(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    private static async Task<string?> DetectBaseBranchAsync(string projectRoot, CancellationToken ct)
+    public static async Task<string?> DetectBaseBranchAsync(string projectRoot, CancellationToken ct)
     {
         if (await GitClient.FindRepositoryRootAsync(projectRoot, ct).ConfigureAwait(false) is null)
         {
