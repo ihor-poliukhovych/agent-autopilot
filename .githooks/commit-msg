@@ -1,0 +1,19 @@
+#!/bin/sh
+# Checks the first line against the Conventional Commits format and rejects tool trailers.
+msg_file="$1"
+first=$(head -n 1 "$msg_file")
+case "$first" in Merge*|Revert*|fixup!*|squash!*) exit 0 ;; esac
+pattern='^(feat|fix|docs|refactor|test|perf|build|ci|chore)(\([a-z0-9-]+\))?!?: [a-z0-9].{0,71}$'
+if ! printf '%s' "$first" | grep -Eq "$pattern"; then
+  echo "commit-msg: first line must look like 'type(scope): subject' (see CONTRIBUTING.md)." >&2
+  echo "  got: $first" >&2
+  exit 1
+fi
+if printf '%s' "$first" | grep -q '\.$'; then
+  echo "commit-msg: no full stop at the end of the subject." >&2
+  exit 1
+fi
+if grep -Eiq '^(co-authored-by|generated (by|with))' "$msg_file"; then
+  echo "commit-msg: remove co-author or generated-by trailers." >&2
+  exit 1
+fi

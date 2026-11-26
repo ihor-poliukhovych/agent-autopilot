@@ -1,0 +1,8 @@
+# <type>(<scope>): <subject>   (imperative, lower case, max 72 chars, no full stop)
+#
+# Types: feat fix docs refactor test perf build ci chore
+# Scopes: core cli ui azure-devops claude-code diagnostics workspace docs
+#
+# Body: why the change is needed and what it does (wrap at 72).
+#
+# Footer: Closes #123 / BREAKING CHANGE: ...
