@@ -156,6 +156,8 @@ The work item source and the publisher read the same settings block. Copy it int
 | `recordTriage` | no | `remote` | `remote`: triage writes a tag and a comment on the work item. `local`: results stay in `.autopilot/out/triage/` and nothing is written to Azure DevOps (read-only) |
 | `auth` | no | `pat` | `pat` (environment variable), `az` (Azure CLI) or `service-principal` (Entra client credentials, see option C) |
 | `tokenVariable` | no | `AUTOPILOT_ADO_PAT` | Name of the environment variable; must start with `AUTOPILOT_` |
+| `maxItems` | no | `50` | Most items the query may return for a run (1 to 500) |
+| `stateMap` | no | none | Work item state to move to at a step, for example `agent-ready=Active; needs-human=New; in-progress=Active; draft-pr=Resolved`. A step that is not listed changes no state; items already Closed, Done, Removed or Completed are never moved |
 
 Default query: open items of the project (state not Closed, Done or Removed) that have
 the tag `dev-autopilot`, newest first, at most 50:
@@ -197,7 +199,54 @@ refused.
   description as the local `PULL_REQUEST.md`. It never sets auto-complete, never votes
   and never completes the pull request.
 
-## 7. `autopilot doctor`
+### Write-back in detail
+
+Every write looks at the work item first, so running the same step again changes nothing:
+
+| What | How it stays idempotent |
+|---|---|
+| Triage tag | The item's tags are compared; the patch is sent only if they differ. It is guarded by the revision, and retried once from a fresh read if someone else changed the item meanwhile |
+| State | Only moved when `stateMap` has an entry for the step and the state differs |
+| Assigned to | Compared with the current display name or sign-in name; an empty value clears it |
+| Comments | Each comment ends with a visible line `ref:<kind>:<key>` (kinds `triage`, `needs-human`, `run-summary`, `pull-request`). The key is the run id (or the hash of the text). If a comment with that reference exists, nothing is posted. Every comment starts with "Written by Dev Autopilot" |
+| Link to the pull request | The item's links are read; an `ArtifactLink` to that pull request is added only if missing |
+| Draft pull request | An open pull request from the same branch into the base branch is reused instead of a second one being created |
+
+Pull requests are always drafts. The module can create one and change its title and description;
+it has no call that marks one ready, votes, sets auto-complete or completes it. A person does that.
+
+## 7. Looking at the query and checking the connection
+
+```powershell
+autopilot ado preview --project shop            # first 25 items the configured query reads
+autopilot ado preview --project shop --skip 25  # next page
+autopilot ado preview --project shop --query "SELECT [System.Id] FROM WorkItems WHERE [System.State] = 'New'"
+autopilot ado check --project shop              # sign-in, query, read, write, git rights, branch policy
+```
+
+`preview` reads at most 200 items of a query and shows 1 to 100 per page; it changes nothing. `check`
+prints one line per check, with a fix when it did not pass, and `--json` gives the same for a program.
+The write check asks Azure DevOps to validate an update of one item and saves nothing.
+
+## 8. Service types (for a UI or another module)
+
+The module's public services, all behind interfaces and built by `AzureDevOpsModule.Create`:
+
+| Interface | Methods |
+|---|---|
+| `IAzureDevOpsReader` | `PreviewAsync(WorkItemPreviewRequest)`, `LoadAsync(id)` (fields, comments, links) |
+| `IAzureDevOpsWriteback` | `RecordTriageAsync`, `AddTagAsync`, `PostCommentAsync`, `TransitionAsync`, `AssignAsync`, `LinkPullRequestAsync`; comment builders for needs-human questions and run summaries |
+| `IAzureDevOpsPullRequests` | `EnsureDraftAsync`, `UpdateDescriptionAsync` |
+| `IAzureDevOpsConnectionChecker` | `CheckAllAsync`, `CheckSignInAsync`, `CheckQueryAsync`, `CheckWorkItemReadAsync`, `CheckWorkItemWriteAsync`, `CheckGitPermissionsAsync`, `GetBranchPolicySummaryAsync` |
+
+They are expected to map onto the tracker-neutral `IWorkItemTracker` of the local-tasks work like this
+(the adapter is written once both are merged): list items = `Reader.PreviewAsync` with the configured
+query; get an item = `Reader.LoadAsync`; record a triage result = `Writeback.RecordTriageAsync`;
+add a comment = `Writeback.PostCommentAsync`; change state = `Writeback.TransitionAsync`;
+open a pull request = `PullRequests.EnsureDraftAsync` then `Writeback.LinkPullRequestAsync`;
+connection test = `Checks.CheckAllAsync`.
+
+## 9. `autopilot doctor`
 
 | Check | OK when |
 |---|---|
@@ -208,6 +257,7 @@ refused.
 | Azure DevOps repository | The repository can be read |
 | Agent can Contribute / Create branch / Contribute to pull requests | The identity has the right |
 | Agent cannot force push, edit policies, manage permissions, bypass policies when pushing, bypass policies when completing pull requests | The identity does **not** have the right; each one it has is a FAIL with the fix |
+| Azure DevOps: read work items / write work items | One item can be read, and Azure DevOps accepts an update of it (validated, not saved) |
 | Target branch needs a human approval | An enabled, required "Minimum number of reviewers" policy with at least 1 reviewer, where the author's vote does not count, applies to the base branch |
 
 The rights are checked for the identity behind the token, with administrators not
@@ -225,6 +275,8 @@ Written against Microsoft's public REST API documentation, api-version 7.1:
 - [Projects - Get](https://learn.microsoft.com/rest/api/azure/devops/core/projects/get?view=azure-devops-rest-7.1)
 - [Repositories - Get Repository](https://learn.microsoft.com/rest/api/azure/devops/git/repositories/get-repository?view=azure-devops-rest-7.1)
 - [Pull Requests - Create](https://learn.microsoft.com/rest/api/azure/devops/git/pull-requests/create?view=azure-devops-rest-7.1)
+- [Comments - Get Comments](https://learn.microsoft.com/rest/api/azure/devops/wit/comments/get-comments?view=azure-devops-rest-7.1) (7.1-preview.4)
+- [Pull Requests - Get Pull Requests](https://learn.microsoft.com/rest/api/azure/devops/git/pull-requests/get-pull-requests?view=azure-devops-rest-7.1) and Update
 - [Policy Configurations - Get (Git)](https://learn.microsoft.com/rest/api/azure/devops/git/policy-configurations/get?view=azure-devops-rest-7.1)
 - [Permissions - Has Permissions](https://learn.microsoft.com/rest/api/azure/devops/security/permissions/has-permissions?view=azure-devops-rest-7.1)
 - [Security Namespaces - Query](https://learn.microsoft.com/rest/api/azure/devops/security/security-namespaces/query?view=azure-devops-rest-7.1) (Git Repositories bits)

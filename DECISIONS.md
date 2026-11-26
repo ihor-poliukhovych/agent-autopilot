@@ -113,3 +113,27 @@ parses arguments and prints, so the web UI calls the same services.
 
 Rejected: a `pool.json` file (no safe concurrent writes, no query), and a job queue daemon
 (one detached process per job is enough for a local tool).
+
+
+## D-014 Azure DevOps write-back is idempotent, draft-only and checked in words (accepted, 2026-11-26)
+
+The Azure DevOps module is complete for read and write-back, as services behind interfaces
+(`IAzureDevOpsReader`, `IAzureDevOpsWriteback`, `IAzureDevOpsPullRequests`,
+`IAzureDevOpsConnectionChecker`) so a UI can call them without the CLI. Settings come from the
+project's module settings (`organizationUrl`, `project`, `query`, `auth`, variable names, `stateMap`,
+`maxItems`); secrets are only ever environment variable names.
+
+- Every write reads first and changes only what differs. Comments carry a visible `ref:<kind>:<key>`
+  line that later calls search for; a visible marker survives HTML sanitising, a hidden one may not.
+  Tags and state go in one revision-guarded patch, retried once from a fresh read.
+- Items already in a finished state are never moved by `stateMap`.
+- Pull requests are drafts. The module has no call to mark ready, vote, auto-complete or complete,
+  so merging stays with a person; a test checks that no request it sends can do so.
+- The write check uses `validateOnly`, so connection checks never change data. The checks return
+  plain words and a fix hint, and are shared by `doctor`, `autopilot ado check` and a future wizard.
+- The services have their own types for now. The tracker-neutral `IWorkItemTracker` comes from the
+  local-tasks work; an adapter maps one to the other after both are merged (see docs/AZURE-DEVOPS.md).
+
+Rejected: updating a comment in place (needs the comment id and loses history), and a hidden
+HTML-comment marker (not reliably kept by Azure DevOps).
+
