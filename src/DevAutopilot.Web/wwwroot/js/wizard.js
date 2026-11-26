@@ -1,5 +1,6 @@
 import { post } from './api.js';
 import { h, clear, toast, busy, badge, field, ask } from './dom.js';
+import { connectAzureDevOps } from './connect.js';
 import { STEPS, runChecks, analyzeFolder, renderChecks, evidenceBox, needsBox, identityFields } from './setupform.js';
 
 // The wizard has three views of one draft:
@@ -101,7 +102,7 @@ export async function render({ view, go, refreshState }) {
       section('Project', 'The repository, the branch the agent starts from, and the name of the project.', 'folder', identityFields(draft)),
       section('Build and test', 'The commands that must pass on the base branch. The checks below run them on a clean copy of that branch, like the merge gate, so this can take a few minutes.', 'commands', build(2)),
       section('Paths', 'Where the agent may write, which changes always need a close look, and the rule documents the agent reads on every run.', 'paths', build(3)),
-      section('Task source', 'Where the work comes from. Secrets are never typed here: only the names of environment variables that hold them.', 'source', build(4)),
+      section('Task source', 'Where the work comes from. Secrets are never typed here: only the names of environment variables that hold them.', 'source', connectAzureDevOps(draft, { analysis, wizard: true })),
       h('section', { class: 'card stack' },
         h('h2', {}, 'Checks'),
         h('div', { class: 'purpose' }, 'Every required check runs on these values: the folder, the base branch, the build and the tests on a clean checkout, the paths, the task source and its connection. The project can be created only when none fails.'),
