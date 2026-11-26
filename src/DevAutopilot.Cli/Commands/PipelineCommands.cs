@@ -187,7 +187,7 @@ public static class PipelineCommands
         AutopilotPipeline pipeline;
         try
         {
-            pipeline = await ProjectServices.CreatePipelineAsync(target.RepoRoot, context, ct, source, target.DataFolder).ConfigureAwait(false);
+            pipeline = await ProjectServices.CreatePipelineAsync(target.RepoRoot, context, ct, source, target.DataFolder, target.LocalTasks).ConfigureAwait(false);
         }
         catch (ProjectSetupException ex)
         {

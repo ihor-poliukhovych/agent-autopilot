@@ -19,11 +19,11 @@ Ideas that are planned but not built. Order may change.
    `auth: "service-principal"`; `ProjectSettingsService` for settings and context files.
    Left over for the UI step: calling these services from the web UI, and the behaviour
    behind `autoQueue` and `trust` (they are only read and checked now).
-1b. **Azure DevOps complete.** *(Done, see D-014.)* Query preview with paging, item detail with
+1b. **Azure DevOps complete.** *(Done, see D-015.)* Query preview with paging, item detail with
    comments and links, idempotent write-back (tags, comments, `stateMap`, assignee, link to the
    pull request), draft pull request reuse and description update, connection checks with fix
-   hints (`autopilot ado preview|check`, also in `doctor`). Left over: wiring these services to the
-   tracker-neutral interface once the local-tasks work is merged; a UI wizard that calls the checks.
+   hints (`autopilot ado preview|check`, also in `doctor`). Left over: the `IWorkItemTracker` adapter over
+   these services (mapping in docs/AZURE-DEVOPS.md); a UI wizard that calls the checks.
 
 2. **Local web UI** (`autopilot ui`, 127.0.0.1 only, one-time key in the URL):
    tasks (triage, Start, add to pool), pool (order, run now, run at night with
@@ -43,11 +43,7 @@ and see the agent's results without leaving the tool.
 
 Direction:
 
-- Keep local task files (`.autopilot/tasks/*.md`) as the single source of truth, so
-  tasks are versioned in git together with the code and need no server.
-- First a CLI: `autopilot task add`, `task list`, `task show <id>`, `task comment <id>`,
-  `task close <id>`. Comments and the agent's results (triage reason, gate report,
-  draft link) are appended to the task's history.
+- *(Done, see D-014.)* Tasks live in the workspace database, `autopilot task add|list|show|comment|close|reopen|label|import-files`, with comments and the agent's results in a history. Repository-local task files still work and can be imported. Left over: the local web UI over the same service.
 - Then a small local web UI (`autopilot ui`, served on localhost only) over the same
   files: a task board, a task page with comments, triage result, runs, gate facts and
   the diff.
@@ -73,6 +69,8 @@ mostly field mapping.
 - Azure DevOps: work items in, triage labels and comments out, draft pull requests.
 - GitHub: issues in, labels and comments out, draft pull requests.
 - Others later (Jira, Linear, GitLab) on the same adapter interface.
+
+The interface and the sync service exist (see D-014 and docs/TRACKERS.md); the Azure DevOps adapter still has to be moved onto them.
 
 ## Other
 

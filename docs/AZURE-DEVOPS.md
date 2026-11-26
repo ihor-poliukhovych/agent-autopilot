@@ -239,12 +239,17 @@ The module's public services, all behind interfaces and built by `AzureDevOpsMod
 | `IAzureDevOpsPullRequests` | `EnsureDraftAsync`, `UpdateDescriptionAsync` |
 | `IAzureDevOpsConnectionChecker` | `CheckAllAsync`, `CheckSignInAsync`, `CheckQueryAsync`, `CheckWorkItemReadAsync`, `CheckWorkItemWriteAsync`, `CheckGitPermissionsAsync`, `GetBranchPolicySummaryAsync` |
 
-They are expected to map onto the tracker-neutral `IWorkItemTracker` of the local-tasks work like this
-(the adapter is written once both are merged): list items = `Reader.PreviewAsync` with the configured
-query; get an item = `Reader.LoadAsync`; record a triage result = `Writeback.RecordTriageAsync`;
-add a comment = `Writeback.PostCommentAsync`; change state = `Writeback.TransitionAsync`;
-open a pull request = `PullRequests.EnsureDraftAsync` then `Writeback.LinkPullRequestAsync`;
-connection test = `Checks.CheckAllAsync`.
+They map onto the tracker-neutral `IWorkItemTracker` (`DevAutopilot.Core.Tasks`, see docs/TRACKERS.md) like
+this; the adapter itself is the next step and has not been written:
+
+| `IWorkItemTracker` | Azure DevOps module |
+|---|---|
+| `ReadAsync` | `Reader.PreviewAsync` pages over the configured query, then `Reader.LoadAsync` per item |
+| `WriteAsync` `Labels` | `Writeback.AddTagAsync` for each missing tag (other tags stay) |
+| `WriteAsync` `Comments` | `Writeback.PostCommentAsync` with a kind and key per comment |
+| `WriteAsync` `Closed` | `Writeback.TransitionAsync` (only if `stateMap` names a state) |
+| `WriteAsync` `DraftLink` | `Writeback.LinkPullRequestAsync`, after `PullRequests.EnsureDraftAsync` |
+| connection test (wizard, doctor) | `Checks.CheckAllAsync` |
 
 ## 9. `autopilot doctor`
 

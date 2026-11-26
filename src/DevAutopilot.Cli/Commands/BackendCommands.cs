@@ -61,8 +61,8 @@ public static class BackendCommands
             try
             {
                 items = string.Equals(parse.GetValue(source), ProjectServices.LocalSource, StringComparison.Ordinal)
-                    ? new LocalWorkItemSource(target.RepoRoot, target.DataFolder)
-                    : ProjectServices.CreateModules(target.RepoRoot, config, target.DataFolder).WorkItems;
+                    ? ProjectServices.CreateLocalModules(target.RepoRoot, target.DataFolder, target.LocalTasks).WorkItems
+                    : ProjectServices.CreateModules(target.RepoRoot, config, target.DataFolder, target.LocalTasks).WorkItems;
             }
             catch (ProjectSetupException ex)
             {
@@ -222,7 +222,7 @@ public static class BackendCommands
     {
         try
         {
-            return await ProjectServices.CreatePipelineAsync(target.RepoRoot, context, ct, null, target.DataFolder).ConfigureAwait(false);
+            return await ProjectServices.CreatePipelineAsync(target.RepoRoot, context, ct, null, target.DataFolder, target.LocalTasks).ConfigureAwait(false);
         }
         catch (ProjectSetupException ex)
         {

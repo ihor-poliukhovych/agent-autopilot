@@ -9,6 +9,27 @@ namespace DevAutopilot.Cli;
 /// </summary>
 public sealed record ProjectTarget(string RepoRoot, string? DataFolder, ProjectRecord? Project = null, DevAutopilot.Core.Workspace.Workspace? Workspace = null)
 {
+    /// <summary>The workspace tasks of a registered project that keeps its tasks locally; null otherwise.</summary>
+    /// <remarks>
+    /// A project that still has task files in its workspace folder and no tasks in the database keeps reading those
+    /// files until <c>task import-files</c> moves them, so existing projects do not lose their tasks.
+    /// </remarks>
+    public DevAutopilot.Core.Tasks.LocalTaskService? LocalTasks
+    {
+        get
+        {
+            if (Project is not { TaskSource: ProjectRegistry.LocalSource } || Workspace is null)
+            {
+                return null;
+            }
+
+            var service = new DevAutopilot.Core.Tasks.LocalTaskService(Workspace, Project.Key);
+            var legacy = DataFolder is not null && Directory.Exists(Path.Combine(DataFolder, "tasks"))
+                && Directory.EnumerateFiles(Path.Combine(DataFolder, "tasks"), "*.md").Any();
+            return legacy && service.List(includeClosed: true).Count == 0 ? null : service;
+        }
+    }
+
     /// <summary>Pool, jobs, runs and schedules are kept per registered project; a repository-local folder has none.</summary>
     public (ProjectRecord Project, DevAutopilot.Core.Workspace.Workspace Workspace) RequireRegistered() =>
         Project is not null && Workspace is not null
