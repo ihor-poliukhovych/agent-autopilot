@@ -113,3 +113,23 @@ parses arguments and prints, so the web UI calls the same services.
 
 Rejected: a `pool.json` file (no safe concurrent writes, no query), and a job queue daemon
 (one detached process per job is enough for a local tool).
+
+
+## D-014 Local tasks are the hub; trackers sync to them (accepted, 2026-11-26)
+
+Tasks, comments and history of a project are tables in `autopilot.db` (migration 003), with a
+number per project that is never reused. `LocalTaskService` holds the logic; `task ...` commands
+only parse and print. A registered project whose task source is `local` reads its work items from
+these tables, and the gate verdict, triage reason and draft location are appended to the task's
+history. A tracker is a thin adapter behind `IWorkItemTracker` (read items in, write labels,
+comments, state and draft link out); `TaskSyncService` matches by external id and sends each
+comment and result once. See docs/TRACKERS.md.
+
+- The repository-local `.autopilot/tasks/*.md` flow is unchanged for a plain folder. A registered
+  project that still has task files in its workspace folder and no database tasks keeps reading
+  the files until `task import-files` moves them, so nothing disappears silently.
+- Rejected: task files as the single source (no comments or history, no safe concurrent writes,
+  nothing to link to a tracker), and a database row per tracker with its own model (every tracker
+  would need its own triage, list and pool code).
+- The Azure DevOps module still serves its work items directly; moving it onto the sync service
+  is a later step.
