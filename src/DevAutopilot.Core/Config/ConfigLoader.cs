@@ -149,6 +149,21 @@ public static class ConfigLoader
             problems.Add(problem);
         }
 
+        if (!string.Equals(config.Merge?.By, MergeConfig.Human, StringComparison.Ordinal))
+        {
+            problems.Add($"merge.by is \"{config.Merge?.By}\". The only value is \"{MergeConfig.Human}\": a person always merges.");
+        }
+
+        if (config.AutoQueue is null)
+        {
+            problems.Add("autoQueue is missing. Remove the \"autoQueue\" key to use the defaults, or fill in enabled and maxRisk.");
+        }
+
+        if (!TrustLevels.All.Contains(config.Trust ?? string.Empty, StringComparer.Ordinal))
+        {
+            problems.Add($"trust is \"{config.Trust}\". Use one of: {string.Join(", ", TrustLevels.All)}.");
+        }
+
         if (config.Gate is null)
         {
             problems.Add("gate is missing. Remove the \"gate\" key to use the defaults, or fill in its limits.");
