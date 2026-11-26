@@ -132,6 +132,21 @@ tool, copy the example, run `autopilot run`, read the draft.
 To connect your own project: [docs/ADOPT.md](docs/ADOPT.md).
 For Azure DevOps work items and draft pull requests: [docs/AZURE-DEVOPS.md](docs/AZURE-DEVOPS.md).
 
+## The local web UI
+
+`autopilot ui` opens a page on your own computer (127.0.0.1 only, one-time key in the link,
+works offline) over the same services as the command line: add projects with a checked
+step-by-step wizard, write and triage tasks, order the pool, run now or at night, follow the
+current step of a run and stop that one job, read the gate report and the diff, answer questions
+that need a person, and edit the settings. Merging stays with a person.
+
+| | |
+|---|---|
+| ![Tasks, light theme](docs/images/ui-tasks-light.png) | ![Runs with a live job, dark theme](docs/images/ui-runs-dark.png) |
+| ![A failed wizard check with a fix](docs/images/ui-wizard-check.png) | ![Tasks at phone width](docs/images/ui-tasks-phone-dark.png) |
+
+Details: [docs/UI.md](docs/UI.md).
+
 ## Requirements and current limits
 
 - .NET 10 SDK, git, Claude Code signed in with a Claude subscription. API keys are not used.
@@ -150,6 +165,7 @@ For Azure DevOps work items and draft pull requests: [docs/AZURE-DEVOPS.md](docs
 | `src/DevAutopilot.Core` | pipeline, merge gate, tool policy, config, local modules, evals |
 | `src/DevAutopilot.ClaudeCode` | the Claude Code runner and the PreToolUse hook |
 | `src/DevAutopilot.AzureDevOps` | work items, triage tags and comments, draft pull requests, doctor checks |
+| `src/DevAutopilot.Web` | the local web UI (`autopilot ui`): minimal API and static pages |
 | `src/DevAutopilot.Diagnostics` | read-only MCP server over JSON Lines logs |
 | `tests/` | unit and integration tests for each project |
 | `examples/library-catalogue` | a small .NET API with seeded defects, tasks, telemetry and eval cases |

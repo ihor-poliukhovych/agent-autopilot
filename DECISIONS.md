@@ -133,3 +133,31 @@ comment and result once. See docs/TRACKERS.md.
   would need its own triage, list and pool code).
 - The Azure DevOps module still serves its work items directly; moving it onto the sync service
   is a later step.
+
+## D-016 The UI is a local minimal API with static pages (accepted, 2026-11-26)
+
+`autopilot ui` serves `DevAutopilot.Web`: ASP.NET minimal API endpoints and plain HTML, CSS and
+JavaScript modules compiled into the assembly. No Node toolchain, no framework, no outside
+requests, so the tool stays one package that works offline. Endpoints only call services; the
+rules stay in the core library and in `SetupService`, `TaskOperations`, `PoolOperations` and
+`RunOperations`, which the tests call through an in-memory host.
+
+- Access: 127.0.0.1 only; a one-time key in the first link becomes a session cookie; changes need
+  the cookie, a custom header and a matching `Origin`; only local host names are served; a strict
+  content policy. The UI is for one person on one computer, not a shared server.
+- Setup is one draft object. The wizard and the settings page edit it and the same code turns it
+  into the settings file, so there is one place that decides what a valid project is. The checks
+  are the `doctor` checks, run against a temporary copy of the draft. A step passes only if its
+  checks ran and passed; the server repeats the cheap ones when creating the project.
+- The web project cannot reference the command line project (which references it), so the
+  command line supplies the `doctor` checks, the folder defaults and the tracker modules behind
+  three small interfaces. Tests replace them with fakes.
+- Secrets: only environment variable names are stored. Fields for names refuse values that do not
+  look like a name, so a pasted token never reaches the settings file.
+- Settings gain an optional `identity` (name and address of the agent's commits), and local tasks
+  can be edited (`LocalTaskService.Update`); an edit changes the text hash, so stored triage shows
+  as stale. A person's answer to a triage question is added to the task as a comment and as a
+  section of its text.
+- Rejected: a Node front end (a second toolchain for a local tool), serving the UI on a network
+  address with accounts (a different product with a different threat model), and polling the
+  filesystem instead of calling the services.

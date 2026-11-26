@@ -19,11 +19,15 @@ Ideas that are planned but not built. Order may change.
    `auth: "service-principal"`; `ProjectSettingsService` for settings and context files.
    Left over for the UI step: calling these services from the web UI, and the behaviour
    behind `autoQueue` and `trust` (they are only read and checked now).
-2. **Local web UI** (`autopilot ui`, 127.0.0.1 only, one-time key in the URL):
-   tasks (triage, Start, add to pool), pool (order, run now, run at night with
-   confirmation), runs (live step, history, gate report, diff), project settings (who
-   merges, where task state lives, agent identity, models, limits, risk paths),
-   context documents editor.
+2. **Local web UI.** *(Done, see D-016 and docs/UI.md.)* `autopilot ui` (127.0.0.1 only,
+   one-time key in the link): projects and a checked add-project wizard, tasks (triage and
+   staleness, add and edit, comments, Start, add to pool), the pool (order, run now, run at night
+   after a confirmation that shows the plan), runs (live step, a Stop button for one job, history,
+   gate report, diff, how often a person agreed with the gate), questions that need a person, and
+   settings (trust, identity, models, limits, paths, context documents). Left over: the behaviour
+   behind `trust` and `autoQueue`, stopping a pool run as a whole, answering needs-human questions
+   of tracker tasks, and wiring the Azure DevOps write-back checks into the wizard once that module
+   is merged.
 3. **Verify and publish:** VERIFY.md (secret scan, forbidden words over files and history,
    licences, fresh clone and install by GETTING-STARTED), private GitHub repository,
    owner review, then public.
@@ -37,10 +41,9 @@ and see the agent's results without leaving the tool.
 
 Direction:
 
-- *(Done, see D-014.)* Tasks live in the workspace database, `autopilot task add|list|show|comment|close|reopen|label|import-files`, with comments and the agent's results in a history. Repository-local task files still work and can be imported. Left over: the local web UI over the same service.
-- Then a small local web UI (`autopilot ui`, served on localhost only) over the same
-  files: a task board, a task page with comments, triage result, runs, gate facts and
-  the diff.
+- *(Done, see D-014.)* Tasks live in the workspace database, `autopilot task add|list|show|comment|close|reopen|label|import-files`, with comments and the agent's results in a history. Repository-local task files still work and can be imported. The local web UI over the same service is done (see D-016).
+- *(Done, see D-016.)* The local web UI (`autopilot ui`, localhost only) over the same service: a task
+  page with comments, triage result, runs, gate facts and the diff.
 
 ## Project context, fully local
 
@@ -51,7 +54,7 @@ context that every agent role reads before working:
 - `context/architecture.md`, `context/conventions.md`, `context/glossary.md`,
   `context/decisions/` (architecture decision records).
 - The agent can read the context but never change it.
-- The local web UI edits these documents directly, next to tasks and comments.
+- The local web UI edits these documents directly (Settings, *Context documents*).
 
 ## Trackers as sync adapters, not separate worlds
 
