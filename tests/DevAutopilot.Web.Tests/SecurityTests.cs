@@ -19,6 +19,14 @@ public sealed class SecurityTests
     }
 
     [Fact]
+    public void Each_port_gets_its_own_session_cookie_name()
+    {
+        Assert.NotEqual(
+            SessionGuard.CookieNameFor(new Microsoft.AspNetCore.Http.HostString("127.0.0.1", 5290)),
+            SessionGuard.CookieNameFor(new Microsoft.AspNetCore.Http.HostString("127.0.0.1", 5292)));
+    }
+
+    [Fact]
     public async Task The_key_works_once_and_starts_a_cookie_session()
     {
         await using var ui = new UiFixture(signedIn: false);

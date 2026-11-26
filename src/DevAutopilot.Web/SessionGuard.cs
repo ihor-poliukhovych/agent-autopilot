@@ -11,6 +11,9 @@ namespace DevAutopilot.Web;
 public sealed class SessionGuard
 {
     public const string CookieName = "ap_session";
+
+    /// <summary>Cookies are shared by every port of a host, so each UI gets its own name; two UIs on one machine would sign each other out.</summary>
+    public static string CookieNameFor(HostString host) => host.Port is { } port ? $"{CookieName}_{port}" : CookieName;
     public const string RequestHeader = "X-Autopilot-Request";
 
     private readonly byte[] _key;
@@ -40,7 +43,7 @@ public sealed class SessionGuard
     public string SessionToken => _session;
 
     public bool HasSession(HttpRequest request) =>
-        request.Cookies.TryGetValue(CookieName, out var value) && value is not null
+        request.Cookies.TryGetValue(CookieNameFor(request.Host), out var value) && value is not null
         && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(_session), Encoding.UTF8.GetBytes(value));
 
     public static bool IsLocalHost(HostString host) =>
@@ -78,7 +81,7 @@ public sealed class SessionGuard
             {
                 if (TryRedeem(offered.ToString()))
                 {
-                    context.Response.Cookies.Append(CookieName, _session, new CookieOptions
+                    context.Response.Cookies.Append(CookieNameFor(context.Request.Host), _session, new CookieOptions
                     {
                         HttpOnly = true,
                         SameSite = SameSiteMode.Strict,
