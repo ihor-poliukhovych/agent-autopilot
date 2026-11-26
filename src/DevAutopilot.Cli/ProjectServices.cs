@@ -9,6 +9,7 @@ using DevAutopilot.Core.Gate;
 using DevAutopilot.Core.Git;
 using DevAutopilot.Core.Local;
 using DevAutopilot.Core.Pipeline;
+using DevAutopilot.Core.Tasks;
 using DevAutopilot.Diagnostics;
 
 namespace DevAutopilot.Cli;
@@ -24,7 +25,7 @@ public static class ProjectServices
     /// <c>.autopilot/tasks/</c> for this run whatever <c>modules.workItems</c> says, and then drafts stay
     /// local bundles too, so a local task id is never linked to an unrelated remote work item.
     /// </summary>
-    public static async Task<AutopilotPipeline> CreatePipelineAsync(string projectRoot, CliContext context, CancellationToken ct, string? source = null, string? dataFolder = null)
+    public static async Task<AutopilotPipeline> CreatePipelineAsync(string projectRoot, CliContext context, CancellationToken ct, string? source = null, string? dataFolder = null, LocalTaskService? tasks = null)
     {
         AutopilotConfig config;
         try
@@ -59,8 +60,8 @@ public static class ProjectServices
         }
 
         var (workItems, publisher) = localSource
-            ? ((IWorkItemSource)new LocalWorkItemSource(projectRoot, dataFolder), (IPublisher)new LocalPublisher(projectRoot, dataFolder))
-            : CreateModules(projectRoot, config, dataFolder);
+            ? CreateLocalModules(projectRoot, dataFolder, tasks)
+            : CreateModules(projectRoot, config, dataFolder, tasks);
         return new AutopilotPipeline(new AutopilotPipelineOptions
         {
             ProjectRoot = projectRoot,
@@ -87,11 +88,10 @@ public static class ProjectServices
     /// written; with Azure DevOps the draft pull request is opened after it.
     /// The module lives as long as the process (one command), so it is not disposed here.
     /// </summary>
-    public static (IWorkItemSource WorkItems, IPublisher Publisher) CreateModules(string projectRoot, AutopilotConfig config, string? dataFolder = null)
+    public static (IWorkItemSource WorkItems, IPublisher Publisher) CreateModules(string projectRoot, AutopilotConfig config, string? dataFolder = null, LocalTaskService? tasks = null)
     {
         ArgumentNullException.ThrowIfNull(config);
-        IWorkItemSource workItems = new LocalWorkItemSource(projectRoot, dataFolder);
-        IPublisher publisher = new LocalPublisher(projectRoot, dataFolder);
+        var (workItems, publisher) = CreateLocalModules(projectRoot, dataFolder, tasks);
 
         var adoForItems = AzureDevOpsModule.IsSelected(config.Modules.WorkItems);
         var adoForPublisher = AzureDevOpsModule.IsSelected(config.Modules.Publisher);
@@ -121,6 +121,19 @@ public static class ProjectServices
         }
 
         return (workItems, publisher);
+    }
+
+    /// <summary>
+    /// The local source and publisher. With <paramref name="tasks"/> (a registered project whose tasks are local) the
+    /// work items are the workspace tasks and the gate verdict and draft are appended to their history; otherwise
+    /// they are the repository-local task files.
+    /// </summary>
+    public static (IWorkItemSource WorkItems, IPublisher Publisher) CreateLocalModules(string projectRoot, string? dataFolder, LocalTaskService? tasks)
+    {
+        IPublisher publisher = new LocalPublisher(projectRoot, dataFolder);
+        return tasks is null
+            ? (new LocalWorkItemSource(projectRoot, dataFolder), publisher)
+            : (new LocalTaskWorkItemSource(tasks, new TriageStore(projectRoot, dataFolder)), new TaskHistoryPublisher(publisher, tasks));
     }
 
     /// <summary>
