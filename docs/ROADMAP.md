@@ -74,6 +74,50 @@ mostly field mapping.
 
 The interface and the sync service exist (see D-014 and docs/TRACKERS.md); the Azure DevOps adapter still has to be moved onto them.
 
+## Gaps before a full migration
+
+What a team running a larger, project-specific autopilot still needs before it can move
+onto Dev Autopilot completely. Generic capabilities only; order inside a group is not fixed.
+
+### P1: blocks a migration
+
+- **Merge gate parity:** proof that the reproducing test fails before and passes after, a
+  check of the pull request's thread and vote state, project rules read from the base
+  branch instead of the branch under review, verdicts bound to one commit.
+- **Risk classification:** a computed level from paths and diff (public contracts, stored
+  data, secrets, paid resources), compared with the declared level, never lowered.
+- **Rulebook for triage:** written rules with ids that every agent-ready or needs-human mark
+  must cite, with accepted decision records overriding them.
+- **Human-question flow:** questions on tracker tasks answered in the UI, option answers,
+  answers read by author identity, re-triage after an answer.
+- **Merge hand-over decision:** keep every merge with a person, or add a guarded merge mode.
+
+### P2: soon
+
+- **Intake sources:** a queue of signals (feedback, ratings, health checks, exceptions) with
+  deduplication, masking and claim into a task.
+- **Story proposals:** propose an approach, let a person approve it, then build.
+- **Exception-watch style scheduled checks:** a baseline comparison that files tasks.
+- **Verify after deploy:** detect that a commit is deployed, run the task's "how to check".
+- **System diff page:** a broad-to-narrow page per pull request for a quick human decision.
+- **Usage dashboard:** plan-limit use per day and cost per run.
+- **Run-state table:** explicit steps, statuses and allowed transitions, with stalled-run
+  detection.
+- **Stop controls:** stop a whole pool run, one global pause switch.
+- **Auto-start and budget:** the behaviour behind `autoQueue` and `trust`, with a daily use limit.
+- **Pull request comment watcher:** react to new answers and votes on an open pull request.
+- **Tracker state in comments:** optionally mirror triage and run state to the tracker.
+
+### P3: later
+
+- Adversarial attack pass with an independent judge model.
+- Release-level verification after a production deploy.
+- Funnel view: time to merge, first-pass rate, returns by requester.
+- Generic scheduled actions beyond the night run.
+- Board and event timeline views by tracker column.
+- Eval cases for each capability above.
+- Always-on service for the UI.
+
 ## Other
 
 - A stronger sandbox for build and test runs (container or a separate OS user).
