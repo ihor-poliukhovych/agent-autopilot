@@ -4,10 +4,11 @@ Ideas that are planned but not built. Order may change.
 
 ## Next (in this order)
 
-0. **Project data outside the repository.** Settings, tasks, comments and run results
-   of a project live in a per-user workspace (markdown files first, a database later),
-   not in the project's repository and never in this one. `--workspace <path>` and a
-   default under the user profile; the repository-local `.autopilot/` stays as an option.
+0. **Project data outside the repository.** *(Done, see D-012.)* Per-user workspace
+   (`%USERPROFILE%\.dev-autopilot`, `--workspace`, `AUTOPILOT_WORKSPACE`) with a SQLite
+   registry and a folder per project; `autopilot project add|list|show|remove|import-local`;
+   `--project <key>`. The repository-local `.autopilot/` still works. Left over: `eval` on
+   workspace projects, comments and run history in the database.
 
 1. **Backend for a task pool and background runs** (services the UI calls, plus CLI):
    - `autopilot list [--json]`: open work items with stored triage (stale when the text
