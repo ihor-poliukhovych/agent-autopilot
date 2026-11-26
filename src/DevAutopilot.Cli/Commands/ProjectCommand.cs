@@ -63,6 +63,12 @@ public static class ProjectCommand
                 config = await InitCommand.BuildDefaultsAsync(repoFolder, ct, branch).ConfigureAwait(false);
             }
 
+            if (taskSource == ProjectRegistry.LocalSource && config.Modules.WorkItems.Type != "local")
+            {
+                // --source local after a detected Azure DevOps remote: keep the person's choice.
+                config = config with { Modules = config.Modules with { WorkItems = new ModuleConfig { Type = "local" }, Publisher = new ModuleConfig { Type = "local" } } };
+            }
+
             if (taskSource == ProjectRegistry.AzureDevOpsSource && config.Modules.WorkItems.Type != ProjectRegistry.AzureDevOpsSource)
             {
                 config = config with
