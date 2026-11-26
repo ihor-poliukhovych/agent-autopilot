@@ -93,7 +93,7 @@ export async function render({ view, key, rest, go }) {
       h('p', {}, 'Every open task, from backlog to a draft a person merges.')),
     h('div', { class: 'row' },
       h('button', { type: 'button', onclick: () => load().catch(e => toast(e.message, true)) }, 'Refresh'),
-      runs.status.busy ? h('a', { class: 'chip run', href: link(key, 'runs') }, h('span', { class: 'dot' }), 'Run active') : null)));
+      null)));
 
     if (!tasks.items.length) {
       holder.append(h('div', { class: 'card' }, emptyState(
@@ -117,7 +117,7 @@ export async function render({ view, key, rest, go }) {
     }
     const fun = funnel(runs.stats, runs.runs);
     holder.append(waitingPanel(key, waiting), fun,
-      h('div', { class: 'board', role: 'list' }, STAGES.map(([id, label]) => h('section', { class: `lane s-${id}`, role: 'listitem', 'aria-label': label },
+      h('div', { class: 'board', role: 'list' }, STAGES.map(([id, label]) => h('section', { class: `lane s-${id}${lanes[id].length ? '' : ' is-empty'}`, role: 'listitem', 'aria-label': label },
         h('div', { class: 'lane-head' }, h('span', {}, h('span', { class: 'bar' }), label), h('span', { class: 'n' }, String(lanes[id].length))),
         lanes[id].length ? lanes[id].map(([item, job, stage]) => card(key, item, job, stage)) : h('div', { class: 'lane-empty' }, 'Empty')))));
     return runs;

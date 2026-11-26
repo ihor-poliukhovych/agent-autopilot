@@ -201,7 +201,7 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
 .waiting .why { flex: 1 1 18rem; color: var(--muted); font-size: var(--fs-sm); }
 
 /* pipeline board */
-.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(190px, 1fr); gap: var(--s3); overflow-x: auto; padding-bottom: var(--s3); align-items: start; }
+.board { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--s3); align-items: start; }
 .lane { background: var(--surface-2); border-radius: var(--radius); padding: var(--s2); min-height: 8rem; }
 .lane-head { display: flex; justify-content: space-between; align-items: center; padding: var(--s1) var(--s2) var(--s2); font-weight: 650; font-size: var(--fs-sm); }
 .lane-head .n { color: var(--muted); font-weight: 600; }
@@ -240,7 +240,6 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
   .topbar { padding: var(--s2) .75rem; gap: var(--s2); flex-wrap: wrap; }
   .brand span { display: none; }
   .tabs { padding: 0 var(--s2); }
-  .board { grid-auto-flow: row; grid-auto-columns: auto; overflow: visible; }
   table.stack-sm thead { display: none; }
   table.stack-sm, table.stack-sm tbody, table.stack-sm tr, table.stack-sm td { display: block; width: 100%; }
   table.stack-sm tr { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .4rem .6rem; margin-bottom: .6rem; background: var(--surface); }
@@ -248,4 +247,5 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
   table.stack-sm td[data-label]::before { content: attr(data-label) ": "; color: var(--muted); font-size: .8rem; }
   table.stack-sm td.actions { text-align: left; white-space: normal; padding-top: .4rem; }
   .page-head { align-items: flex-start; }
+  .lane.is-empty { display: none; }
 }
