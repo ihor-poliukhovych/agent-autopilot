@@ -223,4 +223,6 @@ On Windows `az.cmd` started by its bare name from another process prints "Failed
 executable." and exits 1, because the batch file cannot find its own folder. The token provider
 resolves `az.cmd` or `az.exe` from `PATH`, starts it by full path and removes `PYTHONHOME` and
 `PYTHONPATH` for the child. `autopilot ado import` reads the configured query and writes only local
-tasks (matched by work item number, so it is idempotent); it never writes to Azure DevOps.
+tasks (matched by work item number, so it is idempotent); it never writes to Azure DevOps. The import is a
+core service (`TrackerImportService`) that the command line and the web UI both call; the UI offers a
+preview (dry run) first and a confirmed import in the project settings.

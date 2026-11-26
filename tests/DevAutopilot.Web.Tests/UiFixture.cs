@@ -57,6 +57,15 @@ public sealed class FakeAdo : IAzureDevOpsProbe
 
     public int SeenSkip { get; private set; }
 
+    public bool? SeenDryRun { get; private set; }
+
+    public Task<TrackerImportReport> ImportAsync(ModuleConfig module, string repositoryFolder, LocalTaskService tasks, int? limit, bool dryRun, CancellationToken ct)
+    {
+        Seen = module;
+        SeenDryRun = dryRun;
+        return Task.FromResult(new TrackerImportReport(3, 1, 2, dryRun));
+    }
+
     public Task<WorkItemPreviewPage> PreviewAsync(ModuleConfig module, string repositoryFolder, int skip, int take, CancellationToken ct)
     {
         Seen = module;

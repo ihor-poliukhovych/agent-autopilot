@@ -228,21 +228,6 @@ autopilot ado check --project shop              # sign-in, query, read, write, g
 prints one line per check, with a fix when it did not pass, and `--json` gives the same for a program.
 The write check asks Azure DevOps to validate an update of one item and saves nothing.
 
-### Importing work items as local tasks
-
-```powershell
-autopilot ado import --project shop --dry-run   # count what would change, write nothing
-autopilot ado import --project shop             # run the configured query, store the items as tasks
-autopilot ado import --project shop --limit 20  # only the first 20 items
-```
-
-`import` needs a registered project. It only reads from Azure DevOps and writes into the local
-workspace. Each work item becomes a task whose external id is the work item number and whose link
-points to the item; tags become labels. States Closed, Done, Removed, Resolved and Completed close
-the task, any other state keeps it open. A second run creates nothing new: it updates a task only
-when the title, description, labels, link or state changed, and prints the counts of new, updated and
-unchanged items.
-
 ### Troubleshooting: "Failed to load python executable."
 
 Symptom: `az` works in your shell, but Dev Autopilot reports that the Azure CLI did not return a token

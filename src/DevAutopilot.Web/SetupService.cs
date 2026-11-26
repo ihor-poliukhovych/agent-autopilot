@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using DevAutopilot.Core;
 using DevAutopilot.Core.Analysis;
 using DevAutopilot.Core.Config;
+using DevAutopilot.Core.Tasks;
 using DevAutopilot.Core.Workspace;
 
 namespace DevAutopilot.Web;
@@ -108,6 +109,24 @@ public sealed partial class SetupService(WebUiOptions options)
         var config = draft with { TaskSource = ProjectRegistry.AzureDevOpsSource };
         var module = config.ApplyTo(new AutopilotConfig()).Modules.WorkItems;
         return await options.AzureDevOps.PreviewAsync(module, folder, Math.Max(0, skip), PreviewPageSize, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Imports the work items of the project's Azure DevOps query as local tasks (read only on the Azure DevOps side).
+    /// A dry run only counts. Uses the saved settings of the project.
+    /// </summary>
+    public async Task<TrackerImportReport> ImportAsync(ProjectScope scope, bool dryRun, int? limit, CancellationToken ct)
+    {
+        if (options.AzureDevOps is null)
+        {
+            throw new ConflictException("Azure DevOps is not available in this build.");
+        }
+
+        var config = ConfigLoader.Load(scope.Project.RepositoryFolder, scope.DataFolder);
+        var module = new[] { config.Modules.Publisher, config.Modules.WorkItems }.FirstOrDefault(m => m.Type is not null && (m.Type.Equals(ProjectRegistry.AzureDevOpsSource, StringComparison.OrdinalIgnoreCase) || m.Type.Equals("azuredevops", StringComparison.OrdinalIgnoreCase) || m.Type.Equals("ado", StringComparison.OrdinalIgnoreCase)))
+            ?? throw new ArgumentException("This project is not connected to Azure DevOps yet. Open Settings, press \"Connect Azure DevOps\", fill in the steps and save.");
+        var tasks = new LocalTaskService(scope.Workspace, scope.Project.Key);
+        return await options.AzureDevOps.ImportAsync(module, scope.Project.RepositoryFolder, tasks, limit, dryRun, ct).ConfigureAwait(false);
     }
 
     /// <summary>Registers the project and writes its settings. Fails with every problem named when a check fails.</summary>

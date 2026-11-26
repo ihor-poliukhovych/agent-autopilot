@@ -102,13 +102,32 @@ public sealed class UiBackend(CliContext context) : ISetupChecker, IAzureDevOpsP
         }
         catch (AzureDevOpsSettingsException ex)
         {
-            throw new ArgumentException(string.Join(" ", ex.Problems), ex);
+            throw new ArgumentException(string.Join(" ", ex.Problems) + AdoFix, ex);
         }
         catch (Exception ex) when (ex is AzureDevOpsException or AzureDevOpsAuthException)
         {
-            throw new ArgumentException(ex.Message, ex);
+            throw new ArgumentException(ex.Message + AdoFix, ex);
         }
     }
+
+    public async Task<TrackerImportReport> ImportAsync(ModuleConfig module, string repositoryFolder, LocalTaskService tasks, int? limit, bool dryRun, CancellationToken ct)
+    {
+        try
+        {
+            using var ado = AzureDevOpsModule.Create(module, repositoryFolder, "main", requireRepository: false);
+            return await new TrackerImportService(tasks).ImportAsync(ado.WorkItems, limit, dryRun, ct).ConfigureAwait(false);
+        }
+        catch (AzureDevOpsSettingsException ex)
+        {
+            throw new ArgumentException(string.Join(" ", ex.Problems) + AdoFix, ex);
+        }
+        catch (Exception ex) when (ex is AzureDevOpsException or AzureDevOpsAuthException)
+        {
+            throw new ArgumentException(ex.Message + AdoFix, ex);
+        }
+    }
+
+    private const string AdoFix = " To fix it: open the project's Settings, go to the Azure DevOps step and press Check (or run: autopilot ado check).";
 
     public IWorkItemSource Create(string repositoryFolder, AutopilotConfig config, string dataFolder, LocalTaskService? tasks)
     {

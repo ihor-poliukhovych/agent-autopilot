@@ -156,6 +156,33 @@ public sealed class ProjectAndWizardTests
     }
 
     [Fact]
+    public async Task Import_needs_an_Azure_DevOps_connection_and_names_the_next_step()
+    {
+        await using var ui = new UiFixture();
+        await ui.CreateProjectAsync();
+        var (status, body) = await ui.PostAsync("/api/projects/demo/azure-devops/import", new { dryRun = true });
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.Contains("Connect Azure DevOps", body.GetProperty("error").GetString());
+        Assert.Null(ui.Ado.SeenDryRun);
+    }
+
+    [Fact]
+    public async Task Import_of_a_connected_project_runs_a_dry_run_then_the_real_import()
+    {
+        await using var ui = new UiFixture();
+        var ado = new { organizationUrl = "https://dev.azure.com/acme", project = "Shop", repository = "shop", auth = "az" };
+        var (created, _) = await ui.PostAsync("/api/projects", ui.Draft("shop", "azure-devops", ado));
+        Assert.Equal(HttpStatusCode.Created, created);
+
+        var (_, dry) = await ui.PostAsync("/api/projects/shop/azure-devops/import", new { dryRun = true });
+        Assert.True(dry.GetProperty("dryRun").GetBoolean());
+        Assert.Equal(3, dry.GetProperty("created").GetInt32());
+        var (_, real) = await ui.PostAsync("/api/projects/shop/azure-devops/import", new { dryRun = false });
+        Assert.False(real.GetProperty("dryRun").GetBoolean());
+        Assert.False(ui.Ado.SeenDryRun);
+    }
+
+    [Fact]
     public async Task Settings_are_saved_through_the_same_draft_and_bad_values_change_nothing()
     {
         await using var ui = new UiFixture();

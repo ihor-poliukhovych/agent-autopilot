@@ -27,7 +27,7 @@ public static class AzureDevOpsImportCommand
             {
                 try
                 {
-                    var report = await new AzureDevOpsImporter(tasks).ImportAsync(module.WorkItems, parse.GetValue(limit), parse.GetValue(dryRun), ct).ConfigureAwait(false);
+                    var report = await new TrackerImportService(tasks).ImportAsync(module.WorkItems, parse.GetValue(limit), parse.GetValue(dryRun), ct).ConfigureAwait(false);
                     await output.WriteLineAsync(parse.GetValue(json)
                         ? JsonSerializer.Serialize(report, Json)
                         : $"{(report.DryRun ? "Dry run, nothing written. Would import" : "Imported")}: {report.Created} new, {report.Updated} updated, {report.Unchanged} unchanged.").ConfigureAwait(false);

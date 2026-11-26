@@ -1,22 +1,18 @@
-using DevAutopilot.Core;
-using DevAutopilot.Core.Local;
-using DevAutopilot.Core.Tasks;
-
-namespace DevAutopilot.AzureDevOps;
+namespace DevAutopilot.Core.Tasks;
 
 /// <summary>Counts of one import. <see cref="DryRun"/> says nothing was written.</summary>
-public sealed record AzureDevOpsImportReport(int Created, int Updated, int Unchanged, bool DryRun);
+public sealed record TrackerImportReport(int Created, int Updated, int Unchanged, bool DryRun);
 
 /// <summary>
-/// Reads the configured query (read only) and turns the work items into local tasks, matched by the
+/// Turns the work items of a tracker (read only) into local tasks, matched by the
 /// work item number. A second run creates nothing new and only updates what changed.
 /// </summary>
-public sealed class AzureDevOpsImporter(LocalTaskService tasks)
+public sealed class TrackerImportService(LocalTaskService tasks)
 {
     /// <summary>Tracker states that count as finished; any other state keeps the task open.</summary>
     private static readonly string[] ClosedStates = ["Closed", "Done", "Removed", "Resolved", "Completed"];
 
-    public async Task<AzureDevOpsImportReport> ImportAsync(IWorkItemSource source, int? limit, bool dryRun, CancellationToken ct)
+    public async Task<TrackerImportReport> ImportAsync(IWorkItemSource source, int? limit, bool dryRun, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(source);
         var items = await source.ListOpenAsync(ct).ConfigureAwait(false);
@@ -33,7 +29,7 @@ public sealed class AzureDevOpsImporter(LocalTaskService tasks)
             }
         }
 
-        return new AzureDevOpsImportReport(created, updated, unchanged, dryRun);
+        return new TrackerImportReport(created, updated, unchanged, dryRun);
     }
 
     public static TaskImport ToImport(WorkItem item) =>
