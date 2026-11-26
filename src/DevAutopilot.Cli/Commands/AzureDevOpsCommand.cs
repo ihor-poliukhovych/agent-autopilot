@@ -73,10 +73,10 @@ public static class AzureDevOpsCommand
             return results.Any(r => r.Outcome == CheckOutcome.Fail) ? ExitCodes.Failure : ExitCodes.Ok;
         }, ct));
 
-        return new Command("ado", "Azure DevOps: preview the query and check the connection.") { preview, check };
+        return new Command("ado", "Azure DevOps: preview the query, check the connection, import work items as local tasks.") { preview, check, AzureDevOpsImportCommand.Create(options, context) };
     }
 
-    private static async Task<int> RunAsync(
+    internal static async Task<int> RunAsync(
         ProjectOptions options, CliContext context, ParseResult parse, bool requireRepository, Func<AzureDevOpsModule, TextWriter, Task<int>> action, CancellationToken ct)
     {
         _ = ct;
