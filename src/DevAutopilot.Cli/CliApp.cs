@@ -51,6 +51,7 @@ public static class CliApp
         root.Subcommands.Add(EvalCommand.Create(projectOption, context));
         root.Subcommands.Add(ProjectCommand.Create(projectOption, context));
         root.Subcommands.Add(TaskCommand.Create(projectOption, context));
+        root.Subcommands.Add(UiCommand.Create(projectOption, context));
         foreach (var backend in BackendCommands.Create(projectOption, context))
         {
             root.Subcommands.Add(backend);
