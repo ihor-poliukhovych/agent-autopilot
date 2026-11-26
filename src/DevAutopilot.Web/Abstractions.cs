@@ -37,6 +37,9 @@ public sealed record WorkItemPreviewPage(IReadOnlyList<WorkItemPreview> Items, i
 public interface IAzureDevOpsProbe
 {
     Task<WorkItemPreviewPage> PreviewAsync(ModuleConfig module, string repositoryFolder, int skip, int take, CancellationToken ct);
+
+    /// <summary>Runs the module's query (read only) and imports the items as local tasks; with <paramref name="dryRun"/> only counts.</summary>
+    Task<TrackerImportReport> ImportAsync(ModuleConfig module, string repositoryFolder, LocalTaskService tasks, int? limit, bool dryRun, CancellationToken ct);
 }
 
 /// <summary>Builds the work item source of a project (the local tasks, the task files or a tracker).</summary>
