@@ -154,9 +154,16 @@ public sealed class AzureCliTokenProvider : IAzureDevOpsTokenProvider
         var token = result.StandardOutput.Trim();
         if (!result.Succeeded || token.Length == 0)
         {
-            // stderr of az never contains the token; stdout is not shown on purpose.
+            // stderr of az never contains the token; stdout is not shown on purpose (az.cmd prints some errors there).
+            var reason = AzureCliLauncher.FirstLine(result.StandardError);
+            if (reason.Length == 0 && !result.Succeeded)
+            {
+                reason = AzureCliLauncher.FirstLine(result.StandardOutput);
+            }
+
             throw new AzureDevOpsAuthException(
-                "The Azure CLI did not return a token for Azure DevOps (exit code " + result.ExitCode + "). " +
+                "The Azure CLI did not return a token for Azure DevOps (exit code " + result.ExitCode + ")" +
+                (reason.Length > 0 ? ": " + reason : ".") + " " +
                 "Install the Azure CLI, run 'az login' as the agent identity and try again.");
         }
 
@@ -166,13 +173,7 @@ public sealed class AzureCliTokenProvider : IAzureDevOpsTokenProvider
     public string Describe() => "Azure CLI sign-in (az account get-access-token)";
 
     private static Task<ProcessResult> RunAzAsync(IReadOnlyList<string> arguments, CancellationToken ct) =>
-        ProcessRunner.RunAsync(
-            OperatingSystem.IsWindows() ? "az.cmd" : "az",
-            arguments,
-            Environment.CurrentDirectory,
-            Timeout,
-            new Dictionary<string, string?> { ["AZURE_CORE_ONLY_SHOW_ERRORS"] = "true" },
-            ct);
+        AzureCliLauncher.RunAsync(arguments, Timeout, ct);
 }
 
 /// <summary>
