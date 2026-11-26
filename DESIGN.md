@@ -187,11 +187,11 @@ They are never written to files.
 ## 9. Repository layout
 
 ```
-src/Autopilot.Cli            the `autopilot` dotnet tool: init, doctor, triage, run, review, gate, eval
-src/Autopilot.Core           pipeline, roles, gate, config, interfaces
-src/Autopilot.ClaudeCode     IAgentRunner over `claude -p`, PreToolUse hook
-src/Autopilot.AzureDevOps    work items and draft PRs
-src/Autopilot.Diagnostics    read-only MCP server (stdio) over a diagnostics source
+src/DevAutopilot.Cli            the `autopilot` dotnet tool: init, doctor, triage, run, review, gate, eval
+src/DevAutopilot.Core           pipeline, roles, gate, config, interfaces
+src/DevAutopilot.ClaudeCode     IAgentRunner over `claude -p`, PreToolUse hook
+src/DevAutopilot.AzureDevOps    work items and draft PRs
+src/DevAutopilot.Diagnostics    read-only MCP server (stdio) over a diagnostics source
 tests/...                    unit tests for every project above
 examples/library-catalogue   .NET 10 minimal API with xUnit tests, seeded tasks,
                              fake telemetry and eval cases, ready to try

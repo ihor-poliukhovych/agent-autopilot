@@ -62,7 +62,7 @@ flowchart LR
 ## Limits are enforced, not requested
 
 Every tool call the agent makes goes through a PreToolUse hook written in C#
-(`src/Autopilot.Core/Policy/ToolPolicyEvaluator.cs`). It fails closed and denies:
+(`src/DevAutopilot.Core/Policy/ToolPolicyEvaluator.cs`). It fails closed and denies:
 
 - writes outside the configured source and test folders, and any write to
   `.autopilot/` (the tool's own settings) or to risk paths such as project files,
@@ -130,11 +130,11 @@ For Azure DevOps work items and draft pull requests: [docs/AZURE-DEVOPS.md](docs
 
 | Path | What |
 |---|---|
-| `src/Autopilot.Cli` | the `autopilot` dotnet tool |
-| `src/Autopilot.Core` | pipeline, merge gate, tool policy, config, local modules, evals |
-| `src/Autopilot.ClaudeCode` | the Claude Code runner and the PreToolUse hook |
-| `src/Autopilot.AzureDevOps` | work items, triage tags and comments, draft pull requests, doctor checks |
-| `src/Autopilot.Diagnostics` | read-only MCP server over JSON Lines logs |
+| `src/DevAutopilot.Cli` | the `autopilot` dotnet tool |
+| `src/DevAutopilot.Core` | pipeline, merge gate, tool policy, config, local modules, evals |
+| `src/DevAutopilot.ClaudeCode` | the Claude Code runner and the PreToolUse hook |
+| `src/DevAutopilot.AzureDevOps` | work items, triage tags and comments, draft pull requests, doctor checks |
+| `src/DevAutopilot.Diagnostics` | read-only MCP server over JSON Lines logs |
 | `tests/` | unit and integration tests for each project |
 | `examples/library-catalogue` | a small .NET API with seeded defects, tasks, telemetry and eval cases |
 | `docs/` | design, gate rules, evals, setup guides, roadmap |

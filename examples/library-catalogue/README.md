@@ -15,7 +15,7 @@ tools/TelemetryGenerator/     the program that writes telemetry.jsonl
 ```
 
 The example has its own `Directory.Build.props` (net10.0, nullable, warnings as errors) and
-does not inherit the settings of the agent-autopilot repository, so it behaves the same when
+does not inherit the settings of the dev-autopilot repository, so it behaves the same when
 copied elsewhere.
 
 ## The API

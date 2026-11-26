@@ -142,17 +142,17 @@ The work item source and the publisher read the same settings block. Copy it int
 | `tokenVariable` | no | `AUTOPILOT_ADO_PAT` | Name of the environment variable; must start with `AUTOPILOT_` |
 
 Default query: open items of the project (state not Closed, Done or Removed) that have
-the tag `agent-autopilot`, newest first, at most 50:
+the tag `dev-autopilot`, newest first, at most 50:
 
 ```sql
 SELECT [System.Id] FROM WorkItems
 WHERE [System.TeamProject] = @project
   AND [System.State] NOT IN ('Closed', 'Done', 'Removed')
-  AND [System.Tags] CONTAINS 'agent-autopilot'
+  AND [System.Tags] CONTAINS 'dev-autopilot'
 ORDER BY [System.CreatedDate] DESC
 ```
 
-So a person decides which items the agent may look at by adding the tag `agent-autopilot`.
+So a person decides which items the agent may look at by adding the tag `dev-autopilot`.
 The name is chosen so that it does not start with the triage tag prefix `autopilot:`.
 
 Open task files in `.autopilot/tasks/` are not read while the work items come from Azure
@@ -188,7 +188,7 @@ refused.
 | Triage results | Always OK; says whether `recordTriage` is `remote` (tags and a comment) or `local` (nothing written) |
 | Azure DevOps token | The environment variable is set, or `az` returns a token |
 | Azure DevOps project | The project can be read with the token |
-| Work item query | The query runs; shows how many items match and the tag used (`agent-autopilot` for the default query, or "custom query") |
+| Work item query | The query runs; shows how many items match and the tag used (`dev-autopilot` for the default query, or "custom query") |
 | Azure DevOps repository | The repository can be read |
 | Agent can Contribute / Create branch / Contribute to pull requests | The identity has the right |
 | Agent cannot force push, edit policies, manage permissions, bypass policies when pushing, bypass policies when completing pull requests | The identity does **not** have the right; each one it has is a FAIL with the fix |

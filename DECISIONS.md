@@ -69,5 +69,6 @@ written from scratch without any employer or client code or data. The repository
 ## D-011 Name: Dev Autopilot (accepted, 2026-11-26)
 
 Product name "Dev Autopilot", repository `dev-autopilot`, NuGet package `DevAutopilot`.
-The command stays `autopilot`, the settings folder stays `.autopilot/`, and the code
-namespaces stay `Autopilot.*`.
+Projects and code namespaces are `DevAutopilot.*`, and the default Azure DevOps tag and
+the local working folders are `dev-autopilot`. The command stays `autopilot` and the
+settings folder stays `.autopilot/`, because people type them by hand.

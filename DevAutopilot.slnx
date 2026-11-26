@@ -1,16 +1,16 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/Autopilot.AzureDevOps/Autopilot.AzureDevOps.csproj" />
-    <Project Path="src/Autopilot.ClaudeCode/Autopilot.ClaudeCode.csproj" />
-    <Project Path="src/Autopilot.Cli/Autopilot.Cli.csproj" />
-    <Project Path="src/Autopilot.Core/Autopilot.Core.csproj" />
-    <Project Path="src/Autopilot.Diagnostics/Autopilot.Diagnostics.csproj" />
+    <Project Path="src/DevAutopilot.AzureDevOps/DevAutopilot.AzureDevOps.csproj" />
+    <Project Path="src/DevAutopilot.ClaudeCode/DevAutopilot.ClaudeCode.csproj" />
+    <Project Path="src/DevAutopilot.Cli/DevAutopilot.Cli.csproj" />
+    <Project Path="src/DevAutopilot.Core/DevAutopilot.Core.csproj" />
+    <Project Path="src/DevAutopilot.Diagnostics/DevAutopilot.Diagnostics.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/Autopilot.AzureDevOps.Tests/Autopilot.AzureDevOps.Tests.csproj" />
-    <Project Path="tests/Autopilot.ClaudeCode.Tests/Autopilot.ClaudeCode.Tests.csproj" />
-    <Project Path="tests/Autopilot.Cli.Tests/Autopilot.Cli.Tests.csproj" />
-    <Project Path="tests/Autopilot.Core.Tests/Autopilot.Core.Tests.csproj" />
-    <Project Path="tests/Autopilot.Diagnostics.Tests/Autopilot.Diagnostics.Tests.csproj" />
+    <Project Path="tests/DevAutopilot.AzureDevOps.Tests/DevAutopilot.AzureDevOps.Tests.csproj" />
+    <Project Path="tests/DevAutopilot.ClaudeCode.Tests/DevAutopilot.ClaudeCode.Tests.csproj" />
+    <Project Path="tests/DevAutopilot.Cli.Tests/DevAutopilot.Cli.Tests.csproj" />
+    <Project Path="tests/DevAutopilot.Core.Tests/DevAutopilot.Core.Tests.csproj" />
+    <Project Path="tests/DevAutopilot.Diagnostics.Tests/DevAutopilot.Diagnostics.Tests.csproj" />
   </Folder>
 </Solution>

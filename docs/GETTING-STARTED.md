@@ -21,7 +21,7 @@ Runs use your subscription's usage limits. API keys are not used: the tool remov
 From a clone of this repository:
 
 ```powershell
-dotnet pack src/Autopilot.Cli -c Release -o artifacts
+dotnet pack src/DevAutopilot.Cli -c Release -o artifacts
 dotnet tool install --global DevAutopilot --add-source artifacts
 autopilot --help
 ```

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\DevAutopilot.Core\DevAutopilot.Core.csproj" />
+    <ProjectReference Include="..\DevAutopilot.ClaudeCode\DevAutopilot.ClaudeCode.csproj" />
+    <ProjectReference Include="..\DevAutopilot.Diagnostics\DevAutopilot.Diagnostics.csproj" />
+    <ProjectReference Include="..\DevAutopilot.AzureDevOps\DevAutopilot.AzureDevOps.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" Version="3.0.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>autopilot</AssemblyName>
+    <RootNamespace>DevAutopilot.Cli</RootNamespace>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>autopilot</ToolCommandName>
+    <PackageId>DevAutopilot</PackageId>
+    <Version>0.1.0</Version>
+    <Description>Runs a Claude Code agent over a project's backlog behind a merge gate written in code.</Description>
+  </PropertyGroup>
+
+</Project>
