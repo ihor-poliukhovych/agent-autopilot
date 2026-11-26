@@ -1,5 +1,6 @@
 import { get, put } from './api.js';
 import { h, clear, toast, busy, badge, field } from './dom.js';
+import { connectAzureDevOps } from './connect.js';
 import { STEPS, trustField, runChecks } from './setupform.js';
 
 const base = key => `/projects/${encodeURIComponent(key)}`;
@@ -19,7 +20,7 @@ export async function render({ view, key, refreshState }) {
       h('p', {}, draft.taskSource === 'local'
         ? 'Local tasks: written and kept in this tool.'
         : `Azure DevOps: ${draft.ado.organizationUrl} / ${draft.ado.project}. Only names of environment variables are stored; the secrets are not.`),
-      h('p', { class: 'muted small' }, 'Change it in the section "Task source" below.')));
+      draft.taskSource === 'local' ? connectAzureDevOps(draft) : h('p', { class: 'muted small' }, 'Change it in the section "Task source" below.')));
 
   for (const def of STEPS) {
     const results = h('div', { 'aria-live': 'polite' });

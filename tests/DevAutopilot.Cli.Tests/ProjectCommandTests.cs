@@ -123,4 +123,55 @@ public sealed class ProjectCommandTests : IDisposable
         Assert.Equal(2, unknown.Exit);
         Assert.Contains("no project", unknown.Err);
     }
+
+    [Fact]
+    public async Task Analyze_prints_every_value_with_its_evidence_and_changes_nothing()
+    {
+        using var repo = await TestRepo.CreateAsync(new Dictionary<string, string> { ["App.sln"] = "", ["src/App/App.csproj"] = "<Project/>", ["tests/App.Tests/App.Tests.csproj"] = "<Project/>" });
+
+        var text = await RunAsync("project", "analyze", repo.Root);
+        Assert.Equal(0, text.Exit);
+        Assert.Contains("dotnet build \"App.sln\"", text.Out);
+        Assert.Contains("[high]", text.Out);
+        Assert.Contains("Solution file App.sln", text.Out);
+
+        using var json = JsonDocument.Parse((await RunAsync("project", "analyze", repo.Root, "--json")).Out);
+        Assert.Equal("dotnet test \"App.sln\"", json.RootElement.GetProperty("test").GetProperty("value").GetString());
+        Assert.Equal("high", json.RootElement.GetProperty("test").GetProperty("confidence").GetString());
+        Assert.False(Directory.Exists(Path.Combine(WorkspacePath, "projects")));
+        Assert.False(Directory.Exists(Path.Combine(repo.Root, ".autopilot")));
+
+        var missing = await RunAsync("project", "analyze", Path.Combine(_temp.Path, "nope"));
+        Assert.Equal(2, missing.Exit);
+        Assert.Contains("does not exist", missing.Err);
+    }
+
+    [Fact]
+    public async Task Add_with_detect_uses_the_detected_values_and_says_why()
+    {
+        using var repo = await TestRepo.CreateAsync(new Dictionary<string, string> { ["App.sln"] = "", ["src/App/App.csproj"] = "<Project/>", ["CLAUDE.md"] = "rules" });
+        await DevAutopilot.Core.Process.ProcessRunner.RunAsync("git", ["remote", "add", "origin", "https://dev.azure.com/contoso/Shop/_git/shop-api"], repo.Root);
+
+        var add = await RunAsync("project", "add", "shop", "--repo", repo.Root, "--detect");
+
+        Assert.Equal(0, add.Exit);
+        Assert.Contains("What was detected, and why", add.Out);
+        Assert.Contains("Solution file App.sln", add.Out);
+        var config = ConfigLoader.Load(repo.Root, Path.Combine(WorkspacePath, "projects", "shop"));
+        Assert.Equal("dotnet build \"App.sln\"", config.Commands.Build);
+        Assert.Contains("src/**", config.WritablePaths);
+        Assert.Contains("CLAUDE.md", config.Context);
+        Assert.Equal("azure-devops", config.Modules.WorkItems.Type);
+        Assert.Equal("contoso", config.Modules.WorkItems.Settings["organizationUrl"].Split('/')[^1]);
+        Assert.Equal("Shop", config.Modules.WorkItems.Settings["project"]);
+        using var show = JsonDocument.Parse((await RunAsync("project", "show", "shop", "--json")).Out);
+        Assert.Equal("azure-devops", show.RootElement.GetProperty("taskSource").GetString());
+
+        // An explicit --source and --base-branch win over what was detected.
+        var local = await RunAsync("project", "add", "shop-local", "--repo", repo.Root, "--detect", "--source", "local", "--base-branch", "trunk");
+        Assert.Equal(0, local.Exit);
+        var localConfig = ConfigLoader.Load(repo.Root, Path.Combine(WorkspacePath, "projects", "shop-local"));
+        Assert.Equal("local", localConfig.Modules.WorkItems.Type);
+        Assert.Equal("trunk", localConfig.BaseBranch);
+    }
 }

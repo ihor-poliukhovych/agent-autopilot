@@ -1,9 +1,13 @@
 using System.Text.RegularExpressions;
 using DevAutopilot.Core;
+using DevAutopilot.Core.Analysis;
 using DevAutopilot.Core.Config;
 using DevAutopilot.Core.Workspace;
 
 namespace DevAutopilot.Web;
+
+/// <summary>What Analyze returns: the draft with every detected value filled in, and the evidence behind each value.</summary>
+public sealed record AnalyzeResult(ProjectDraft Draft, ProjectAnalysis Analysis);
 
 /// <summary>The result of the checks of one wizard step.</summary>
 public sealed record StepCheckResult(int Step, bool Passed, IReadOnlyList<CheckLine> Checks);
@@ -38,6 +42,18 @@ public sealed partial class SetupService(WebUiOptions options)
 
         var key = SuggestKey(path);
         return ProjectDraft.FromConfig(config, key, key, path, ProjectRegistry.LocalSource);
+    }
+
+    /// <summary>
+    /// Analyzes a folder (read-only, no model, no network) and returns a complete draft plus the evidence. When the
+    /// folder is inside a repository the whole repository is used, so the draft always names the repository's top folder.
+    /// </summary>
+    public async Task<AnalyzeResult> AnalyzeAsync(string folder, CancellationToken ct)
+    {
+        var analysis = await ProjectAnalyzer.AnalyzeAsync(FullFolder(folder), ct).ConfigureAwait(false);
+        var config = AnalysisApplier.ToConfig(analysis);
+        var draft = ProjectDraft.FromConfig(config, analysis.Key.Value, analysis.DisplayName.Value, analysis.Folder, analysis.TaskSource.Value);
+        return new AnalyzeResult(draft, analysis);
     }
 
     /// <summary>The draft of a registered project, read from its settings file.</summary>

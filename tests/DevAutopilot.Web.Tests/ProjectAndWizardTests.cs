@@ -216,4 +216,85 @@ public sealed class ProjectAndWizardTests
         var (status, _) = await ui.GetAsync("/api/projects/ghost/tasks");
         Assert.Equal(HttpStatusCode.NotFound, status);
     }
+
+    private static string FolderWith(string name, params (string Path, string Content)[] files)
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "autopilot-analyze-" + Guid.NewGuid().ToString("N")[..10], name);
+        Directory.CreateDirectory(Path.Combine(folder, ".git")); // enough for the registry; git itself finds nothing
+        foreach (var (path, content) in files)
+        {
+            var full = Path.Combine(folder, path.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.WriteAllText(full, content);
+        }
+
+        return folder;
+    }
+
+    [Fact]
+    public async Task Analyze_returns_a_complete_draft_with_the_evidence_for_each_value()
+    {
+        await using var ui = new UiFixture();
+        var folder = FolderWith("Shop Api", ("Shop.sln", ""), ("src/Api/Api.csproj", "<Project/>"), ("tests/Api.Tests/Api.Tests.csproj", "<Project/>"), ("CLAUDE.md", "rules"));
+
+        var (status, body) = await ui.PostAsync("/api/wizard/analyze", new { folder });
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        var draft = body.GetProperty("draft");
+        Assert.Equal("dotnet build \"Shop.sln\"", draft.GetProperty("buildCommand").GetString());
+        Assert.Equal("shop-api", draft.GetProperty("key").GetString());
+        Assert.Contains("src/**", draft.GetProperty("writablePaths").EnumerateArray().Select(p => p.GetString()));
+        Assert.Contains("CLAUDE.md", draft.GetProperty("context").EnumerateArray().Select(p => p.GetString()));
+        Assert.Equal("local", draft.GetProperty("taskSource").GetString());
+        var build = body.GetProperty("analysis").GetProperty("build");
+        Assert.Contains("Shop.sln", build.GetProperty("evidence").GetString());
+        Assert.Equal("high", build.GetProperty("confidence").GetString()!.ToLowerInvariant());
+        Assert.All(body.GetProperty("analysis").GetProperty("riskPaths").EnumerateArray(), r => Assert.False(string.IsNullOrWhiteSpace(r.GetProperty("evidence").GetString())));
+    }
+
+    [Fact]
+    public async Task The_analyzed_draft_can_be_created_without_further_edits()
+    {
+        await using var ui = new UiFixture();
+        var folder = FolderWith("shop", ("Shop.sln", ""), ("src/Api/Api.csproj", "<Project/>"));
+        var (_, analyzed) = await ui.PostAsync("/api/wizard/analyze", new { folder });
+
+        var (checks, result) = await ui.PostAsync("/api/wizard/check", new { step = 6, draft = analyzed.GetProperty("draft") });
+        Assert.Equal(HttpStatusCode.OK, checks);
+        Assert.True(result.GetProperty("passed").GetBoolean());
+
+        var (created, _) = await ui.PostAsync("/api/projects", analyzed.GetProperty("draft"));
+        Assert.Equal(HttpStatusCode.Created, created);
+        var config = ConfigLoader.Load(folder, ui.Workspace.ProjectFolder("shop"));
+        Assert.Equal("dotnet build \"Shop.sln\"", config.Commands.Build);
+        Assert.Contains("**/*.csproj", config.RiskPaths);
+    }
+
+    [Fact]
+    public async Task Analyze_names_what_only_a_person_can_answer_and_refuses_a_missing_folder()
+    {
+        await using var ui = new UiFixture();
+        var folder = FolderWith("notes", ("readme.txt", "hello"));
+
+        var (_, body) = await ui.PostAsync("/api/wizard/analyze", new { folder });
+        var needs = body.GetProperty("analysis").GetProperty("needsInput").EnumerateArray().Select(n => n.GetProperty("field").GetString()).ToList();
+        Assert.Contains("buildCommand", needs);
+        Assert.Contains("testCommand", needs);
+        Assert.Contains("writablePaths", needs);
+
+        var (status, error) = await ui.PostAsync("/api/wizard/analyze", new { folder = Path.Combine(Path.GetTempPath(), "autopilot-nope-" + Guid.NewGuid().ToString("N")) });
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.Contains("does not exist", error.GetProperty("problems")[0].GetString());
+
+        var (empty, _) = await ui.PostAsync("/api/wizard/analyze", new { folder = "" });
+        Assert.Equal(HttpStatusCode.BadRequest, empty);
+    }
+
+    [Fact]
+    public async Task Analyze_needs_a_session_like_every_other_endpoint()
+    {
+        await using var ui = new UiFixture(signedIn: false);
+        var (status, _) = await ui.PostAsync("/api/wizard/analyze", new { folder = ui.RepoFolder });
+        Assert.NotEqual(HttpStatusCode.OK, status);
+    }
 }

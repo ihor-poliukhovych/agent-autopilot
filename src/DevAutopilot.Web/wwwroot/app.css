@@ -148,3 +148,12 @@ dialog .row.end { justify-content: flex-end; margin-top: 1rem; }
   table.stack-sm td.actions { text-align: left; white-space: normal; padding-top: .4rem; }
   .page-head { align-items: flex-start; }
 }
+
+/* Add project: detected values and their evidence */
+.evidence { border: 1px solid var(--border); border-radius: 8px; padding: .4rem .7rem; background: var(--surface); }
+.evidence > summary { cursor: pointer; font-weight: 600; }
+.evidence-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .6rem; padding: .35rem 0; border-top: 1px solid var(--border); }
+.evidence-row:first-child { border-top: 0; }
+.evidence-row .lbl { min-width: 6.5rem; font-weight: 600; }
+.evidence-row .ev { flex-basis: 100%; font-size: .85rem; }
+.banner ul { margin: .3rem 0 0 1.1rem; padding: 0; }
