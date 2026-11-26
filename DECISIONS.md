@@ -216,3 +216,11 @@ A six step wizard asked people for values the folder already knows. Now a person
   the result could not be tested); it stays an optional later step (see the roadmap). Also rejected:
   making `init` use the analyzer now, which would change settings of existing projects.
 
+
+## D-018 Start the Azure CLI by its full path; import is read only (accepted, 2026-11-26)
+
+On Windows `az.cmd` started by its bare name from another process prints "Failed to load python
+executable." and exits 1, because the batch file cannot find its own folder. The token provider
+resolves `az.cmd` or `az.exe` from `PATH`, starts it by full path and removes `PYTHONHOME` and
+`PYTHONPATH` for the child. `autopilot ado import` reads the configured query and writes only local
+tasks (matched by work item number, so it is idempotent); it never writes to Azure DevOps.
