@@ -67,9 +67,33 @@ the agent read it. The changed text also marks the old triage stale.
 
 ## The add-project wizard
 
-Six steps. Each shows what it is for, the current value, a live check and, when a check fails, a
-fix in plain words. The checks run the same code as `autopilot doctor`, against a temporary copy of
-your draft, so nothing is saved until the end.
+You choose the repository folder and press *Analyze the folder*. Dev Autopilot reads the folder
+(it writes nothing, uses no model and sends nothing anywhere) and fills in every setting. The next
+page, *Review the project*, shows all of it at once:
+
+- **What still needs you.** Only what the folder cannot tell: a build or test command it could not
+  find or only guessed (low confidence), no source folder, a branch it is unsure about, the name of the
+  environment variable that holds your Azure DevOps token. Nothing else is asked.
+- **Sections** for the project (base branch, key, name), build and test, paths and context
+  documents, and the task source. Every prefilled value is editable and sits under a
+  *What was detected* list: a *detected* badge, the value, the file or rule that produced it
+  ("Solution file Shop.sln", "origin/HEAD points to main", "remote origin is an Azure DevOps
+  repository") and a confidence (high, medium or low).
+- **Checks.** Every required check runs on the final values: the folder is a git repository, the base
+  branch exists, the build and the tests pass on a clean checkout of the base branch (this can take
+  a few minutes), the paths exist, and for Azure DevOps the variables are set and the connection works.
+  *Create the project* is enabled only when none fails; the server checks again when you create it.
+
+What the analysis looks for is described in the decision record D-017 (stacks, commands, writable and
+risk paths, rule documents, the task source from the remote). A folder inside a repository means the
+whole repository. A folder that is not a git repository is analyzed too, and the checks ask you to
+run `git init` and make a first commit. The command line has the same analysis: `autopilot project
+analyze <folder>` and `autopilot project add <key> --repo <folder> --detect`.
+
+**Advanced.** *Go through the settings step by step* opens the older six step view of the same
+settings. Each step explains what it is for, shows the detected evidence, checks the value live and,
+when a check fails, says how to fix it. The checks run the same code as `autopilot doctor`, against a
+temporary copy of your draft, so nothing is saved until the end.
 
 | Step | You set | What is checked |
 |---|---|---|

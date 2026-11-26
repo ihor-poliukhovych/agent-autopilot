@@ -33,6 +33,14 @@ Ideas that are planned but not built. Order may change.
    settings (trust, identity, models, limits, paths, context documents). Left over: the behaviour
    behind `trust` and `autoQueue`, stopping a pool run as a whole, answering needs-human questions
    of tracker tasks.
+2b. **Project analysis.** *(Done, see D-017.)* `autopilot project analyze <folder> [--json]`,
+   `project add --detect`, and a one-step wizard: pick a folder, review the detected values, create.
+   Left over: **Improve with the agent**, an optional, off by default button that runs a read-only
+   `claude -p` pass over the folder to propose rule documents and context summaries (clearly
+   labelled as using the subscription, never writing into the project; proposals would be saved in
+   the workspace only); `init` still uses its older, smaller detection; the implementer's allowed
+   shell commands are still the .NET ones, so other stacks need `roles.implementer.allowedCommands`
+   edited by hand; GitHub issues as a task source.
 3. **Verify and publish:** VERIFY.md (secret scan, forbidden words over files and history,
    licences, fresh clone and install by GETTING-STARTED), private GitHub repository,
    owner review, then public.

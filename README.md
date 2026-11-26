@@ -11,7 +11,8 @@ work is checked, and how we know it got better or worse, is ordinary C# code wit
 
 ```
 autopilot init      # add the tool to a project (settings in the repository's .autopilot/)
-autopilot project add <key> --repo <folder>   # or keep everything in your user workspace
+autopilot project analyze <folder>            # what the tool finds in a folder, with the evidence
+autopilot project add <key> --repo <folder> --detect   # register it with everything detected
 autopilot doctor    # check every part of the setup, building on a clean checkout like the gate
 autopilot run       # triage the backlog, implement the agent-ready tasks
 autopilot eval      # measure it on known tasks, several runs each

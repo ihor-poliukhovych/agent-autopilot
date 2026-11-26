@@ -184,3 +184,35 @@ rules stay in the core library and in `SetupService`, `TaskOperations`, `PoolOpe
 - Rejected: a Node front end (a second toolchain for a local tool), serving the UI on a network
   address with accounts (a different product with a different threat model), and polling the
   filesystem instead of calling the services.
+
+## D-017 Adding a project starts from an analysis of the folder (accepted, 2026-11-26)
+
+A six step wizard asked people for values the folder already knows. Now a person picks a folder and
+`ProjectAnalyzer` (core library) suggests every setting; the person reviews and edits.
+
+- Deterministic and read-only: it lists the folder (bounded: dependency and build folders, most dot
+  folders and links are skipped, at most 30,000 entries, depth 5) and asks git read-only questions
+  (`config --get-regexp`, `for-each-ref`, `symbolic-ref`). No model, no network, nothing written.
+- Every value is a `Detected`: the value, the file or rule that produced it, and a confidence
+  (high: a file or git setting says exactly this; medium: a convention or a choice among several;
+  low: a fallback). Values that are low confidence or unknown become `needsInput` questions; the
+  rest is only shown. Secrets are never detected: for Azure DevOps only the variable name is asked.
+- A folder inside a repository means the whole repository, because a project is a repository.
+- Several stacks in one repository: the root stack (dotnet, node, python, go, rust, maven,
+  gradle, in that order) provides the commands, with medium confidence; the other stacks'
+  commands are listed as alternatives. Node commands install first, because the gate builds on a
+  clean checkout. Python's build is only a syntax check and is marked low.
+- Risk paths: conventional folders and file kinds that exist in the folder (project, lock, pipeline,
+  settings, migration and infrastructure files), plus a fixed precaution set (`.claude/**`,
+  authentication, security, secrets). Context candidates: rule documents (CLAUDE.md, AGENTS.md,
+  `.claude/rules`, decision and architecture folders), capped by the 40 KB prompt budget.
+- A remote on `dev.azure.com` or `visualstudio.com` (https or ssh) fills organisation, project and
+  repository and suggests Azure DevOps; GitHub and others suggest local tasks. Credentials in a
+  remote address are dropped.
+- The wizard keeps one `ProjectDraft`: Analyze fills it, a single review page edits it and runs the
+  same live checks as before, and the old step by step view stays as *Advanced*. The CLI offers
+  `project analyze` and `project add --detect`.
+- Rejected: asking a model to configure the project (not reproducible, costs subscription use, and
+  the result could not be tested); it stays an optional later step (see the roadmap). Also rejected:
+  making `init` use the analyzer now, which would change settings of existing projects.
+

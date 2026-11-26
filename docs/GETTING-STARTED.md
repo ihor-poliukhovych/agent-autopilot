@@ -112,7 +112,8 @@ folder inside the clone. See [EVALS.md](EVALS.md).
 you would rather not add anything to a repository, register it in your workspace instead:
 
 ```powershell
-autopilot project add shop --repo D:\code\shop --name "Shop"
+autopilot project analyze D:\code\shop             # what the tool finds, with the evidence
+autopilot project add shop --repo D:\code\shop --detect   # register it with the detected settings
 autopilot project list
 autopilot project show shop --json
 autopilot doctor --project shop
