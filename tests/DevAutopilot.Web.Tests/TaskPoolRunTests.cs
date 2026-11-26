@@ -171,7 +171,9 @@ public sealed class TaskPoolRunTests
         var (_, shown) = await ui.PostAsync("/api/projects/demo/pool/schedule", new { at = "02:30", limit = 3, confirmed = true });
         Assert.True(shown.GetProperty("installedInOs").GetBoolean());
         var job = Assert.Single(ui.Scheduler.Jobs.Values);
-        Assert.Contains("pool run", job.Command, StringComparison.Ordinal);
+        Assert.EndsWith("pool run --limit 3", job.Command, StringComparison.Ordinal);
+        Assert.Contains("--project demo", job.Command, StringComparison.Ordinal);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(job.Command, "pool run"));
 
         await ui.SendAsync(HttpMethod.Delete, "/api/projects/demo/pool/schedule");
         Assert.Empty(ui.Scheduler.Jobs);

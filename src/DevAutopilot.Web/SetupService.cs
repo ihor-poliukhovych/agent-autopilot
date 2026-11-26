@@ -261,7 +261,7 @@ public sealed partial class SetupService(WebUiOptions options)
             var lines = await options.Checker.RunAsync(new SetupCheckRequest(folder, temp, skipBuild), ct).ConfigureAwait(false);
             return [.. lines.Select(l => l with
             {
-                Detail = l.Name == "config" && l.Status == CheckLine.Ok ? "The settings are valid." : l.Detail.Replace(temp, "(draft settings)", StringComparison.OrdinalIgnoreCase),
+                Detail = l.Name == "config" && l.Status == CheckLine.Ok ? "The settings are valid." : DropLogPointer(l.Detail),
                 Fix = PlainFix(l),
             })];
         }
@@ -333,6 +333,11 @@ public sealed partial class SetupService(WebUiOptions options)
             _ => line.Fix,
         };
     }
+
+    /// <summary>The checks write their logs into a temporary folder that is deleted afterwards, so a pointer to a log file would lead nowhere.</summary>
+    private static string DropLogPointer(string detail) =>
+        string.Join('\n', detail.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')
+            .Where(line => !line.TrimStart().StartsWith("Full log:", StringComparison.Ordinal)));
 
     /// <summary>True when a fix names the settings file or a command line, which the page does not show.</summary>
     private static bool MentionsFiles(string fix) =>

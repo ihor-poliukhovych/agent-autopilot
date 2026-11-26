@@ -216,7 +216,7 @@ public sealed class PoolOperations(WebUiOptions options)
     public Task<bool> RemoveScheduleAsync(ProjectScope scope, CancellationToken ct) => scope.Schedule.Create().RemoveAsync(ct);
 
     private static SchedulePlan PlanOf(ProjectScope scope, string at, int? limit) =>
-        scope.Schedule.Create().Plan(at, limit, scope.CommandLine(["pool", "run", "--project", scope.Project.Key, "--workspace", scope.Workspace.Root]));
+        scope.Schedule.Create().Plan(at, limit, scope.ProgramCommandLine());
 }
 
 public sealed record RunOverview(

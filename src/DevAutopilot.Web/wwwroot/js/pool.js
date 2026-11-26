@@ -50,7 +50,7 @@ export async function render({ view, key }) {
                 title: 'Install the night run?',
                 confirm: 'Install',
                 body: [
-                  h('p', {}, plan.summary),
+                  h('p', { class: 'prewrap small' }, plan.summary),
                   h('p', {}, h('b', {}, 'Tasks that would run:')),
                   plan.items.length ? h('ol', {}, plan.items.map(i => h('li', {}, `#${i.id} ${i.title}`))) : h('p', { class: 'muted' }, 'The pool is empty now. Tasks you add later run too.'),
                   h('p', { class: 'muted small' }, 'It runs on this computer, as your user, and needs it switched on at that time. Each result is a draft; nothing is merged.'),

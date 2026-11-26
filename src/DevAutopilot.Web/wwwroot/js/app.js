@@ -69,6 +69,7 @@ async function route() {
   const stage = h('div');
   const tabBar = h('div', { class: 'tabs-inner', style: 'display:contents' });
   let stop = null;
+  if (!view.firstChild) view.append(h('p', { class: 'muted' }, 'Loading…'));
   document.title = 'Dev Autopilot';
   try {
     if (r.name === 'project') {

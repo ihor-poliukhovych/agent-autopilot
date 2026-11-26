@@ -65,12 +65,13 @@ function jobCard(key, j, reload) {
     h('div', { class: 'row between' },
       h('h2', {}, `Running: task #${job.workItemId}`),
       h('button', { type: 'button', class: 'danger', onclick: async ev => {
+        const button = ev.currentTarget; // currentTarget is gone after the first await
         const ok = await ask({
           title: `Stop job ${job.id}?`, danger: true, confirm: 'Stop this job',
           body: [h('p', {}, `This stops only the run for task #${job.workItemId}. Other jobs and the pool are not touched.`)],
         });
         if (!ok) return;
-        await busy(ev.currentTarget, async () => {
+        await busy(button, async () => {
           try { await post(`${base(key)}/jobs/${encodeURIComponent(job.id)}/stop`); toast('Stopped.'); await reload(); } catch (e) { toast(e.message, true); }
         });
       } }, 'Stop')),
