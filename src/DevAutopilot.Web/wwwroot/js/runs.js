@@ -1,4 +1,5 @@
 import { get, post } from './api.js';
+import { timeline, duration } from './pipeline.js';
 import { h, clear, toast, badge, ago, emptyState, busy, ask, put } from './dom.js';
 
 const base = key => `/projects/${encodeURIComponent(key)}`;
@@ -42,7 +43,7 @@ async function renderOverview({ view, key }) {
       h('p', { class: 'small muted' }, `${s.totalRuns} runs in all: gate passed ${s.gatePassed}, gate rejected ${s.gateRejected}.`)));
 
     holder.append(h('section', { class: 'card' }, h('h2', {}, 'History'),
-      !data.runs.length ? emptyState('No runs yet.') : h('div', { class: 'table-wrap' }, h('table', { class: 'stack-sm' },
+      !data.runs.length ? emptyState('A run is one attempt by the agent. Start one from a task or from the pool.', { label: 'Go to the tasks', href: `#/p/${encodeURIComponent(key)}/tasks` }, 'No runs yet') : h('div', { class: 'table-wrap' }, h('table', { class: 'stack-sm' },
         h('thead', {}, h('tr', {}, ['Run', 'Task', 'Outcome', 'Gate', 'Person', 'When'].map(t => h('th', {}, t)))),
         h('tbody', {}, data.runs.map(r => h('tr', {},
           h('td', { 'data-label': 'Run' }, h('a', { href: `#/p/${encodeURIComponent(key)}/runs/${r.id}` }, '#' + r.id)),
@@ -96,20 +97,18 @@ async function show(holder, key, id) {
     catch (e) { toast(e.message, true); }
   };
   put(holder,
-    h('p', {}, h('a', { href: `#/p/${encodeURIComponent(key)}/runs` }, '← All runs')),
+    h('p', { class: 'crumbs' }, h('a', { href: `#/p/${encodeURIComponent(key)}/pipeline` }, 'Pipeline'), ' / ', h('a', { href: `#/p/${encodeURIComponent(key)}/runs` }, 'Runs'), ` / #${r.id}`),
     h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, `Run #${r.id} for task #${r.workItemId}`),
       h('p', {}, `${r.outcome}${r.branch ? ` on branch ${r.branch}` : ''}, ${ago(r.finishedAt)}`)),
       h('div', { class: 'row' }, r.gateVerdict ? badge(`gate ${r.gateVerdict}`, verdictKind(r.gateVerdict)) : badge('no gate verdict'),
         r.humanDecision ? badge(decisionText(r.humanDecision), r.humanDecision === 'merged' ? 'ok' : 'bad') : null)),
     r.message ? h('div', { class: 'banner info' }, r.message) : null,
-    h('section', { class: 'card stack' }, h('h2', {}, 'Your decision'),
-      h('p', { class: 'muted' }, 'Merging is always done by a person, in your own tool. Record here what you did, so the gate can be compared with your judgement.'),
-      h('div', { class: 'row' },
-        h('button', { type: 'button', onclick: () => decide('merged') }, 'I merged it'),
-        h('button', { type: 'button', onclick: () => decide('rejected') }, 'I rejected it'))),
+    h('div', { class: 'split' },
+      h('section', { class: 'card' }, h('h2', {}, 'Steps'), timeline(runSteps(detail))),
+      h('div', {}, decisionCard(r, decide), detail.diff ? h('p', {}, h('a', { class: 'btn', href: '#diff', onclick: ev => { ev.preventDefault(); document.getElementById('diff')?.scrollIntoView(); } }, 'Jump to the diff')) : null)),
     gateCard(detail),
     detail.report ? h('section', { class: 'card' }, h('h2', {}, r.gateVerdict === 'rejected' ? 'Why it was rejected' : 'Draft description'), h('pre', {}, detail.report)) : null,
-    detail.diff ? h('section', { class: 'card' }, h('h2', {}, 'Diff'), diffView(detail.diff), detail.diffTruncated ? h('p', { class: 'muted' }, 'The diff is shortened here; the full patch is in the run folder.') : null) : null,
+    detail.diff ? h('section', { class: 'card', id: 'diff' }, h('h2', {}, 'Diff'), diffView(detail.diff), detail.diffTruncated ? h('p', { class: 'muted' }, 'The diff is shortened here; the full patch is in the run folder.') : null) : null,
     detail.gateLog ? h('details', { class: 'card' }, h('summary', {}, 'Build and test log (end)'), h('pre', {}, detail.gateLog)) : null);
 }
 
@@ -137,4 +136,31 @@ function diffView(text) {
     pre.append(h('span', { class: cls }, line + '\n'));
   }
   return pre;
+}
+
+function decisionCard(r, decide) {
+  return h('section', { class: 'card stack' }, h('h2', {}, 'Your decision'),
+    h('p', { class: 'muted' }, 'Merging is always done by a person, in your own tool. Record here what you did, so the gate can be compared with your judgement.'),
+    h('div', { class: 'row' },
+      h('button', { type: 'button', class: r.humanDecision ? '' : 'primary', onclick: () => decide('merged') }, 'I merged it'),
+      h('button', { type: 'button', onclick: () => decide('rejected') }, 'I rejected it')));
+}
+
+/** The run as steps: what happened, what the gate said, what a person did. Only what the run record knows. */
+function runSteps(detail) {
+  const r = detail.run, g = detail.gate;
+  const took = duration(new Date(r.finishedAt) - new Date(r.startedAt));
+  const steps = [['Picked up', 'done', `Task #${r.workItemId} started ${ago(r.startedAt)}`]];
+  const implemented = !!(g || r.branch);
+  steps.push(['Implement', implemented ? 'done' : 'fail', r.message || r.outcome, took]);
+  if (g) {
+    steps.push(['Build and tests', g.buildSucceeded && g.testsSucceeded ? 'done' : 'fail',
+      `Build ${g.buildSucceeded ? 'passed' : 'failed'}, tests ${g.testsSucceeded ? 'passed' : 'failed'}${g.testCountsKnown ? ` (${g.testCountBefore} before, ${g.testCountAfter} after)` : ''}`]);
+    steps.push(['Gate', r.gateVerdict === 'passed' ? 'done' : 'fail', `${r.gateVerdict || g.outcome}${g.highRisk ? ', high risk: needs a person' : ''}; ${g.filesChanged} files, ${g.sourceLinesChanged} source lines`]);
+  } else if (r.gateVerdict) steps.push(['Gate', r.gateVerdict === 'passed' ? 'done' : 'fail', `Verdict: ${r.gateVerdict}${r.highRisk ? ', high risk: needs a person' : ''}`]);
+  else steps.push(['Gate', 'pending', 'This run did not reach the gate.']);
+  steps.push(['Draft PR', r.wouldMerge ? 'done' : 'pending', r.branch ? `Branch ${r.branch}` : 'No draft was produced.']);
+  steps.push(['Person decides', r.humanDecision ? (r.humanDecision === 'merged' ? 'done' : 'fail') : (r.wouldMerge ? 'wait' : 'pending'),
+    r.humanDecision ? decisionText(r.humanDecision) : (r.wouldMerge ? 'Waiting for you.' : '')]);
+  return steps;
 }
