@@ -20,6 +20,8 @@ public sealed record StepBody(int Step, ProjectDraft Draft);
 
 public sealed record PreviewBody(ProjectDraft Draft, int? Skip);
 
+public sealed record ImportBody(bool DryRun, int? Limit);
+
 public sealed record FolderBody(string? Folder, string? BaseBranch);
 
 public sealed record ContextFileBody(string? Path, string? Text);
@@ -55,6 +57,9 @@ internal static class Endpoints
         project.MapPut("/setup", (string key, ProjectDraft draft, ProjectScopes p, SetupService s) => s.Save(p.Get(key), draft with { Key = key }));
         project.MapPost("/setup/check", (string key, StepBody b, ProjectScopes p, SetupService s, CancellationToken ct) =>
             s.CheckAsync(b.Step, b.Draft with { Key = key, RepositoryFolder = p.Get(key).Project.RepositoryFolder }, ct));
+
+        project.MapPost("/azure-devops/import", (string key, ImportBody b, ProjectScopes p, SetupService s, CancellationToken ct) =>
+            s.ImportAsync(p.Get(key), b.DryRun, b.Limit, ct));
 
         // ----- tasks -----
         var tasks = project.MapGroup("/tasks");

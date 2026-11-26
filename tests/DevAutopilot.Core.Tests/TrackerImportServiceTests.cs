@@ -3,9 +3,9 @@ using DevAutopilot.Core.Tasks;
 using Microsoft.Data.Sqlite;
 using Ws = DevAutopilot.Core.Workspace.Workspace;
 
-namespace DevAutopilot.AzureDevOps.Tests;
+namespace DevAutopilot.Core.Tests;
 
-public sealed class AzureDevOpsImporterTests : IDisposable
+public sealed class TrackerImportServiceTests : IDisposable
 {
     private readonly string _temp = Path.Combine(Path.GetTempPath(), "autopilot-tests", Guid.NewGuid().ToString("N")[..12]);
 
@@ -39,7 +39,7 @@ public sealed class AzureDevOpsImporterTests : IDisposable
     {
         var tasks = Tasks();
         var source = new FakeSource(Item("1", "One"), Item("2", "Two"));
-        var importer = new AzureDevOpsImporter(tasks);
+        var importer = new TrackerImportService(tasks);
 
         var first = await importer.ImportAsync(source, null, false, default);
         var second = await importer.ImportAsync(source, null, false, default);
@@ -60,7 +60,7 @@ public sealed class AzureDevOpsImporterTests : IDisposable
     public async Task A_dry_run_counts_but_writes_nothing()
     {
         var tasks = Tasks();
-        var importer = new AzureDevOpsImporter(tasks);
+        var importer = new TrackerImportService(tasks);
         await importer.ImportAsync(new FakeSource(Item("1", "One")), null, false, default);
 
         var report = await importer.ImportAsync(new FakeSource(Item("1", "Changed"), Item("2", "New")), null, true, default);
@@ -73,7 +73,7 @@ public sealed class AzureDevOpsImporterTests : IDisposable
     [Fact]
     public async Task The_limit_cuts_the_list()
     {
-        var report = await new AzureDevOpsImporter(Tasks()).ImportAsync(new FakeSource(Item("1", "a"), Item("2", "b"), Item("3", "c")), 2, false, default);
+        var report = await new TrackerImportService(Tasks()).ImportAsync(new FakeSource(Item("1", "a"), Item("2", "b"), Item("3", "c")), 2, false, default);
 
         Assert.Equal(2, report.Created);
     }
