@@ -34,6 +34,22 @@ public sealed class LocalTaskTests : IDisposable
     }
 
     [Fact]
+    public void Update_changes_the_text_keeps_the_rest_and_records_it_in_the_history()
+    {
+        var tasks = Service();
+        var task = tasks.Add("Old title", "Old body", ["a"]);
+        Assert.False(tasks.Update(task.Number, null, null), "nothing to change");
+        Assert.True(tasks.Update(task.Number, "New title", null));
+        var changed = tasks.Get(task.Number)!;
+        Assert.Equal("New title", changed.Title);
+        Assert.Equal("Old body", changed.Body);
+        Assert.Equal(["a"], changed.Labels);
+        Assert.Contains(tasks.Show(task.Number)!.History, e => e.Kind == LocalTaskService.HistoryKind.Updated);
+        Assert.Throws<WorkspaceException>(() => tasks.Update(task.Number, " ", null));
+        Assert.Throws<WorkspaceException>(() => tasks.Update(99, "x", null));
+    }
+
+    [Fact]
     public void Add_requires_a_title_and_normalizes_labels()
     {
         var tasks = Service();

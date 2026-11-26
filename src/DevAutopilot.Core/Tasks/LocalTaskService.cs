@@ -68,6 +68,30 @@ public sealed class LocalTaskService(Workspace.Workspace workspace, string proje
     public LocalTask Add(string title, string? body = null, IEnumerable<string>? labels = null, string? author = null) =>
         Create(RequireTitle(title), body ?? string.Empty, NormalizeLabels(labels), author ?? DefaultAuthor(), null, null, false, HistoryKind.Created, "Task created.");
 
+    /// <summary>
+    /// Changes the title and body of a task. A null part is left as it is. Returns false when nothing changed.
+    /// A changed text makes stored triage stale (it is matched by a hash of the text).
+    /// </summary>
+    public bool Update(int number, string? title, string? body, string? author = null)
+    {
+        using var connection = workspace.Open();
+        using var transaction = connection.BeginTransaction();
+        var task = RequireTask(connection, number);
+        var newTitle = title is null ? task.Title : RequireTitle(title);
+        var newBody = body ?? task.Body;
+        if (newTitle == task.Title && newBody == task.Body)
+        {
+            return false;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        Db.Execute(connection, "UPDATE tasks SET title = $title, body = $body, updated_at = $t WHERE project_key = $k AND number = $n",
+            ("$title", newTitle), ("$body", newBody), ("$t", Db.Stamp(now)), ("$k", projectKey), ("$n", number));
+        AddHistory(connection, number, HistoryKind.Updated, $"Text changed by {author ?? DefaultAuthor()}.", null, now);
+        transaction.Commit();
+        return true;
+    }
+
     public IReadOnlyList<LocalTask> List(bool includeClosed = false, string? label = null)
     {
         using var connection = workspace.Open();

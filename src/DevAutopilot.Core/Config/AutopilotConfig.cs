@@ -55,6 +55,9 @@ public sealed record AutopilotConfig
     /// <summary>How much of the gate's verdict to trust: "ask", "safe" or "high" (read and checked now; behaviour comes later).</summary>
     public string Trust { get; init; } = TrustLevels.Ask;
 
+    /// <summary>Name and email the agent's commits carry. Null means "Dev Autopilot" with a local address.</summary>
+    public IdentityConfig? Identity { get; init; }
+
     public GateConfig Gate { get; init; } = new();
 
     public RolesConfig Roles { get; init; } = new();
@@ -75,6 +78,13 @@ public sealed record AutoQueueConfig
 
     /// <summary>The highest triage risk that may join the pool by itself.</summary>
     public RiskLevel MaxRisk { get; init; } = RiskLevel.Low;
+}
+
+public sealed record IdentityConfig
+{
+    public string Name { get; init; } = "Dev Autopilot";
+
+    public string Email { get; init; } = "autopilot@localhost";
 }
 
 public static class TrustLevels

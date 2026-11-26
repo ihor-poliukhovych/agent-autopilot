@@ -5,6 +5,7 @@
     <Project Path="src/DevAutopilot.Cli/DevAutopilot.Cli.csproj" />
     <Project Path="src/DevAutopilot.Core/DevAutopilot.Core.csproj" />
     <Project Path="src/DevAutopilot.Diagnostics/DevAutopilot.Diagnostics.csproj" />
+    <Project Path="src/DevAutopilot.Web/DevAutopilot.Web.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/DevAutopilot.AzureDevOps.Tests/DevAutopilot.AzureDevOps.Tests.csproj" />
@@ -12,5 +13,6 @@
     <Project Path="tests/DevAutopilot.Cli.Tests/DevAutopilot.Cli.Tests.csproj" />
     <Project Path="tests/DevAutopilot.Core.Tests/DevAutopilot.Core.Tests.csproj" />
     <Project Path="tests/DevAutopilot.Diagnostics.Tests/DevAutopilot.Diagnostics.Tests.csproj" />
+    <Project Path="tests/DevAutopilot.Web.Tests/DevAutopilot.Web.Tests.csproj" />
   </Folder>
 </Solution>

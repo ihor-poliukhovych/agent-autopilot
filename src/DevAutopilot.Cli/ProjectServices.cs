@@ -50,7 +50,7 @@ public static class ProjectServices
             ?? throw new ProjectSetupException($"{projectRoot} is not in a git repository. Run 'git init' and commit your code first.");
 
         var diagnosticsServer = DiagnosticsServerFor(projectRoot, config, dataFolder);
-        var git = new GitClient(repoRoot);
+        var git = new GitClient(repoRoot, config.Identity is { } id ? new GitIdentity(id.Name, id.Email) : null);
         var worktreeRoot = context.WorktreeRoot ?? GitClient.DefaultWorktreeRoot(repoRoot);
         var localSource = string.Equals(source, LocalSource, StringComparison.OrdinalIgnoreCase);
         if (localSource && !string.Equals(config.Modules.WorkItems.Type, LocalSource, StringComparison.OrdinalIgnoreCase))
