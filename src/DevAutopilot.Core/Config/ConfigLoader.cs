@@ -159,6 +159,19 @@ public static class ConfigLoader
             problems.Add("autoQueue is missing. Remove the \"autoQueue\" key to use the defaults, or fill in enabled and maxRisk.");
         }
 
+        if (config.Identity is { } identity)
+        {
+            if (string.IsNullOrWhiteSpace(identity.Name) || identity.Name.Length > 100 || identity.Name.Any(char.IsControl))
+            {
+                problems.Add("identity.name must be a short name such as \"Dev Autopilot\".");
+            }
+
+            if (string.IsNullOrWhiteSpace(identity.Email) || identity.Email.Length > 200 || identity.Email.Any(c => char.IsWhiteSpace(c) || char.IsControl(c)) || !identity.Email.Contains('@', StringComparison.Ordinal))
+            {
+                problems.Add("identity.email must be an address such as \"autopilot@localhost\", with no spaces.");
+            }
+        }
+
         if (!TrustLevels.All.Contains(config.Trust ?? string.Empty, StringComparer.Ordinal))
         {
             problems.Add($"trust is \"{config.Trust}\". Use one of: {string.Join(", ", TrustLevels.All)}.");
