@@ -19,7 +19,7 @@ export async function render({ view, key }) {
       h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Pool'),
         h('p', {}, 'Tasks the agent works through one at a time, in this order. Every result is a draft that a person merges.'))),
       h('section', { class: 'card' },
-        !items.length ? emptyState('The pool is empty. Add tasks from the Tasks page.') : h('div', { class: 'table-wrap' }, h('table', { class: 'stack-sm' },
+        !items.length ? emptyState('The pool is the queue the agent works through, one task at a time. Add triaged tasks to it from the Tasks page.', { label: 'Pick tasks', href: `#/p/${encodeURIComponent(key)}/tasks` }, 'The pool is empty') : h('div', { class: 'table-wrap' }, h('table', { class: 'stack-sm' },
           h('thead', {}, h('tr', {}, ['#', 'Task', 'Triage', ''].map(t => h('th', {}, t)))),
           h('tbody', {}, items.map((p, index) => h('tr', {},
             h('td', { 'data-label': 'Order' }, String(p.position)),

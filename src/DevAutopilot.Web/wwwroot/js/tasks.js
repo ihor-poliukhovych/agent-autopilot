@@ -46,7 +46,7 @@ async function renderList(ctx) {
       holder.append(h('div', { class: 'banner info' }, `A run is active (${data.status.owner}). `, h('a', { href: `#/p/${encodeURIComponent(key)}/runs` }, 'Follow it on the Runs page.')));
     }
     if (!data.items.length) {
-      holder.append(h('div', { class: 'card' }, emptyState(data.localTasks ? 'No open tasks. Add the first one.' : 'No open work items were found.')));
+      holder.append(h('div', { class: 'card' }, emptyState(data.localTasks ? 'Write down one thing you want done. It does not need to be perfect: triage tells you what is missing.' : 'No open work items were found in the tracker.', data.localTasks ? { label: 'Add a task', onclick: () => showAddForm(ctx, holder, load) } : { label: 'Check the task source', href: `#/p/${encodeURIComponent(key)}/settings` }, data.localTasks ? 'No tasks yet' : 'Nothing to show')));
       return data;
     }
     const rows = data.items.map(item => {

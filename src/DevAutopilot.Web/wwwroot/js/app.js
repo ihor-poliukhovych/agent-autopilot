@@ -1,6 +1,7 @@
 import { get, ApiError } from './api.js';
-import { h, clear, toast } from './dom.js';
+import { h, clear, toast, loading } from './dom.js';
 import * as projects from './projects.js';
+import * as pipeline from './pipeline.js';
 import * as tasks from './tasks.js';
 import * as pool from './pool.js';
 import * as runs from './runs.js';
@@ -9,15 +10,16 @@ import * as settings from './settings.js';
 import * as wizard from './wizard.js';
 
 const TABS = [
-  ['tasks', 'Tasks', tasks], ['pool', 'Pool', pool], ['runs', 'Runs', runs],
+  ['pipeline', 'Pipeline', pipeline], ['tasks', 'Tasks', tasks], ['pool', 'Pool', pool], ['runs', 'Runs', runs],
   ['needs', 'Needs a person', needs], ['settings', 'Settings', settings],
 ];
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const switcher = document.getElementById('project-switch');
+const statusChip = document.getElementById('status-chip');
 let state = { projects: [] };
 let cleanup = null;
-let lastTab = 'tasks';
+let lastTab = 'pipeline';
 
 // ---- theme ----
 function storedTheme() { try { return localStorage.getItem('autopilot-theme'); } catch { return null; } }
@@ -37,7 +39,7 @@ document.getElementById('theme-toggle').addEventListener('click', () => {
 // ---- routing ----
 function parse() {
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
-  if (parts[0] === 'p' && parts[1]) return { name: 'project', key: parts[1], tab: parts[2] || 'tasks', rest: parts.slice(3) };
+  if (parts[0] === 'p' && parts[1]) return { name: 'project', key: parts[1], tab: parts[2] || 'pipeline', rest: parts.slice(3) };
   if (parts[0] === 'new') return { name: 'new' };
   return { name: 'projects' };
 }
@@ -69,7 +71,7 @@ async function route() {
   const stage = h('div');
   const tabBar = h('div', { class: 'tabs-inner', style: 'display:contents' });
   let stop = null;
-  if (!view.firstChild) view.append(h('p', { class: 'muted' }, 'Loading…'));
+  if (!view.firstChild) view.append(loading());
   document.title = 'Dev Autopilot';
   try {
     if (r.name === 'project') {
@@ -78,7 +80,7 @@ async function route() {
       if (!project) {
         stage.append(h('div', { class: 'banner bad' }, `There is no project "${r.key}".`));
       } else {
-        lastTab = r.tab === 'run' ? 'runs' : (TABS.some(t => t[0] === r.tab) ? r.tab : 'tasks');
+        lastTab = r.tab === 'run' ? 'runs' : (TABS.some(t => t[0] === r.tab) ? r.tab : 'pipeline');
         renderTabs(tabBar, r);
         const screen = (TABS.find(t => t[0] === lastTab) || TABS[0])[2];
         document.title = `${project.displayName} · Dev Autopilot`;
@@ -91,6 +93,7 @@ async function route() {
       stop = await projects.render({ view: stage, state, go }) || null;
     }
   } catch (e) {
+    stage.replaceChildren();
     stage.append(h('div', { class: 'banner bad' }, e instanceof ApiError && e.status === 401
       ? 'You are signed out. Start "autopilot ui" again and open the new link it prints.'
       : (e.message || 'Something went wrong.')));
@@ -98,6 +101,7 @@ async function route() {
   if (mine !== generation) { if (stop) stop(); return; }
   cleanup = stop;
   switcher.value = r.name === 'project' ? r.key : '';
+  if (r.name !== 'project') statusChip.hidden = true;
   clear(tabs).append(tabBar);
   view.replaceChildren(stage);
   view.focus({ preventScroll: true });
@@ -108,6 +112,14 @@ function renderTabs(bar, r) {
     const link = h('a', { href: `#/p/${encodeURIComponent(r.key)}/${id}` }, label);
     if (id === lastTab) link.setAttribute('aria-current', 'page');
     bar.append(link);
+    if (id === 'pipeline') {
+      get(`/projects/${encodeURIComponent(r.key)}/runs`).then(d => {
+        statusChip.hidden = false;
+        statusChip.className = 'chip ' + (d.status.busy ? 'run' : '');
+        statusChip.replaceChildren(h('span', { class: 'dot' }), d.status.busy ? 'Run active' : 'Idle');
+        statusChip.href = `#/p/${encodeURIComponent(r.key)}/${d.status.busy ? 'runs' : 'pipeline'}`;
+      }).catch(() => { statusChip.hidden = true; });
+    }
     if (id === 'needs') {
       get(`/projects/${encodeURIComponent(r.key)}/needs-human`).then(items => {
         if (items.length) link.append(h('span', { class: 'count' }, String(items.length)));

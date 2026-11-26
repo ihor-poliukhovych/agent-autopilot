@@ -12,7 +12,7 @@ export async function render({ view, key }) {
     clear(holder);
     holder.append(h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Needs a person'),
       h('p', {}, 'Triage could not decide these alone. Answer the question and the answer is stored on the task, so the next triage and the agent read it.'))));
-    if (!items.length) { holder.append(h('div', { class: 'card' }, emptyState('Nothing waits for you.'))); return; }
+    if (!items.length) { holder.append(h('div', { class: 'card' }, emptyState('When triage cannot decide a task alone, its question shows up here.', { label: 'Back to the pipeline', href: `#/p/${encodeURIComponent(key)}/pipeline` }, 'Nothing waits for you'))); return; }
     for (const item of items) {
       const answer = h('textarea', { rows: 4, placeholder: 'Your answer' });
       holder.append(h('section', { class: 'card stack' },

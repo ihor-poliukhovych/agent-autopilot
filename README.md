@@ -137,15 +137,15 @@ For Azure DevOps work items and draft pull requests: [docs/AZURE-DEVOPS.md](docs
 ## The local web UI
 
 `autopilot ui` opens a page on your own computer (127.0.0.1 only, one-time key in the link,
-works offline) over the same services as the command line: add projects with a checked
+works offline) over the same services as the command line: see every task move through a pipeline board, add projects with a checked
 step-by-step wizard, write and triage tasks, order the pool, run now or at night, follow the
 current step of a run and stop that one job, read the gate report and the diff, answer questions
 that need a person, and edit the settings. Merging stays with a person.
 
 | | |
 |---|---|
-| ![Tasks, light theme](docs/images/ui-tasks-light.png) | ![Runs with a live job, dark theme](docs/images/ui-runs-dark.png) |
-| ![A failed wizard check with a fix](docs/images/ui-wizard-check.png) | ![Tasks at phone width](docs/images/ui-tasks-phone-dark.png) |
+| ![Pipeline, light theme](docs/images/ui-pipeline-light.png) | ![Pipeline, dark theme](docs/images/ui-pipeline-dark.png) |
+| ![A run with its step timeline](docs/images/ui-run-detail-light.png) | ![Pipeline at phone width](docs/images/ui-pipeline-phone-dark.png) |
 
 Details: [docs/UI.md](docs/UI.md).
 

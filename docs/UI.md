@@ -32,7 +32,16 @@ The UI is meant for one person on one computer.
 
 ## Screens
 
-The header has a project switcher and a light/dark switch. The pages work down to phone width.
+The header has a project switcher, a status chip (*Idle* or *Run active*) and a light/dark switch.
+The theme follows the system until you press the switch. The pages work down to phone width.
+
+**Pipeline.** The first page of a project. Every open task is a card in a lane: *Backlog*,
+*Triaged*, *In pool*, *Running*, *Gate*, *Draft PR*, *Needs a person* and *Done*. A card shows the
+id, title, triage label, risk, and the current step with its elapsed time. Above the board,
+*Waiting for a person* lists what needs you now: questions from triage, drafts to review and runs
+the gate rejected. The funnel strip shows the median time to merge, the first-pass rate (runs that
+passed the gate) and how often a person agreed with the gate; a figure with no data yet is hidden.
+A running card opens the live job (steps, latest output, *Stop*); a finished card opens the run.
 
 **Projects.** The projects of the workspace, and *Add a project* (the wizard below).
 
@@ -114,8 +123,9 @@ After setup the Settings page shows the same sections, each with its own *Check*
 
 | | |
 |---|---|
-| ![Tasks, light theme](images/ui-tasks-light.png) | ![Runs with a live job, dark theme](images/ui-runs-dark.png) |
-| ![A failed check with a fix](images/ui-wizard-check.png) | ![Tasks at phone width](images/ui-tasks-phone-dark.png) |
+| ![Pipeline, light theme](images/ui-pipeline-light.png) | ![Pipeline, dark theme](images/ui-pipeline-dark.png) |
+| ![A run with its step timeline](images/ui-run-detail-light.png) | ![A live job](images/ui-job-dark.png) |
+| ![Tasks, light theme](images/ui-tasks-light.png) | ![Pipeline at phone width](images/ui-pipeline-phone-dark.png) |
 
 ## Limits
 

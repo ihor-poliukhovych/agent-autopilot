@@ -65,7 +65,17 @@ export function field(label, input, hint) {
   return h('label', { class: 'field' }, h('span', { class: 'lbl' }, label), input, hint ? h('p', { class: 'hint' }, hint) : null);
 }
 
-export function emptyState(text) { return h('div', { class: 'empty' }, text); }
+/** A newcomer-friendly empty state. `action` is { label, href } or { label, onclick }: the next step as a button. */
+export function emptyState(text, action, title) {
+  const button = action && (action.href
+    ? h('a', { class: 'btn primary', href: action.href }, action.label)
+    : h('button', { type: 'button', class: 'primary', onclick: action.onclick }, action.label));
+  return h('div', { class: 'empty' }, h('div', { class: 'icon', 'aria-hidden': 'true' }, '+'), title ? h('h2', {}, title) : null, h('p', {}, text), button);
+}
+
+export function loading(text = 'Loading…') {
+  return h('div', { class: 'loading', role: 'status' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), text);
+}
 
 export async function busy(button, work) {
   button.disabled = true;
