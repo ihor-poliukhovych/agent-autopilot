@@ -205,4 +205,61 @@ export async function loadDefaults(folder, baseBranch) {
   return post('/wizard/defaults', { folder, baseBranch });
 }
 
+/** Reads the folder (nothing is written) and returns { draft, analysis }: every value with the evidence behind it. */
+export async function analyzeFolder(folder) {
+  return post('/wizard/analyze', { folder });
+}
+
+const CONFIDENCE_KIND = { high: 'ok', medium: 'info', low: 'warn' };
+
+function evidenceRow(label, d) {
+  if (!d) return h('div', { class: 'evidence-row' }, h('span', { class: 'lbl' }, label), badge('not detected', 'warn'), h('div', { class: 'muted ev' }, 'Nothing in the folder says what this is. Fill it in below.'));
+  const level = String(d.confidence).toLowerCase();
+  return h('div', { class: 'evidence-row' },
+    h('span', { class: 'lbl' }, label), h('code', {}, d.value),
+    badge('detected', 'info'), badge(`${level} confidence`, CONFIDENCE_KIND[level] || ''),
+    h('div', { class: 'muted ev' }, d.evidence),
+    d.alternatives && d.alternatives.length ? h('div', { class: 'muted ev' }, `Other choices: ${d.alternatives.join('; ')}`) : null);
+}
+
+/** What the analyzer found for one part of the setup, with the file or rule behind each value. */
+export function evidenceBox(analysis, group) {
+  if (!analysis) return null;
+  const rows = [];
+  if (group === 'folder') {
+    rows.push(evidenceRow('Base branch', analysis.baseBranch), evidenceRow('Project key', analysis.key), evidenceRow('Display name', analysis.displayName));
+  } else if (group === 'commands') {
+    rows.push(evidenceRow('Build', analysis.build), evidenceRow('Test', analysis.test));
+  } else if (group === 'paths') {
+    rows.push(...analysis.writablePaths.map(d => evidenceRow('Writable', d)), ...analysis.riskPaths.map(d => evidenceRow('Risk', d)), ...analysis.context.map(d => evidenceRow('Context', d)));
+    if (!analysis.writablePaths.length) rows.unshift(evidenceRow('Writable', null));
+  } else if (group === 'source') {
+    rows.push(evidenceRow('Task source', analysis.taskSource));
+    const ado = analysis.azureDevOps;
+    if (ado) rows.push(evidenceRow('Organization', ado.organizationUrl), evidenceRow('Project', ado.project), evidenceRow('Repository', ado.repository));
+  }
+  return h('details', { class: 'evidence', open: rows.length <= 6 },
+    h('summary', {}, `What was detected (${rows.length} value${rows.length === 1 ? '' : 's'}, with evidence)`), h('div', { class: 'stack' }, rows));
+}
+
+/** The values the analyzer cannot know, as a list the person works through. */
+export function needsBox(analysis) {
+  const notes = [...(analysis.needsInput || []).map(n => n.question), ...(analysis.warnings || [])];
+  if (!notes.length) return h('p', {}, badge('Nothing to ask', 'ok'), ' Every value was found in the folder.');
+  return h('div', { class: 'banner warn' },
+    h('b', {}, (analysis.needsInput || []).length ? 'Please check these:' : 'Worth knowing:'),
+    h('ul', {}, notes.map(n => h('li', {}, n))));
+}
+
+/** The few fields every project has: base branch, key, display name. The folder is fixed once analyzed. */
+export function identityFields(draft) {
+  const folder = text(draft, 'repositoryFolder', { mono: true });
+  folder.disabled = true;
+  return h('div', { class: 'form-grid' },
+    field('Repository folder', folder, 'The repository that was analyzed. To use another folder, start again.'),
+    field('Base branch', text(draft, 'baseBranch', { mono: true }), 'Agent branches start here and drafts target it.'),
+    field('Project key', text(draft, 'key', { mono: true }), 'Short name: lower-case letters, digits, - and _. It cannot be changed later.'),
+    field('Display name', text(draft, 'displayName')));
+}
+
 export { get };

@@ -43,6 +43,7 @@ internal static class Endpoints
         // ----- projects and the wizard -----
         api.MapGet("/projects", (WebUiOptions o) => new ProjectRegistry(o.Workspace).List().Select(Summary));
         api.MapPost("/wizard/defaults", (FolderBody b, SetupService s, CancellationToken ct) => s.DefaultsAsync(b.Folder ?? string.Empty, b.BaseBranch, ct));
+        api.MapPost("/wizard/analyze", (FolderBody b, SetupService s, CancellationToken ct) => s.AnalyzeAsync(b.Folder ?? string.Empty, ct));
         api.MapPost("/wizard/check", (StepBody b, SetupService s, CancellationToken ct) => s.CheckAsync(b.Step, b.Draft, ct));
         api.MapPost("/wizard/azure-devops/preview", (PreviewBody b, SetupService s, CancellationToken ct) => s.PreviewAsync(b.Draft, b.Skip ?? 0, ct));
         api.MapPost("/projects", async (ProjectDraft draft, SetupService s, CancellationToken ct) =>
