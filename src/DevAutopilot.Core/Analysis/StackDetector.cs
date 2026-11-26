@@ -114,6 +114,7 @@ internal static class StackDetector
         // "packages", "components" and "pages" only mean something to a node project; "cmd", "internal" and "pkg" to Go.
         "node" => true,
         "go" => folder is "cmd" or "internal" or "pkg" or "tests" or "test",
+        "dotnet" or "rust" or "maven" or "gradle" => folder is "src" or "tests" or "test",
         _ => folder is "src" or "lib" or "app" or "tests" or "test" or "spec" or "e2e" or "__tests__",
     };
 
