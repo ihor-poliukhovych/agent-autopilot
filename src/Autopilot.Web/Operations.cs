@@ -56,7 +56,13 @@ public sealed record TaskDetailView(
 
 public sealed record RunStatus(bool Busy, int? Pid, string? Owner);
 
-public sealed record NeedsHumanItem(string Id, string Title, string Question, bool Stale, bool CanAnswer, string? Answer = null);
+/// <summary>One question on Needs a person. <see cref="Question"/> is the text without the options; <see cref="Reason"/> is the whole triage reason.</summary>
+public sealed record NeedsHumanItem(
+    string Id, string Title, string Question, bool Stale, bool CanAnswer, string? Answer = null,
+    IReadOnlyList<string>? Options = null, int? Recommended = null, string? Reason = null, bool InPool = false);
+
+/// <summary>What "Save and continue" did: the task with its answer, whether it is in the pool, and the triage job if one started.</summary>
+public sealed record AnswerContinueView(TaskDetailView Task, bool InPool, JobRecord? TriageJob, string? Note);
 
 /// <summary>Tasks: lists, local task changes, starting a run. Every method is one call into the core.</summary>
 public sealed class TaskOperations(WebUiOptions options)
@@ -173,7 +179,30 @@ public sealed class TaskOperations(WebUiOptions options)
         var items = await scope.CreateList().ListAsync(ct).ConfigureAwait(false);
         return [.. items
             .Where(i => i.Triage is { Label: "needs-human" })
-            .Select(i => new NeedsHumanItem(i.Id, i.Title, i.Triage!.Reason, i.Triage.Stale, scope.LocalTasks is not null, AnswerOf(scope, i.Id)))];
+            .Select(i => Needs(scope, i))];
+    }
+
+    private static NeedsHumanItem Needs(ProjectScope scope, WorkItemListEntry i)
+    {
+        var triage = i.Triage!;
+        var q = TriageQuestion.Resolve(triage.Reason, triage.Options, triage.Recommended);
+        return new NeedsHumanItem(i.Id, i.Title, q.Text, triage.Stale, scope.LocalTasks is not null, AnswerOf(scope, i.Id), q.Options, q.Recommended, triage.Reason, i.InPool);
+    }
+
+    /// <summary>
+    /// Saves the answer, puts the task in the pool and starts its triage again. When another triage is running the
+    /// answer and the pool entry are still kept and <see cref="AnswerContinueView.Note"/> says to triage it next.
+    /// </summary>
+    public async Task<AnswerContinueView> AnswerAndContinueAsync(ProjectScope scope, int number, string answer, CancellationToken ct)
+    {
+        Answer(scope, number, answer);
+        var id = number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        scope.Pool.Add(id);
+        JobRecord? job = null;
+        string? note = null;
+        try { job = StartTriage(scope, id); }
+        catch (ConflictException e) { note = e.Message; }
+        return new AnswerContinueView(await DetailAsync(scope, number, ct).ConfigureAwait(false), true, job, note);
     }
 
     /// <summary>The last answer a person gave on the task (the section <see cref="Answer"/> appends), or null.</summary>
@@ -275,8 +304,14 @@ public sealed record PoolStatusView(
 /// <summary>The pool and its runs: order, remove, run now, run at night.</summary>
 public sealed class PoolOperations(WebUiOptions options)
 {
-    public async Task<IReadOnlyList<PoolItemView>> ListAsync(ProjectScope scope, CancellationToken ct)
+    /// <param name="fresh">Drops the cached tracker list first, so the queue shows what the tracker holds now.</param>
+    public async Task<IReadOnlyList<PoolItemView>> ListAsync(ProjectScope scope, CancellationToken ct, bool fresh = false)
     {
+        if (fresh)
+        {
+            options.ListCache.Invalidate(scope.Project.Key);
+        }
+
         var entries = scope.Pool.List();
         if (entries.Count == 0)
         {
@@ -409,7 +444,8 @@ public sealed class PoolOperations(WebUiOptions options)
         if (body.MasterEnabled is { } m) { pool["master"] = new System.Text.Json.Nodes.JsonObject { ["enabled"] = m }; }
         if (body.IntegrationEnabled is { } i) { pool["integration"] = new System.Text.Json.Nodes.JsonObject { ["enabled"] = i }; }
         var budget = new System.Text.Json.Nodes.JsonObject();
-        if (body.MaxAgentRuns is { } r) { budget["maxAgentRuns"] = r; }
+        // 0 means "no limit": the key is stored as null, which is how the file says it.
+        if (body.MaxAgentRuns is { } r) { budget["maxAgentRuns"] = r == 0 ? null : r; }
         if (body.StopAtUsagePercent is { } s) { budget["stopAtUsagePercent"] = s; }
         if (budget.Count > 0) { pool["budget"] = budget; }
         var saved = pool.Count == 0 ? scope.Settings.Read() : scope.Settings.Save(new System.Text.Json.Nodes.JsonObject { ["pool"] = pool });

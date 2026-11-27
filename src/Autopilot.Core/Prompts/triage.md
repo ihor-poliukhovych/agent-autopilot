@@ -28,3 +28,5 @@ Answer only with the JSON object the schema asks for:
 - `reason`: one or two plain sentences a person can act on. For `needs-human`, ask the question to decide as a question, give two or three concrete options, and say which one you recommend and why, so the person can answer with one word.
 - `acceptanceCriteria`: short, checkable statements. Empty only for `needs-human`.
 - `risk`: `low`, `medium`, or `high`.
+- `options`: for `needs-human`, the two or three answers a person can pick, one short self-contained sentence each, without a letter or number in front. Empty for `agent-ready`.
+- `recommended`: the number of the option you recommend, counted from 1 (the first option is 1). Use 0 when `options` is empty.

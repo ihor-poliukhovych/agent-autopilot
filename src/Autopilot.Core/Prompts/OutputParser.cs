@@ -47,7 +47,9 @@ public static class OutputParser
             reason = "Triage gave no acceptance criteria, so a person must write them. " + reason;
         }
 
-        result = new TriageResult(parsedLabel.Value, reason.Trim(), criteria, risk);
+        var options = ReadList(json, "options");
+        int? recommended = json.TryGetProperty("recommended", out var rec) && rec.ValueKind == JsonValueKind.Number && rec.TryGetInt32(out var n) && n >= 1 && n <= options.Count ? n : null;
+        result = new TriageResult(parsedLabel.Value, reason.Trim(), criteria, risk, options, recommended);
         return true;
     }
 

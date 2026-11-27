@@ -101,7 +101,7 @@ local tasks you can add and edit a task, comment, close and reopen. *Start* runs
 background; *Add to pool* queues it; *Triage* asks the agent to triage it again. A task that
 belongs to a tracker is read-only here.
 
-**Pool.** The queue in the order the agent works through it. Below it: the concurrency slider, the unattended switch, who works on what and why a task waits, the pool master's decisions (with undo), parked tasks, the integration branch and a scheduled run (date, repeat, stop time; see [POOL.md](POOL.md)). Move, remove, *Run now* (optionally
+**Pool.** The queue in the order the agent works through it. Below it: the concurrency slider, the unattended switch, who works on what and why a task waits, the pool master's decisions (with undo), parked tasks, the integration branch and a scheduled run (date, repeat, stop time; see [POOL.md](POOL.md)). The queue refreshes by itself every few seconds (and with *Refresh*), and the budget (most agent runs in 24 hours, stop at a usage percent) is edited in the settings block. Move, remove, *Run now* (optionally
 with a limit), and *Run at night*: the page shows the exact command and the tasks that would run,
 and installs the schedule only after you confirm.
 
@@ -111,9 +111,15 @@ matched the gate's verdict, and the history. A run page shows the gate report, t
 description, the diff and the build log, and two buttons to record whether you merged or rejected
 the draft. Merging itself is always done by a person in their own tool.
 
-**Needs a person.** Tasks that triage could not decide, with the agent's question. Your answer is
-stored on the task twice: as a comment, and as a section of the task text, so the next triage and
-the agent read it. The changed text also marks the old triage stale.
+**Needs a person.** Tasks that triage could not decide, with the agent's question. When the question
+has options, each is a button and the recommended one is first and highlighted: one click saves it
+(a note in the box is added to it). Or write your own answer. Your answer is stored on the task
+twice: as a comment, and as a section of the task text, so the next triage and the agent read it.
+The changed text also marks the old triage stale. With *Save and continue* (on by default) the
+task is also put in the pool and triaged again; *Triage all answered* does that for every answered
+task, one after the other. Saving one answer redraws only that card, and text typed in other
+cards is kept. Triage returns the options and its recommendation as fields; results stored before
+that are read from the "(A) ... (B) ... I recommend B" wording.
 
 **Settings.** The setup steps below on one page, plus:
 
