@@ -32,7 +32,8 @@ public static class AzureCliLauncher
         {
             foreach (var name in names)
             {
-                var candidate = Path.Combine(folder.Trim('"'), name);
+                var directory = folder.Trim('"');
+                var candidate = windows ? directory.TrimEnd('\\') + "\\" + name : Path.Combine(directory, name);
                 if (exists(candidate))
                 {
                     return candidate;

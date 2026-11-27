@@ -89,16 +89,21 @@ public sealed class McpConfigTests
     public void Server_command_prefers_the_apphost()
     {
         var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "proj"));
-        var asApphost = DiagnosticsServerCommand.Build(@"C:\tools\autopilot.exe", @"C:\tools\autopilot.dll", root, _ => true);
-        Assert.Equal(@"C:\tools\autopilot.exe", asApphost.Command);
+        var tools = Path.Combine(Path.GetTempPath(), "tools");
+        var apphost = Path.Combine(tools, OperatingSystem.IsWindows() ? "autopilot.exe" : "autopilot");
+        var assembly = Path.Combine(tools, "autopilot.dll");
+        var dotnet = Path.Combine(Path.GetTempPath(), "dotnet", OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+
+        var asApphost = DiagnosticsServerCommand.Build(apphost, assembly, root, _ => true);
+        Assert.Equal(apphost, asApphost.Command);
         Assert.Equal(["mcp", "diagnostics", "--project", root], asApphost.Args);
 
-        var onDotnet = DiagnosticsServerCommand.Build(@"C:\dotnet\dotnet.exe", Path.Combine("C:\\tools", "autopilot.dll"), root, _ => true);
-        Assert.EndsWith(OperatingSystem.IsWindows() ? "autopilot.exe" : "autopilot", onDotnet.Command);
+        var onDotnet = DiagnosticsServerCommand.Build(dotnet, assembly, root, _ => true);
+        Assert.Equal(apphost, onDotnet.Command);
 
-        var noApphost = DiagnosticsServerCommand.Build(@"C:\dotnet\dotnet.exe", @"C:\tools\autopilot.dll", root, _ => false);
-        Assert.Equal(@"C:\dotnet\dotnet.exe", noApphost.Command);
-        Assert.Equal([@"C:\tools\autopilot.dll", "mcp", "diagnostics", "--project", root], noApphost.Args);
+        var noApphost = DiagnosticsServerCommand.Build(dotnet, assembly, root, _ => false);
+        Assert.Equal(dotnet, noApphost.Command);
+        Assert.Equal([assembly, "mcp", "diagnostics", "--project", root], noApphost.Args);
     }
 
     [Fact]
