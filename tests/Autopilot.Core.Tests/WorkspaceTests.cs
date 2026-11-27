@@ -61,7 +61,7 @@ public sealed class WorkspaceTests : IDisposable
         {
             // Put the database back to the state of a build that stopped at migration 004.
             using var command = connection.CreateCommand();
-            command.CommandText = "DROP TABLE workspace_settings; DELETE FROM schema_version WHERE version > 4;";
+            command.CommandText = Undo006 + "DROP TABLE workspace_settings; DELETE FROM schema_version WHERE version > 4;";
             command.ExecuteNonQuery();
         }
 
@@ -71,7 +71,35 @@ public sealed class WorkspaceTests : IDisposable
         using var check = workspace.Open();
         using var query = check.CreateCommand();
         query.CommandText = "SELECT MAX(version) FROM schema_version";
-        Assert.Equal(5L, (long)query.ExecuteScalar()!);
+        Assert.Equal((long)Workspace.Workspace.LatestVersion, (long)query.ExecuteScalar()!);
+    }
+
+    /// <summary>Takes migration 006 back out, so a test can start from a database that stopped before it.</summary>
+    private const string Undo006 =
+        "DROP TABLE pool_decisions; DROP TABLE pool_parked; DROP TABLE pool_status; DROP TABLE pool_pause; "
+        + "DROP TABLE pool_agent_runs; DROP TABLE task_locks; DROP TABLE pool_integration; DROP TABLE pool_integration_merges; "
+        + "ALTER TABLE schedules DROP COLUMN start_date; ALTER TABLE schedules DROP COLUMN repeat; ALTER TABLE schedules DROP COLUMN until_time; "
+        + "ALTER TABLE schedules DROP COLUMN unattended; ALTER TABLE schedules DROP COLUMN last_started_at; ";
+
+    [Fact]
+    public void A_database_at_workspace_settings_upgrades_to_the_unattended_pool_tables()
+    {
+        var workspace = NewWorkspace();
+        using (var connection = workspace.Open())
+        {
+            // Put the database back to the state of a build that stopped at migration 005.
+            using var command = connection.CreateCommand();
+            command.CommandText = Undo006 + "DELETE FROM schema_version WHERE version > 5;";
+            command.ExecuteNonQuery();
+        }
+
+        var state = new Pool.PoolStateStore(workspace, "demo");
+        state.Park("1", null, "reason", DateTimeOffset.UtcNow);
+        Assert.Single(state.Parked());
+        using var check = workspace.Open();
+        using var query = check.CreateCommand();
+        query.CommandText = "SELECT MAX(version) FROM schema_version";
+        Assert.Equal(6L, (long)query.ExecuteScalar()!);
     }
 
     [Fact]

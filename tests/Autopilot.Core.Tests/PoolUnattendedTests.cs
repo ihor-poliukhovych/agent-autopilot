@@ -439,10 +439,32 @@ public sealed class PoolUnattendedTests : IDisposable
 
         public List<string> Log { get; } = [];
 
-        public async Task<ImplementResult> RunAsync(string id, int millis = 500)
+        private readonly TaskCompletionSource _together = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>When set, a task waits until this many tasks run at once (or ten seconds pass, so a serial pool fails instead of hanging).</summary>
+        public int WaitForTogether { get; init; }
+
+        public async Task<ImplementResult> RunAsync(string id, int millis = 50)
         {
-            lock (Log) { Log.Add("start " + id); Max = Math.Max(Max, ++_now); }
-            await Task.Delay(millis);
+            lock (Log)
+            {
+                Log.Add("start " + id);
+                Max = Math.Max(Max, ++_now);
+                if (WaitForTogether > 0 && _now >= WaitForTogether)
+                {
+                    _together.TrySetResult();
+                }
+            }
+
+            if (WaitForTogether > 0)
+            {
+                await Task.WhenAny(_together.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+            }
+            else
+            {
+                await Task.Delay(millis);
+            }
+
             lock (Log) { Log.Add("end " + id); _now--; }
             return Result(id, ImplementOutcome.Published);
         }
@@ -455,7 +477,7 @@ public sealed class PoolUnattendedTests : IDisposable
         _config = new PoolConfig { Concurrency = 2 };
         _tasks.Infos["1"] = new PoolTaskInfo("One", string.Empty, ["src/a/**"], []);
         _tasks.Infos["2"] = new PoolTaskInfo("Two", string.Empty, ["src/b/**", "tests/b/**"], []);
-        var peak = new Peak();
+        var peak = new Peak { WaitForTogether = 2 };
 
         var result = await RunAsync(id => peak.RunAsync(id));
 
