@@ -269,6 +269,16 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
 .app-layout { display: grid; gap: var(--s4); grid-template-columns: var(--left-col) minmax(0, 1fr); align-items: start; }
 .app-left, .app-right { min-width: 0; }
 .drawer-open, .drawer-close { display: none; }
+
+/* Inbox cards: id, kind badge and age on the first row, then a two-line title and a three-line summary. */
+.inbox-card { display: block; width: 100%; text-align: left; border-left: 3px solid transparent; }
+.inbox-card.selected { border-left-color: var(--accent); background: var(--accent-soft); }
+.inbox-card .inbox-head { display: flex; align-items: center; gap: .5rem; }
+.inbox-card .inbox-id { color: var(--link, var(--accent)); font-weight: 650; }
+.inbox-card .inbox-age { margin-left: auto; }
+.inbox-card .inbox-title { margin: .25rem 0 0; font-weight: 600; text-align: left; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.inbox-card .inbox-summary { margin: .25rem 0 0; text-align: left; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.app-right > [data-part="inbox-detail"] { position: sticky; top: var(--s4); max-height: calc(100vh - 2rem); overflow-y: auto; }
 @media (max-width: 760px) {
   .app-layout { grid-template-columns: minmax(0, 1fr); }
   /* On phone width the right column becomes a drawer that slides over the page. */
