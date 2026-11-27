@@ -56,6 +56,25 @@ public sealed class NavigationLayoutTests
     }
 
     [Fact]
+    public void Inbox_cards_are_left_aligned_clamped_and_select_the_first_item()
+    {
+        var js = Wwwroot("js/inbox.js");
+        var css = Wwwroot("app.css");
+        Assert.Contains("class: 'inbox-id' }, `#${item.id}`", js);
+        Assert.DoesNotContain("`#${item.id} ${item.title}`, item.kind", js);
+        Assert.Contains("class: 'inbox-title' }, item.title", js);
+        Assert.Contains("'aria-current': same(item, selected) ? 'true' : null", js);
+        Assert.Contains("selected = items[0]", js);
+        Assert.DoesNotContain("Pick an item on the left", js);
+        Assert.Contains("Nothing waits for you", js);
+        Assert.Contains(".inbox-card .inbox-title", css);
+        Assert.Contains("-webkit-line-clamp: 2", css);
+        Assert.Contains("-webkit-line-clamp: 3", css);
+        Assert.Contains(".inbox-card.selected { border-left-color: var(--accent)", css);
+        Assert.Contains("[data-part=\"inbox-detail\"] { position: sticky", css);
+    }
+
+    [Fact]
     public void Css_defines_left_col_420px_and_the_shared_layout_class()
     {
         var css = Wwwroot("app.css");

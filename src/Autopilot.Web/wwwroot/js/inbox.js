@@ -24,6 +24,7 @@ export async function render({ view, key }) {
   async function reload() {
     items = await get(`${base(key)}/inbox`);
     if (selected && !items.some(i => same(i, selected))) selected = null;
+    if (!selected && items.length) selected = items[0];
     paintList();
     paintDetail();
   }
@@ -37,22 +38,23 @@ export async function render({ view, key }) {
     }
     for (const item of items) {
       list.append(h('button', {
-        type: 'button', class: 'card' + (same(item, selected) ? ' selected' : ''), 'data-kind': item.kind, 'data-id': item.id,
+        type: 'button', class: 'card inbox-card' + (same(item, selected) ? ' selected' : ''), 'data-kind': item.kind, 'data-id': item.id,
         'aria-current': same(item, selected) ? 'true' : null,
         onclick: () => { selected = item; paintList(); paintDetail(); },
       },
-      h('div', { class: 'row between' }, h('b', {}, `#${item.id} ${item.title}`), item.kind === 'parked' ? badge('parked', 'warn') : badge('question', 'info')),
-      h('p', { class: 'muted small' }, item.kind === 'parked' ? item.parkReason : (item.question?.question || ''), ' · ', ago(item.createdAt))));
+      h('div', { class: 'inbox-head' },
+        h('span', { class: 'inbox-id' }, `#${item.id}`),
+        item.kind === 'parked' ? badge('parked', 'warn') : badge('question', 'info'),
+        h('span', { class: 'inbox-age muted small' }, ago(item.createdAt))),
+      h('div', { class: 'inbox-title' }, item.title),
+      h('p', { class: 'inbox-summary muted small' }, item.kind === 'parked' ? (item.parkReason || '') : (item.question?.question || ''))));
     }
   }
 
   async function paintDetail() {
     if (stopNeeds) { stopNeeds(); stopNeeds = null; }
     clear(detail);
-    if (!selected) {
-      if (items.length) detail.append(h('p', { class: 'muted' }, 'Pick an item on the left.'));
-      return;
-    }
+    if (!selected) return;
     if (selected.kind === 'parked') {
       const item = selected;
       detail.append(h('section', { class: 'card stack' },
@@ -72,6 +74,7 @@ export async function render({ view, key }) {
     stopNeeds = await needs.render({ view: holder, key, only: id, onChange: current => { if (!current.length) reload().catch(() => {}); } });
   }
 
+  if (items.length) selected = items[0];
   paintList();
   view.append(h('div', { class: 'app-layout', 'data-page': 'inbox' }, h('div', { class: 'app-left' }, list), h('div', { class: 'app-right open' }, detail)));
   paintDetail();
