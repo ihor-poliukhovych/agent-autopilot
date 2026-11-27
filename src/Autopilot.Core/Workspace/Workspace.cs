@@ -47,8 +47,33 @@ public sealed class Workspace
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), DefaultFolderName);
     }
 
-    public static Workspace Resolve(string? explicitPath, Func<string, string?>? getEnvironment = null) =>
-        new(ResolveRoot(explicitPath, getEnvironment));
+    /// <summary>
+    /// Like <see cref="ResolveRoot"/>. When the default location is used and only the folder of the old product
+    /// name exists, it is moved first (see <see cref="LegacyWorkspaceMigration"/>); <paramref name="notice"/> gets
+    /// the message for the person, if any.
+    /// </summary>
+    public static Workspace Resolve(string? explicitPath, Func<string, string?>? getEnvironment = null, Action<string>? notice = null, string? userProfile = null)
+    {
+        var root = ResolveRoot(explicitPath, getEnvironment);
+        var profile = userProfile ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(explicitPath)
+            && string.IsNullOrWhiteSpace((getEnvironment ?? Environment.GetEnvironmentVariable)(EnvironmentVariable))
+            && !string.IsNullOrWhiteSpace(profile))
+        {
+            var result = LegacyWorkspaceMigration.Apply(profile);
+            if (result.Message is not null)
+            {
+                notice?.Invoke(result.Message);
+            }
+
+            if (result.Outcome != LegacyMigrationOutcome.NotNeeded)
+            {
+                root = result.Root;
+            }
+        }
+
+        return new Workspace(root);
+    }
 
     /// <summary>Opens the database, creating the folder and applying the missing migrations first.</summary>
     public SqliteConnection Open()

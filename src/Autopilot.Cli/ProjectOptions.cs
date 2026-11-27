@@ -65,7 +65,7 @@ public sealed class ProjectOptions
     }
 
     public Autopilot.Core.Workspace.Workspace OpenWorkspace(ParseResult parse) =>
-        Autopilot.Core.Workspace.Workspace.Resolve(parse.GetValue(Workspace));
+        Autopilot.Core.Workspace.Workspace.Resolve(parse.GetValue(Workspace), notice: Console.Error.WriteLine);
 
     /// <summary>
     /// A value that is a registered key selects the workspace project. Otherwise it is a repository folder, as
