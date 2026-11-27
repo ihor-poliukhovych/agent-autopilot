@@ -75,7 +75,8 @@ public sealed class NavigationLayoutTests
         var js = Wwwroot("js/app.js");
         var css = Wwwroot("app.css");
         Assert.Contains("function leftColumn(", js);
-        Assert.Contains("h('nav', { class: 'app-links'", js);
+        Assert.DoesNotContain("app-links", js);
+        Assert.DoesNotContain("app-links", css);
         Assert.DoesNotContain(":empty", css);
     }
 
