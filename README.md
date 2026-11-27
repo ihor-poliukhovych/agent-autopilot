@@ -23,7 +23,7 @@ For a registered project (`--project <key>`) there is also a task pool and backg
 ```
 autopilot list                      # open tasks: triage (stale when the text changed), last run, pool
 autopilot pool add 12 14            # queue tasks; also: remove, list, move, clear
-autopilot pool run --limit 3        # one at a time; stops on infrastructure errors; writes POOL-REPORT.md
+autopilot pool run --limit 3        # stops on infrastructure errors; writes POOL-REPORT.md; see docs/POOL.md for unattended runs, several agents and the integration branch
 autopilot task add "title"          # tasks inside Autopilot, no tracker needed (docs/TRACKERS.md)
 autopilot ado import --project shop   # bring Azure DevOps work items in as local tasks (read only; --dry-run first)
 autopilot implement 12 --detach     # run in the background; then: job list | job show <id> --log | job cancel <id>

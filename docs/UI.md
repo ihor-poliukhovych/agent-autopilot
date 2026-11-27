@@ -51,7 +51,7 @@ local tasks you can add and edit a task, comment, close and reopen. *Start* runs
 background; *Add to pool* queues it; *Triage* asks the agent to triage it again. A task that
 belongs to a tracker is read-only here.
 
-**Pool.** The queue in the order the agent works through it. Move, remove, *Run now* (optionally
+**Pool.** The queue in the order the agent works through it. Below it: the concurrency slider, the unattended switch, who works on what and why a task waits, the pool master's decisions (with undo), parked tasks, the integration branch and a scheduled run (date, repeat, stop time; see [POOL.md](POOL.md)). Move, remove, *Run now* (optionally
 with a limit), and *Run at night*: the page shows the exact command and the tasks that would run,
 and installs the schedule only after you confirm.
 
