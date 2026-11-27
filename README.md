@@ -1,5 +1,7 @@
 # Autopilot
 
+[![Build and test](https://github.com/ihor-poliukhovych/autopilot/actions/workflows/build.yml/badge.svg)](https://github.com/ihor-poliukhovych/autopilot/actions/workflows/build.yml)
+
 **AI agents from draft work item to reviewed pull request.**
 
 Autopilot runs an AI coding agent over a project's backlog and turns the safe
