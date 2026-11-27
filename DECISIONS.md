@@ -259,3 +259,24 @@ shared machines and mandatory off loopback. The port is picked once per machine 
 saved in the workspace so the address is stable. `autopilot ui install` starts it at sign-in with
 per-user means only (Startup script, systemd user unit, launchd agent). Tracker lists are cached
 for 30 seconds and refreshed in the background, so a page does not wait for the tracker each time.
+
+
+## D-021 Unattended pool, pool master and integration branch (accepted, 2026-11-28)
+
+The pool can run without a person watching (`pool.unattended`, `pool run --unattended`). A pool master,
+a read-only `claude -p` run, answers needs-human questions and classifies failures. The model only
+suggests: code checks every answer, parks the task when the topic is in `pool.alwaysAsk`
+(secrets, stored data, contracts, paid things, settings, rules), when the answer is not reversible or the
+per-run decision limit is used up, and never lets the master touch those topics. All decisions are stored
+and a person can undo one; the number of undone decisions is kept for the trust levels.
+
+Up to four agents work at once (`pool.concurrency`, read again before each task starts). Tasks that may
+write the same files or depend on each other run one after the other; each task has its own lock and the
+budget is shared.
+
+Task PRs go into an integration branch by default (`pool.integration`): the pool merges a task into
+`integration/<name>` only after build and tests pass, never into the base branch, never marks a PR ready.
+A person merges the one final draft PR. Turning this off is an explicit setting.
+
+Schedules take a date, a repeat, a stop time and a task limit, and a missed run is started at the next
+sign-in. Details: [docs/POOL.md](docs/POOL.md).

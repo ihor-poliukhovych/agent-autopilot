@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text;
+using Autopilot.Core.Config;
 using Autopilot.Core.Evals;
 using Autopilot.Core.Pipeline;
 using Autopilot.Core.Runs;
@@ -14,22 +16,81 @@ public sealed record PoolRunResult(
     string? StoppedBecause,
     string? ReportPath)
 {
+    /// <summary>Tasks left for a person in this run: the reason is the pool master's or the pool's own.</summary>
+    public IReadOnlyList<ParkedTask> Parked { get; init; } = [];
+
+    /// <summary>What the pool master decided in this run.</summary>
+    public IReadOnlyList<PoolDecision> Decisions { get; init; } = [];
+
+    /// <summary>Bug tasks the pool created because it suspected a defect in Autopilot itself.</summary>
+    public IReadOnlyList<string> Bugs { get; init; } = [];
+
+    /// <summary>Agent runs started by this pool run (implement attempts and master calls).</summary>
+    public int AgentRuns { get; init; }
+
+    public bool Unattended { get; init; }
+
     public bool Succeeded => StoppedBecause is null && Rejected.Count == 0;
 }
 
+/// <summary>Everything the unattended pool needs besides the queue. All parts are optional: without them the pool is the plain, attended one.</summary>
+public sealed class PoolRunOptions
+{
+    /// <summary>The pool settings, read again before each task starts so a changed concurrency applies to the next one.</summary>
+    public Func<PoolConfig> Config { get; init; } = () => new PoolConfig();
+
+    /// <summary>Forces unattended mode on (the <c>--unattended</c> flag). Null follows <c>pool.unattended</c>.</summary>
+    public bool? Unattended { get; init; }
+
+    public IPoolMaster? Master { get; init; }
+
+    public IPoolTasks? Tasks { get; init; }
+
+    public PoolStateStore? State { get; init; }
+
+    public TaskRunLock? TaskLock { get; init; }
+
+    public TimeProvider Clock { get; init; } = TimeProvider.System;
+
+    /// <summary>The subscription usage in percent when it is known, otherwise null (then only <c>maxAgentRuns</c> limits).</summary>
+    public Func<double?>? UsagePercent { get; init; }
+
+    /// <summary>No task is started after this local time of day (a night run that stops at six).</summary>
+    public TimeOnly? Until { get; init; }
+
+    /// <summary>How often a pool with waiting tasks looks at the settings again while agents work.</summary>
+    public TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(2);
+}
+
 /// <summary>
-/// Runs the pool one item at a time. It stops on an infrastructure error (Claude Code signed out, a usage
-/// limit, a program that cannot start): every later item would fail the same way. Items that were tried leave
-/// the pool; items not reached and the item that hit the error stay. Takes the project's run lock first.
+/// Runs the pool. Up to <c>pool.concurrency</c> agents work at once; tasks whose write paths overlap, or that
+/// wait for another task, are started one after the other. It stops on an infrastructure error (Claude Code
+/// signed out, a usage limit, a program that cannot start): every later item would fail the same way. Items
+/// that were tried leave the pool; items not reached and the item that hit the error stay. Takes the project's
+/// run lock first and one lock per task.
+/// In unattended mode the pool master answers needs-human questions and classifies failures; what it must
+/// not decide is parked for a person and the pool goes on.
 /// </summary>
 public sealed class PoolRunner(
     PoolService pool,
     RunStore runs,
     ProjectRunLock runLock,
     string projectKey,
-    Func<string, CancellationToken, Task<ImplementResult>> implement)
+    Func<string, CancellationToken, Task<ImplementResult>> implement,
+    PoolRunOptions? options = null)
 {
     public const string ReportFileName = "POOL-REPORT.md";
+
+    private readonly PoolRunOptions _options = options ?? new PoolRunOptions();
+
+    private sealed record Processed(string Bucket, ImplementResult? Result, string? StopBecause, bool Keep, string? Message = null);
+
+    private const string BucketDone = "done";
+    private const string BucketRejected = "rejected";
+    private const string BucketNeedsHuman = "needs-human";
+    private const string BucketParked = "parked";
+    private const string BucketStopped = "stopped";
+    private const string BucketSkipped = "skipped";
 
     /// <param name="limit">At most this many items are tried; the rest are listed as not reached.</param>
     /// <param name="reportFolder">Where <c>POOL-REPORT.md</c> is written (the project's workspace folder).</param>
@@ -40,70 +101,536 @@ public sealed class PoolRunner(
             throw new ArgumentOutOfRangeException(nameof(limit), "The limit must be greater than 0.");
         }
 
+        var clock = _options.Clock;
+        var state = _options.State;
+        var unattended = _options.Unattended ?? _options.Config().Unattended;
         using var held = runLock.Acquire(projectKey, "pool run");
         var queue = pool.List().Select(e => e.WorkItemId).ToList();
         var done = new List<ImplementResult>();
         var rejected = new List<ImplementResult>();
         var needsHuman = new List<ImplementResult>();
         var notReached = new List<string>();
+        var parked = new List<ParkedTask>();
+        var decisions = new List<PoolDecision>();
+        var bugs = new List<string>();
+        var agentRuns = 0;
+        var decisionsMade = 0;
         string? stopped = null;
+        var budgetLock = new object();
+        state?.ClearSlots();
 
-        for (var index = 0; index < queue.Count; index++)
+        // A pause from an earlier run (infrastructure, budget) holds until its retry time.
+        if (state?.CurrentPause() is { } pause)
         {
-            var id = queue[index];
-            if (stopped is not null)
+            if (pause.RetryAt is { } retry && retry > clock.GetUtcNow())
             {
-                notReached.Add($"{id}: not started. {stopped}");
+                stopped = $"The pool is paused until {retry.ToLocalTime():yyyy-MM-dd HH:mm}: {pause.Reason}";
+            }
+            else
+            {
+                state.Resume();
+            }
+        }
+
+        var startedAt = clock.GetUtcNow();
+        DateTimeOffset? deadline = null;
+        if (_options.Until is { } until)
+        {
+            var local = TimeZoneInfo.ConvertTime(startedAt, clock.LocalTimeZone);
+            var day = local.Date + until.ToTimeSpan();
+            if (day <= local.DateTime)
+            {
+                day = day.AddDays(1);
+            }
+
+            deadline = new DateTimeOffset(day, clock.LocalTimeZone.GetUtcOffset(day));
+        }
+
+        string? Reserve(string? workItemId, string kind)
+        {
+            lock (budgetLock)
+            {
+                var config = _options.Config();
+                var now = clock.GetUtcNow();
+                if (config.Budget.MaxAgentRuns is { } max)
+                {
+                    var used = state?.AgentRunsInLastDay(now) ?? agentRuns;
+                    if (used >= max)
+                    {
+                        return $"The budget of {max} agent runs in 24 hours is used up.";
+                    }
+                }
+
+                if (_options.UsagePercent?.Invoke() is { } percent && percent >= config.Budget.StopAtUsagePercent)
+                {
+                    return $"Subscription usage is {percent:0}%, at or above the limit of {config.Budget.StopAtUsagePercent}%.";
+                }
+
+                agentRuns++;
+                state?.CountAgentRun(workItemId, kind, now);
+                return null;
+            }
+        }
+
+        string? BudgetProblem()
+        {
+            lock (budgetLock)
+            {
+                var config = _options.Config();
+                if (config.Budget.MaxAgentRuns is { } max && (state?.AgentRunsInLastDay(clock.GetUtcNow()) ?? agentRuns) >= max)
+                {
+                    return $"The budget of {max} agent runs in 24 hours is used up.";
+                }
+
+                return _options.UsagePercent?.Invoke() is { } percent && percent >= config.Budget.StopAtUsagePercent
+                    ? $"Subscription usage is {percent:0}%, at or above the limit of {config.Budget.StopAtUsagePercent}%."
+                    : null;
+            }
+        }
+
+        var infos = new Dictionary<string, PoolTaskInfo>(StringComparer.Ordinal);
+        var pending = new List<string>(queue);
+        var running = new Dictionary<Task<Processed>, (string Id, DateTimeOffset Started)>();
+        var finished = new HashSet<string>(StringComparer.Ordinal);
+        var failedIds = new HashSet<string>(StringComparer.Ordinal);
+        var tried = 0;
+        var lastWait = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        while (!ct.IsCancellationRequested)
+        {
+            // Fill the free slots, in queue order, with tasks that may start now.
+            if (stopped is null)
+            {
+                var slots = Math.Clamp(_options.Config().Concurrency, 1, PoolConfig.MaxConcurrency);
+                for (var i = 0; i < pending.Count && stopped is null;)
+                {
+                    var id = pending[i];
+                    if (limit is { } max && tried >= max)
+                    {
+                        break;
+                    }
+
+                    if (deadline is { } end && clock.GetUtcNow() >= end)
+                    {
+                        stopped = $"The stop time {_options.Until:HH\\:mm} was reached.";
+                        break;
+                    }
+
+                    if (BudgetProblem() is { } problem)
+                    {
+                        stopped = problem;
+                        break;
+                    }
+
+                    var info = await InfoAsync(id).ConfigureAwait(false);
+                    var wait = WaitReason(id, info);
+                    if (wait is not null)
+                    {
+                        if (wait.StartsWith("dependency failed:", StringComparison.Ordinal))
+                        {
+                            var why = wait["dependency failed:".Length..].Trim();
+                            parked.Add(Park(id, null, $"It depends on a task that did not finish ({why})."));
+                            pending.RemoveAt(i);
+                            state?.ClearSlot(id);
+                            pool.Remove(id);
+                            continue;
+                        }
+
+                        SetWait(id, wait);
+                        i++;
+                        continue;
+                    }
+
+                    if (running.Count >= slots)
+                    {
+                        SetWait(id, $"all {slots} slot(s) are busy");
+                        i++;
+                        continue;
+                    }
+
+                    pending.RemoveAt(i);
+                    tried++;
+                    lastWait.Remove(id);
+                    var started = clock.GetUtcNow();
+                    state?.SetSlot(id, "running", $"slot {running.Count + 1}", started);
+                    running[Work(id, unattended, Reserve, decisions, bugs, () => Interlocked.Increment(ref decisionsMade), ct)] = (id, started);
+                }
+            }
+
+            if (running.Count == 0)
+            {
+                if (pending.Count > 0 && stopped is null && !(limit is { } m && tried >= m))
+                {
+                    // Nothing runs and nothing can start: tasks that wait on each other.
+                    foreach (var id in pending.ToList())
+                    {
+                        parked.Add(Park(id, null, "It waits for tasks that can never finish first (a dependency cycle)."));
+                        state?.ClearSlot(id);
+                        pool.Remove(id);
+                    }
+
+                    pending.Clear();
+                }
+
+                break;
+            }
+
+            // While tasks wait for a slot, look again now and then: a person may have raised the concurrency.
+            var waiting = new List<Task>(running.Keys);
+            if (pending.Count > 0 && stopped is null)
+            {
+                waiting.Add(Task.Delay(_options.PollInterval, ct));
+            }
+
+            var woken = await Task.WhenAny(waiting).ConfigureAwait(false);
+            if (woken is not Task<Processed> completed)
+            {
                 continue;
             }
 
-            if (limit is { } max && index >= max)
+            var (doneId, doneStarted) = running[completed];
+            running.Remove(completed);
+            state?.ClearSlot(doneId);
+            var outcome = await completed.ConfigureAwait(false);
+            finished.Add(doneId);
+            switch (outcome.Bucket)
             {
-                notReached.Add($"{id}: not started, the limit of {max} was reached.");
-                continue;
-            }
-
-            ct.ThrowIfCancellationRequested();
-            var started = DateTimeOffset.UtcNow;
-            ImplementResult result;
-            try
-            {
-                result = await implement(id, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                result = new ImplementResult(id, ImplementOutcome.Failed, ex.Message);
-            }
-
-            var infrastructure = result.Outcome == ImplementOutcome.Failed ? InfrastructureErrors.Classify(result.Message) : null;
-            if (infrastructure is not null)
-            {
-                stopped = $"Stopped at {id}: {infrastructure}";
-                notReached.Add($"{id}: stopped here. {infrastructure}");
-                continue;
-            }
-
-            runs.Record(result, started);
-            pool.Remove(id);
-            switch (result.Outcome)
-            {
-                case ImplementOutcome.Published:
-                    done.Add(result);
+                case BucketStopped:
+                    stopped ??= outcome.StopBecause;
+                    notReached.Add($"{doneId}: stopped here. {outcome.Message ?? outcome.StopBecause}");
+                    failedIds.Add(doneId);
                     break;
-                case ImplementOutcome.NotReady or ImplementOutcome.NotFound:
-                    needsHuman.Add(result);
+                case BucketSkipped:
+                    notReached.Add($"{doneId}: {outcome.Message}");
                     break;
                 default:
-                    rejected.Add(result);
+                    runs.Record(outcome.Result!, doneStarted);
+                    pool.Remove(doneId);
+                    switch (outcome.Bucket)
+                    {
+                        case BucketDone:
+                            done.Add(outcome.Result!);
+                            break;
+                        case BucketNeedsHuman:
+                            needsHuman.Add(outcome.Result!);
+                            failedIds.Add(doneId);
+                            break;
+                        case BucketParked:
+                            parked.Add(new ParkedTask(doneId, null, outcome.Message ?? outcome.Result!.Message, clock.GetUtcNow()));
+                            failedIds.Add(doneId);
+                            break;
+                        default:
+                            rejected.Add(outcome.Result!);
+                            failedIds.Add(doneId);
+                            break;
+                    }
+
                     break;
             }
         }
 
-        var outcome = new PoolRunResult(done, rejected, needsHuman, notReached, stopped, Path.Combine(reportFolder, ReportFileName));
+        ct.ThrowIfCancellationRequested();
+        state?.ClearSlots();
+        foreach (var id in pending)
+        {
+            notReached.Add(stopped is not null
+                ? $"{id}: not started. {stopped}"
+                : $"{id}: not started, the limit of {limit} was reached.");
+        }
+
+        var result = new PoolRunResult(done, rejected, needsHuman, notReached, stopped, Path.Combine(reportFolder, ReportFileName))
+        {
+            Parked = parked,
+            Decisions = decisions,
+            Bugs = bugs,
+            AgentRuns = agentRuns,
+            Unattended = unattended,
+        };
         Directory.CreateDirectory(reportFolder);
-        await File.WriteAllTextAsync(outcome.ReportPath!, Report(outcome, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
-        return outcome;
+        await File.WriteAllTextAsync(result.ReportPath!, Report(result, clock.GetUtcNow()), ct).ConfigureAwait(false);
+        return result;
+
+        async Task<PoolTaskInfo> InfoAsync(string id)
+        {
+            if (!infos.TryGetValue(id, out var info))
+            {
+                info = (_options.Tasks is { } tasks ? await tasks.DescribeAsync(id, ct).ConfigureAwait(false) : null)
+                    ?? new PoolTaskInfo(id, string.Empty, ["**"], []);
+                infos[id] = info;
+            }
+
+            return info;
+        }
+
+        string? WaitReason(string id, PoolTaskInfo info)
+        {
+            foreach (var dependency in info.DependsOn)
+            {
+                if (failedIds.Contains(dependency))
+                {
+                    return $"dependency failed: task {dependency} was not completed";
+                }
+
+                if (pending.Contains(dependency) || running.Values.Any(r => r.Id == dependency))
+                {
+                    return $"waits for task {dependency} (depends-on)";
+                }
+            }
+
+            foreach (var (_, other) in running.Values.Select(r => (r.Id, r.Id)))
+            {
+                if (infos.TryGetValue(other, out var otherInfo) && PathOverlap.Overlaps(info.Paths, otherInfo.Paths))
+                {
+                    return $"shares files with task {other}";
+                }
+            }
+
+            return null;
+        }
+
+        void SetWait(string id, string reason)
+        {
+            if (!lastWait.TryGetValue(id, out var last) || last != reason)
+            {
+                lastWait[id] = reason;
+                state?.SetSlot(id, "waiting", reason, clock.GetUtcNow());
+            }
+        }
+
+        ParkedTask Park(string id, string? category, string reason)
+        {
+            var at = clock.GetUtcNow();
+            state?.Park(id, category, reason, at);
+            return new ParkedTask(id, category, reason, at);
+        }
     }
+
+    private Task<Processed> Work(string id, bool unattended, Func<string?, string, string?> reserve, List<PoolDecision> decisions, List<string> bugs, Func<int> nextDecision, CancellationToken ct) =>
+        Task.Run(() => WorkAsync(id, unattended, reserve, decisions, bugs, nextDecision, ct), CancellationToken.None);
+
+    private async Task<Processed> WorkAsync(string id, bool unattended, Func<string?, string, string?> reserve, List<PoolDecision> decisions, List<string> bugs, Func<int> nextDecision, CancellationToken ct)
+    {
+        IDisposable? taskLock = null;
+        try
+        {
+            if (_options.TaskLock is { } locks)
+            {
+                try
+                {
+                    taskLock = locks.Acquire(projectKey, id, "pool run");
+                }
+                catch (TaskLockHeldException ex)
+                {
+                    return new Processed(BucketSkipped, null, null, true, ex.Message);
+                }
+            }
+
+            var config = _options.Config();
+            var master = unattended && config.Master.Enabled ? _options.Master : null;
+            var clock = _options.Clock;
+            var attempts = 0;
+            var retriages = 0;
+            var firstAttempt = true;
+
+            while (true)
+            {
+                if (reserve(id, firstAttempt ? "implement" : "retry") is { } budget)
+                {
+                    return new Processed(BucketStopped, null, budget, true);
+                }
+
+                firstAttempt = false;
+                ImplementResult result;
+                try
+                {
+                    result = await implement(id, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    result = new ImplementResult(id, ImplementOutcome.Failed, ex.Message);
+                }
+
+                var infrastructure = result.Outcome == ImplementOutcome.Failed ? InfrastructureErrors.Classify(result.Message) : null;
+                if (infrastructure is not null)
+                {
+                    return Pause(id, infrastructure, config);
+                }
+
+                switch (result.Outcome)
+                {
+                    case ImplementOutcome.Published:
+                        return await IntegrateAsync(result, ct).ConfigureAwait(false);
+
+                    case ImplementOutcome.NotReady when master is not null && _options.Tasks is { } tasks:
+                    {
+                        var question = await tasks.QuestionAsync(id, ct).ConfigureAwait(false);
+                        if (question is null)
+                        {
+                            // No triage yet, or the text changed: triage again once, then try again.
+                            if (retriages++ == 0 && reserve(id, "triage") is null && await tasks.RetriageAsync(id, ct).ConfigureAwait(false))
+                            {
+                                continue;
+                            }
+
+                            return Parked(result, null, $"The task could not be made ready: {result.Message}");
+                        }
+
+                        var info = await tasks.DescribeAsync(id, ct).ConfigureAwait(false);
+                        var verdict = await AnswerAsync(id, info, question, master, config, reserve, decisions, nextDecision, tasks, ct).ConfigureAwait(false);
+                        if (verdict.Park is { } park)
+                        {
+                            return Parked(result, verdict.Category, park);
+                        }
+
+                        if (reserve(id, "triage") is { } problem)
+                        {
+                            return new Processed(BucketStopped, null, problem, true);
+                        }
+
+                        if (!await tasks.RetriageAsync(id, ct).ConfigureAwait(false))
+                        {
+                            return Parked(result, verdict.Category, "The task is still not ready after the master's answer.");
+                        }
+
+                        continue;
+                    }
+
+                    case ImplementOutcome.Rejected or ImplementOutcome.Failed when unattended && _options.Tasks is { } tasks:
+                    {
+                        var verdict = master is null
+                            ? new FailureVerdict(FailureKind.Task, string.Empty, "No pool master, so the failure is treated as the task's own.", null)
+                            : await ClassifyAsync(id, result, master, reserve, ct).ConfigureAwait(false);
+                        if (master is not null)
+                        {
+                            lock (decisions) { decisions.Add(Store(id, DecisionKinds.Failure, result.Message, verdict.Kind.ToString(), verdict.Reason, null)); }
+                        }
+
+                        switch (verdict.Kind)
+                        {
+                            case FailureKind.Infrastructure:
+                                return Pause(id, verdict.Reason, config);
+                            case FailureKind.AutopilotDefect:
+                                var title = string.IsNullOrWhiteSpace(verdict.BugTitle) ? $"Autopilot defect while working on task {id}" : verdict.BugTitle!;
+                                var bugId = await tasks.CreateBugAsync(title, $"Found by the pool master while task {id} failed.\n\n{verdict.Reason}\n\nLog excerpt:\n{Excerpt(result.Message)}", ct).ConfigureAwait(false);
+                                lock (bugs) { bugs.Add($"{bugId}: {title}"); }
+                                return Parked(result, null, $"The pool master suspects a defect in Autopilot (bug task {bugId}): {verdict.Reason}");
+                            default:
+                                if (attempts < config.OnFailure.Retries)
+                                {
+                                    attempts++;
+                                    await tasks.PrepareRetryAsync(id, ct).ConfigureAwait(false);
+                                    if (!string.IsNullOrWhiteSpace(verdict.Notes))
+                                    {
+                                        await tasks.AnswerAsync(id, $"Notes for the next attempt (pool master): {verdict.Notes.Trim()}", ct).ConfigureAwait(false);
+                                    }
+
+                                    continue;
+                                }
+
+                                return Parked(result, null, $"It failed {attempts + 1} time(s) and the retries are used up: {Excerpt(result.Message)}");
+                        }
+                    }
+
+                    case ImplementOutcome.NotReady or ImplementOutcome.NotFound:
+                        return new Processed(BucketNeedsHuman, result, null, false);
+
+                    default:
+                        return new Processed(BucketRejected, result, null, false);
+                }
+            }
+        }
+        finally
+        {
+            taskLock?.Dispose();
+        }
+
+        Processed Parked(ImplementResult result, string? category, string reason)
+        {
+            _options.State?.Park(id, category, reason, _options.Clock.GetUtcNow());
+            return new Processed(BucketParked, result, null, false, reason + ((category is not null) ? $" ({category})" : string.Empty));
+        }
+
+        Processed Pause(string taskId, string reason, PoolConfig config)
+        {
+            var now = _options.Clock.GetUtcNow();
+            var retryAt = now.AddMinutes(config.OnFailure.PauseMinutes);
+            if (unattended)
+            {
+                _options.State?.Pause(reason, retryAt, now);
+            }
+
+            var message = unattended ? $"Stopped at {taskId}: {reason} The pool is paused; it can start again at {retryAt.ToLocalTime():HH:mm}." : $"Stopped at {taskId}: {reason}";
+            return new Processed(BucketStopped, null, message, true, reason);
+        }
+    }
+
+    private async Task<Processed> IntegrateAsync(ImplementResult result, CancellationToken ct)
+    {
+        if (_options.Tasks is not { } tasks)
+        {
+            return new Processed(BucketDone, result, null, false);
+        }
+
+        var merged = await tasks.IntegrateAsync(result, ct).ConfigureAwait(false);
+        if (merged is null || merged.Merged)
+        {
+            return new Processed(BucketDone, result, null, false);
+        }
+
+        _options.State?.Park(result.WorkItemId, null, merged.Message, _options.Clock.GetUtcNow());
+        return new Processed(BucketParked, result, null, false, merged.Message);
+    }
+
+    private sealed record AnswerVerdict(string? Park, string? Category);
+
+    private async Task<AnswerVerdict> AnswerAsync(
+        string id, PoolTaskInfo? info, string question, IPoolMaster master, PoolConfig config,
+        Func<string?, string, string?> reserve, List<PoolDecision> decisions, Func<int> nextDecision, IPoolTasks tasks, CancellationToken ct)
+    {
+        var text = $"{info?.Title}\n{info?.Body}\n{question}";
+        if (MasterGuard.MatchedCategory(text, config.AlwaysAsk) is { } matched)
+        {
+            return new AnswerVerdict($"The question is about {matched}, which is always left to a person.", matched);
+        }
+
+        if (nextDecision() > config.Master.MaxDecisionsPerRun)
+        {
+            return new AnswerVerdict($"The master already made {config.Master.MaxDecisionsPerRun} decisions in this run.", null);
+        }
+
+        if (reserve(id, "master") is { } problem)
+        {
+            return new AnswerVerdict(problem, null);
+        }
+
+        var answer = await master.DecideAsync(new MasterQuestion(id, info?.Title ?? id, info?.Body ?? string.Empty, question), ct).ConfigureAwait(false);
+        if (MasterGuard.ParkReason(answer, config.AlwaysAsk) is { } park)
+        {
+            return new AnswerVerdict(park, answer.Category);
+        }
+
+        var line = MasterGuard.AnswerLine(answer, answer.Reason);
+        await tasks.AnswerAsync(id, line, ct).ConfigureAwait(false);
+        lock (decisions) { decisions.Add(Store(id, DecisionKinds.Answer, question, string.IsNullOrWhiteSpace(answer.Answer) ? $"option {answer.Option}" : answer.Answer, answer.Reason, answer.Category)); }
+        return new AnswerVerdict(null, answer.Category);
+    }
+
+    private async Task<FailureVerdict> ClassifyAsync(string id, ImplementResult result, IPoolMaster master, Func<string?, string, string?> reserve, CancellationToken ct)
+    {
+        if (reserve(id, "master") is { } problem)
+        {
+            return new FailureVerdict(FailureKind.Task, string.Empty, problem, null);
+        }
+
+        var info = _options.Tasks is { } tasks ? await tasks.DescribeAsync(id, ct).ConfigureAwait(false) : null;
+        return await master.ClassifyFailureAsync(new FailureInfo(id, info?.Title ?? id, result.Outcome.ToString(), result.Message, Excerpt(result.Message)), ct).ConfigureAwait(false);
+    }
+
+    private PoolDecision Store(string id, string kind, string question, string answer, string reason, string? category) =>
+        _options.State?.AddDecision(id, kind, question, answer, reason, category, _options.Clock.GetUtcNow())
+        ?? new PoolDecision(0, id, kind, question, answer, reason, category, _options.Clock.GetUtcNow(), null);
+
+    private static string Excerpt(string text) => text.Length <= 2000 ? text : text[..2000] + "...";
 
     public static string Report(PoolRunResult result, DateTimeOffset at)
     {
@@ -111,7 +638,7 @@ public sealed class PoolRunner(
         var text = new StringBuilder();
         text.AppendLine("# Pool report");
         text.AppendLine();
-        text.AppendLine($"Finished {at:yyyy-MM-dd HH:mm} UTC.");
+        text.AppendLine($"Finished {at:yyyy-MM-dd HH:mm} UTC." + (result.Unattended ? " Ran without a person (unattended)." : string.Empty));
         if (result.StoppedBecause is not null)
         {
             text.AppendLine();
@@ -121,7 +648,12 @@ public sealed class PoolRunner(
         Section(text, "Done (drafts waiting for a person)", result.Done.Select(r => $"{r.WorkItemId}: {r.Message}{Where(r)}"));
         Section(text, "Rejected", result.Rejected.Select(r => $"{r.WorkItemId}: {r.Message}{Where(r)}"));
         Section(text, "Needs a person", result.NeedsHuman.Select(r => $"{r.WorkItemId}: {r.Message}"));
+        Section(text, "Parked for a person", result.Parked.Select(p => $"{p.WorkItemId}: {p.Reason}" + (p.Category is not null ? $" [{p.Category}]" : string.Empty)));
+        Section(text, "Decisions of the pool master", result.Decisions.Select(d => $"{d.WorkItemId} ({d.Kind}): {d.Answer}. Why: {d.Reason}"));
+        Section(text, "Bugs found in Autopilot", result.Bugs);
         Section(text, "Not reached", result.NotReached);
+        text.AppendLine();
+        text.AppendLine($"Agent runs used: {result.AgentRuns.ToString(CultureInfo.InvariantCulture)}.");
         return text.ToString();
     }
 

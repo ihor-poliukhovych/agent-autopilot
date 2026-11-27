@@ -58,6 +58,9 @@ public sealed record AutopilotConfig
     /// <summary>Name and email the agent's commits carry. Null means "Autopilot" with a local address.</summary>
     public IdentityConfig? Identity { get; init; }
 
+    /// <summary>Unattended mode, the pool master, budget, concurrency and the integration branch.</summary>
+    public PoolConfig Pool { get; init; } = new();
+
     public GateConfig Gate { get; init; } = new();
 
     public RolesConfig Roles { get; init; } = new();
