@@ -17,7 +17,8 @@ public sealed record WorkItemListEntry(
     TriageSummary? Triage,
     RunRecord? LastRun,
     bool InPool,
-    int? PoolPosition);
+    int? PoolPosition,
+    IReadOnlyList<string>? Labels = null);
 
 /// <summary>Lists the open work items of a project (the CLI's <c>list</c> and the web UI both call this).</summary>
 public sealed class WorkItemListService(IWorkItemSource source, TriageStore triage, PoolService? pool = null, RunStore? runs = null)
@@ -34,7 +35,8 @@ public sealed class WorkItemListService(IWorkItemSource source, TriageStore tria
             entries.Add(new WorkItemListEntry(
                 item.Id, item.Title, item.Url, item.State, item.AssignedTo, summary,
                 lastRuns.GetValueOrDefault(item.Id),
-                inPool.ContainsKey(item.Id), inPool.TryGetValue(item.Id, out var position) ? position : null));
+                inPool.ContainsKey(item.Id), inPool.TryGetValue(item.Id, out var position) ? position : null,
+                item.Labels));
         }
 
         return entries;

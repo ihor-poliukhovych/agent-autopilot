@@ -302,5 +302,23 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
   .lane.is-empty { display: none; }
 }
 
+/* Pipeline cards: id, dashed badge and age; wrapped title; a strip of dots joined by a line, action button on the right. */
+.pipeline-filters { flex-wrap: wrap; gap: var(--s2); margin-bottom: var(--s3, .75rem); }
+.pipeline-filters .pf { display: flex; flex-direction: column; gap: .15rem; min-width: 7rem; flex: 1 1 7rem; }
+.pcard { display: block; cursor: pointer; text-align: left; border-left: 3px solid transparent; }
+.pcard.selected { border-left-color: var(--accent); background: var(--accent-soft); }
+.pcard-head { display: flex; align-items: center; gap: .5rem; }
+.pcard-id { font-weight: 650; }
+.pcard-age { margin-left: auto; }
+.badge-dashed { border: 1px dashed var(--muted); color: var(--muted); border-radius: 999px; padding: 0 .5rem; font-size: var(--fs-sm, .8rem); }
+.pcard-title { margin: .25rem 0 .5rem; font-weight: 600; overflow-wrap: anywhere; white-space: normal; }
+.pcard-strip { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.pcard .dots { display: flex; align-items: center; list-style: none; margin: 0; padding: 0; position: relative; flex: 1 1 auto; max-width: 15rem; justify-content: space-between; }
+.pcard .dots::before { content: ""; position: absolute; left: 6px; right: 6px; top: 50%; height: 2px; background: var(--border); z-index: 0; }
+.pcard .dot { position: relative; z-index: 1; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--muted); background: var(--surface, #fff); box-sizing: border-box; }
+.pcard .dot.done { background: var(--ok); border-color: var(--ok); }
+.pcard .dot.current { background: var(--run, #2563eb); border-color: var(--run, #2563eb); }
+.pcard .dot.problem { background: var(--bad); border-color: var(--bad); }
+
 .timing { padding: var(--s2) var(--s4); color: var(--muted, #888); font-size: .75rem; text-align: right; }
 .timing [data-slow="true"] { color: var(--bad, #b3261e); font-weight: 600; }
