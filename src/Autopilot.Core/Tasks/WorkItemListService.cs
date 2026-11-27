@@ -30,18 +30,7 @@ public sealed class WorkItemListService(IWorkItemSource source, TriageStore tria
         var entries = new List<WorkItemListEntry>();
         foreach (var item in items)
         {
-            TriageSummary? summary = null;
-            if (ProjectPaths.IsValidId(item.Id) && await triage.LoadRecordAsync(item.Id, ct).ConfigureAwait(false) is { } record)
-            {
-                // Same rule as the pipeline: triage counts only for the text it was made from.
-                summary = new TriageSummary(
-                    TriageStore.Label(record.Result.Label),
-                    record.Result.Risk.ToString().ToLowerInvariant(),
-                    record.Result.Reason,
-                    record.TriagedAt,
-                    !string.Equals(record.TextHash, TriageStore.TextHash(item), StringComparison.Ordinal));
-            }
-
+            var summary = await SummarizeAsync(triage, item, ct).ConfigureAwait(false);
             entries.Add(new WorkItemListEntry(
                 item.Id, item.Title, item.Url, item.State, item.AssignedTo, summary,
                 lastRuns.GetValueOrDefault(item.Id),
@@ -49,5 +38,22 @@ public sealed class WorkItemListService(IWorkItemSource source, TriageStore tria
         }
 
         return entries;
+    }
+
+    /// <summary>The stored triage of one item, or null when it was never triaged.</summary>
+    public static async Task<TriageSummary?> SummarizeAsync(TriageStore triage, WorkItem item, CancellationToken ct)
+    {
+        if (!ProjectPaths.IsValidId(item.Id) || await triage.LoadRecordAsync(item.Id, ct).ConfigureAwait(false) is not { } record)
+        {
+            return null;
+        }
+
+        // Same rule as the pipeline: triage counts only for the text it was made from.
+        return new TriageSummary(
+            TriageStore.Label(record.Result.Label),
+            record.Result.Risk.ToString().ToLowerInvariant(),
+            record.Result.Reason,
+            record.TriagedAt,
+            !string.Equals(record.TextHash, TriageStore.TextHash(item), StringComparison.Ordinal));
     }
 }

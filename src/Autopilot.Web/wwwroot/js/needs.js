@@ -1,5 +1,6 @@
 import { get, post } from './api.js';
 import { h, clear, toast, badge, emptyState } from './dom.js';
+import { startTriage } from './tasks.js';
 
 const base = key => `/projects/${encodeURIComponent(key)}`;
 
@@ -18,12 +19,14 @@ export async function render({ view, key }) {
       holder.append(h('section', { class: 'card stack' },
         h('div', { class: 'row between' }, h('h2', {}, `#${item.id} ${item.title}`), item.stale ? badge('text changed since triage', 'warn') : badge('needs-human', 'warn')),
         h('p', { class: 'prewrap' }, h('b', {}, 'Question: '), item.question),
+        item.answer ? h('div', { class: 'comment' }, h('div', { class: 'who' }, 'Your answer'), h('div', { class: 'body prewrap' }, item.answer)) : null,
         item.canAnswer
           ? [answer, h('div', { class: 'row' },
             h('button', { class: 'primary', type: 'button', onclick: async () => {
-              try { await post(`${base(key)}/tasks/${encodeURIComponent(item.id)}/answer`, { text: answer.value }); toast('Answer stored on the task. Triage it again.'); await load(); }
+              try { await post(`${base(key)}/tasks/${encodeURIComponent(item.id)}/answer`, { text: answer.value }); toast('Answer stored on the task. Press Triage again to check it.'); await load(); }
               catch (e) { toast(e.message, true); }
             } }, 'Save answer'),
+            item.stale ? h('button', { type: 'button', onclick: ev => startTriage(ev.currentTarget, key, item.id, load) }, 'Triage again') : null,
             h('a', { class: 'btn', href: `#/p/${encodeURIComponent(key)}/tasks/${encodeURIComponent(item.id)}` }, 'Open task'))]
           : h('p', { class: 'muted' }, 'This task lives in the tracker. Answer in a comment there.')));
     }

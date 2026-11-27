@@ -137,6 +137,23 @@ public sealed class BackendCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task A_triage_job_that_cannot_run_ends_failed_with_the_reason()
+    {
+        using var repo = await AddProjectAsync();
+        var jobs = new JobService(new Autopilot.Core.Workspace.Workspace(WorkspacePath), "demo", _ => true);
+        var job = jobs.Create("77", JobKinds.Triage);
+
+        var result = await RunAsync("triage", "77", "--job", job.Id, "--project", "demo");
+
+        Assert.Equal(1, result.Exit);
+        var after = jobs.Get(job.Id)!;
+        Assert.Equal(JobStatus.Failed, after.Status);
+        Assert.Equal(JobKinds.Triage, after.Kind);
+        Assert.Contains("77", after.Message, StringComparison.Ordinal);
+        Assert.Contains("not found", after.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Detached_implement_refuses_an_unsafe_id()
     {
         using var repo = await AddProjectAsync();

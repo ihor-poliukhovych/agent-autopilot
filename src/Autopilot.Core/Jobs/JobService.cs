@@ -25,9 +25,17 @@ public sealed record JobRecord(
     DateTimeOffset? StartedAt,
     DateTimeOffset? FinishedAt,
     string LogPath,
-    string? Message)
+    string? Message,
+    string Kind = JobKinds.Implement)
 {
     public bool IsActive => Status is JobStatus.Queued or JobStatus.Running;
+}
+
+/// <summary>What a job does. A triage job is shown on its task, not as an implement run.</summary>
+public static class JobKinds
+{
+    public const string Implement = "implement";
+    public const string Triage = "triage";
 }
 
 /// <summary>Starts a program that outlives the caller and returns its process id. Tests use a fake.</summary>
@@ -49,28 +57,28 @@ public interface IProcessKiller
 /// </summary>
 public sealed class JobService(Workspace.Workspace workspace, string projectKey, Func<int, bool>? isProcessAlive = null)
 {
-    private const string Columns = "id, project_key, work_item_id, status, step, pid, created_at, started_at, finished_at, log_path, message";
+    private const string Columns = "id, project_key, work_item_id, status, step, pid, created_at, started_at, finished_at, log_path, message, kind";
 
     private readonly Func<int, bool> _isAlive = isProcessAlive ?? ProjectRunLock.IsAlive;
 
     public string JobFolder(string jobId) => Path.Combine(workspace.ProjectFolder(projectKey), "out", "jobs", jobId);
 
-    public JobRecord Create(string workItemId)
+    public JobRecord Create(string workItemId, string kind = JobKinds.Implement)
     {
         var id = "j" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(4));
         var logPath = Path.Combine(JobFolder(id), "log.txt");
         Directory.CreateDirectory(JobFolder(id));
         using var connection = workspace.Open();
         Db.Execute(connection,
-            "INSERT INTO jobs (id, project_key, work_item_id, status, created_at, log_path) VALUES ($i, $k, $w, 'queued', $t, $l)",
-            ("$i", id), ("$k", projectKey), ("$w", workItemId), ("$t", Db.Stamp(DateTimeOffset.UtcNow)), ("$l", logPath));
+            "INSERT INTO jobs (id, project_key, work_item_id, status, created_at, log_path, kind) VALUES ($i, $k, $w, 'queued', $t, $l, $n)",
+            ("$i", id), ("$k", projectKey), ("$w", workItemId), ("$t", Db.Stamp(DateTimeOffset.UtcNow)), ("$l", logPath), ("$n", kind));
         return Get(id)!;
     }
 
     /// <summary>Creates the job and starts <paramref name="arguments"/> detached; the process id is stored on the job.</summary>
-    public JobRecord Start(string workItemId, IJobLauncher launcher, string fileName, Func<string, IReadOnlyList<string>> arguments, string workingDirectory)
+    public JobRecord Start(string workItemId, IJobLauncher launcher, string fileName, Func<string, IReadOnlyList<string>> arguments, string workingDirectory, string kind = JobKinds.Implement)
     {
-        var job = Create(workItemId);
+        var job = Create(workItemId, kind);
         try
         {
             var pid = launcher.Launch(fileName, arguments(job.Id), workingDirectory);
@@ -189,5 +197,5 @@ public sealed class JobService(Workspace.Workspace workspace, string projectKey,
     private static JobRecord Read(SqliteDataReader r) => new(
         r.GetString(0), r.GetString(1), r.GetString(2), Enum.Parse<JobStatus>(r.GetString(3), ignoreCase: true), Db.StringOrNull(r, 4),
         r.IsDBNull(5) ? null : r.GetInt32(5), Db.ParseStamp(r.GetString(6)), Db.ParseStampOrNull(r, 7), Db.ParseStampOrNull(r, 8),
-        r.GetString(9), Db.StringOrNull(r, 10));
+        r.GetString(9), Db.StringOrNull(r, 10), r.GetString(11));
 }
