@@ -13,3 +13,5 @@ artifacts/
 *.pfx
 .env
 .env.*
+
+*.log
