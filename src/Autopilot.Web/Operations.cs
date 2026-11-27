@@ -14,29 +14,94 @@ public sealed record TaskListView(
     bool LocalTasks,
     bool LegacyTaskFiles,
     IReadOnlyDictionary<string, string> ActiveJobs,
-    RunStatus Status);
+    RunStatus Status,
+    int Total,
+    int Page,
+    int PageSize,
+    TaskCounts Counts,
+    IReadOnlyDictionary<string, JobRecord> TriageJobs);
 
-/// <summary>Who holds the project's run lock right now, if anyone.</summary>
+/// <summary>How many open tasks each state filter would show.</summary>
+public sealed record TaskCounts(int All, int NeedsHuman, int AgentReady, int NotTriaged, int Stale);
+
+/// <summary>The list filters: a state, a search text and a page. No page size means everything.</summary>
+public sealed record TaskQuery(string? State = null, string? Search = null, int Page = 1, int? PageSize = null)
+{
+    public const int MaxPageSize = 200;
+    public static readonly string[] States = ["needs-human", "agent-ready", "not-triaged", "stale"];
+
+    public bool Matches(WorkItemListEntry item)
+    {
+        var stateOk = State switch
+        {
+            "needs-human" => item.Triage is { Label: "needs-human" },
+            "agent-ready" => item.Triage is { Label: "agent-ready" },
+            "not-triaged" => item.Triage is null,
+            "stale" => item.Triage is { Stale: true },
+            _ => true,
+        };
+        return stateOk && (string.IsNullOrWhiteSpace(Search)
+            || item.Title.Contains(Search.Trim(), StringComparison.OrdinalIgnoreCase)
+            || item.Id.Equals(Search.Trim().TrimStart('#'), StringComparison.Ordinal));
+    }
+}
+
+/// <summary>A task with its text, comments, history, the stored triage and the last triage job.</summary>
+public sealed record TaskDetailView(
+    LocalTask Task,
+    IReadOnlyList<TaskComment> Comments,
+    IReadOnlyList<TaskHistoryEntry> History,
+    TriageSummary? Triage,
+    JobRecord? TriageJob);
+
 public sealed record RunStatus(bool Busy, int? Pid, string? Owner);
 
-public sealed record NeedsHumanItem(string Id, string Title, string Question, bool Stale, bool CanAnswer);
+public sealed record NeedsHumanItem(string Id, string Title, string Question, bool Stale, bool CanAnswer, string? Answer = null);
 
 /// <summary>Tasks: lists, local task changes, starting a run. Every method is one call into the core.</summary>
 public sealed class TaskOperations(WebUiOptions options)
 {
-    public async Task<TaskListView> ListAsync(ProjectScope scope, CancellationToken ct)
+    public const string AnswerHeading = "## Answer from a person";
+
+    public async Task<TaskListView> ListAsync(ProjectScope scope, CancellationToken ct, TaskQuery? query = null)
     {
-        var items = await scope.CreateList().ListAsync(ct).ConfigureAwait(false);
-        var active = scope.Jobs.List().Where(j => j.IsActive).GroupBy(j => j.WorkItemId, StringComparer.Ordinal)
+        query ??= new TaskQuery();
+        if (query.State is { Length: > 0 } state && !TaskQuery.States.Contains(state))
+        {
+            throw new ArgumentException($"The state must be one of: {string.Join(", ", TaskQuery.States)}.");
+        }
+
+        var all = await scope.CreateList().ListAsync(ct).ConfigureAwait(false);
+        var jobs = scope.Jobs.List();
+        var active = jobs.Where(j => j.IsActive && j.Kind == JobKinds.Implement).GroupBy(j => j.WorkItemId, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.Ordinal);
-        return new TaskListView(items, scope.LocalTasks is not null, scope.LegacyTaskFiles, active, Status(scope));
+        var triageJobs = jobs.Where(j => j.Kind == JobKinds.Triage).GroupBy(j => j.WorkItemId, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        var counts = new TaskCounts(
+            all.Count,
+            all.Count(i => i.Triage is { Label: "needs-human" }),
+            all.Count(i => i.Triage is { Label: "agent-ready" }),
+            all.Count(i => i.Triage is null),
+            all.Count(i => i.Triage is { Stale: true }));
+
+        var matching = all.Where(query.Matches).ToList();
+        var pageSize = query.PageSize is { } size ? Math.Clamp(size, 1, TaskQuery.MaxPageSize) : Math.Max(matching.Count, 1);
+        var pages = Math.Max(1, (matching.Count + pageSize - 1) / pageSize);
+        var page = Math.Clamp(query.Page, 1, pages);
+        var items = matching.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+        return new TaskListView(items, scope.LocalTasks is not null, scope.LegacyTaskFiles, active, Status(scope), matching.Count, page, pageSize, counts, triageJobs);
     }
 
     public static RunStatus Status(ProjectScope scope) =>
         scope.Lock.Holder(scope.Project.Key) is { } held ? new RunStatus(true, held.Pid, held.Owner) : new RunStatus(false, null, null);
 
-    public LocalTaskDetail Detail(ProjectScope scope, int number) =>
-        Local(scope).Show(number) ?? throw new NotFoundException($"There is no task {number}.");
+    public async Task<TaskDetailView> DetailAsync(ProjectScope scope, int number, CancellationToken ct)
+    {
+        var detail = Local(scope).Show(number) ?? throw new NotFoundException($"There is no task {number}.");
+        var triage = await WorkItemListService.SummarizeAsync(scope.Triage, LocalTaskWorkItemSource.ToItem(detail.Task), ct).ConfigureAwait(false);
+        var job = scope.Jobs.List().FirstOrDefault(j => j.Kind == JobKinds.Triage && j.WorkItemId == detail.Task.Id);
+        return new TaskDetailView(detail.Task, detail.Comments, detail.History, triage, job);
+    }
 
     public LocalTask Add(ProjectScope scope, string title, string? body, IEnumerable<string>? labels) =>
         Local(scope).Add(title, body, labels, Author());
@@ -75,18 +140,32 @@ public sealed class TaskOperations(WebUiOptions options)
             scope.Project.RepositoryFolder);
     }
 
-    /// <summary>Starts the triage of one item in the background (it writes the result next to the other triage files).</summary>
-    public void StartTriage(ProjectScope scope, string id)
+    /// <summary>
+    /// Starts the triage of one item as a background job, so the page can follow it and show the error when it
+    /// fails. One triage runs at a time: it uses one worktree. Asking again for the item that is being triaged
+    /// returns that job.
+    /// </summary>
+    public JobRecord StartTriage(ProjectScope scope, string id)
     {
         if (!ProjectPaths.IsValidId(id))
         {
             throw new ArgumentException(ProjectPaths.InvalidIdMessage(id));
         }
 
-        options.Launcher.Launch(
+        if (scope.Jobs.List().FirstOrDefault(j => j.IsActive && j.Kind == JobKinds.Triage) is { } running)
+        {
+            return running.WorkItemId == id
+                ? running
+                : throw new ConflictException($"Task {running.WorkItemId} is being triaged. Wait for it to end.");
+        }
+
+        return scope.Jobs.Start(
+            id,
+            options.Launcher,
             options.Program.File,
-            [.. options.Program.Arguments, "triage", id, "--project", scope.Project.Key, "--workspace", scope.Workspace.Root],
-            scope.Project.RepositoryFolder);
+            jobId => [.. options.Program.Arguments, "triage", id, "--job", jobId, "--project", scope.Project.Key, "--workspace", scope.Workspace.Root],
+            scope.Project.RepositoryFolder,
+            JobKinds.Triage);
     }
 
     public async Task<IReadOnlyList<NeedsHumanItem>> NeedsHumanAsync(ProjectScope scope, CancellationToken ct)
@@ -94,7 +173,19 @@ public sealed class TaskOperations(WebUiOptions options)
         var items = await scope.CreateList().ListAsync(ct).ConfigureAwait(false);
         return [.. items
             .Where(i => i.Triage is { Label: "needs-human" })
-            .Select(i => new NeedsHumanItem(i.Id, i.Title, i.Triage!.Reason, i.Triage.Stale, scope.LocalTasks is not null))];
+            .Select(i => new NeedsHumanItem(i.Id, i.Title, i.Triage!.Reason, i.Triage.Stale, scope.LocalTasks is not null, AnswerOf(scope, i.Id)))];
+    }
+
+    /// <summary>The last answer a person gave on the task (the section <see cref="Answer"/> appends), or null.</summary>
+    private static string? AnswerOf(ProjectScope scope, string id)
+    {
+        if (scope.LocalTasks is not { } tasks || !LocalTaskService.TryParseNumber(id, out var number) || tasks.Get(number) is not { } task)
+        {
+            return null;
+        }
+
+        var at = task.Body.LastIndexOf(AnswerHeading, StringComparison.Ordinal);
+        return at < 0 ? null : task.Body[(at + AnswerHeading.Length)..].Trim();
     }
 
     /// <summary>

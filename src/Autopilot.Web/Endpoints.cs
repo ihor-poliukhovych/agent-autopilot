@@ -63,14 +63,15 @@ internal static class Endpoints
 
         // ----- tasks -----
         var tasks = project.MapGroup("/tasks");
-        tasks.MapGet("/", (string key, ProjectScopes p, TaskOperations t, CancellationToken ct) => t.ListAsync(p.Get(key), ct));
+        tasks.MapGet("/", (string key, string? state, string? q, int? page, int? pageSize, ProjectScopes p, TaskOperations t, CancellationToken ct) =>
+            t.ListAsync(p.Get(key), ct, new TaskQuery(state, q, page ?? 1, pageSize)));
         tasks.MapPost("/", (string key, TaskBody b, ProjectScopes p, TaskOperations t) =>
             t.Add(p.Get(key), b.Title ?? string.Empty, b.Body, b.Labels));
-        tasks.MapGet("/{number:int}", (string key, int number, ProjectScopes p, TaskOperations t) => t.Detail(p.Get(key), number));
-        tasks.MapPut("/{number:int}", (string key, int number, TaskBody b, ProjectScopes p, TaskOperations t) =>
+        tasks.MapGet("/{number:int}", (string key, int number, ProjectScopes p, TaskOperations t, CancellationToken ct) => t.DetailAsync(p.Get(key), number, ct));
+        tasks.MapPut("/{number:int}", (string key, int number, TaskBody b, ProjectScopes p, TaskOperations t, CancellationToken ct) =>
         {
             t.Update(p.Get(key), number, b.Title, b.Body, b.Labels);
-            return t.Detail(p.Get(key), number);
+            return t.DetailAsync(p.Get(key), number, ct);
         });
         tasks.MapPost("/{number:int}/comments", (string key, int number, TextBody b, ProjectScopes p, TaskOperations t) =>
             t.Comment(p.Get(key), number, b.Text ?? string.Empty));
@@ -78,14 +79,11 @@ internal static class Endpoints
         tasks.MapPost("/{number:int}/reopen", (string key, int number, ProjectScopes p, TaskOperations t) => new { changed = t.SetClosed(p.Get(key), number, false) });
         tasks.MapPost("/{id}/start", (string key, string id, ProjectScopes p, TaskOperations t) => t.Start(p.Get(key), id));
         tasks.MapPost("/{id}/triage", (string key, string id, ProjectScopes p, TaskOperations t) =>
-        {
-            t.StartTriage(p.Get(key), id);
-            return Results.Accepted();
-        });
-        tasks.MapPost("/{number:int}/answer", (string key, int number, TextBody b, ProjectScopes p, TaskOperations t) =>
+            Results.Accepted(null, t.StartTriage(p.Get(key), id)));
+        tasks.MapPost("/{number:int}/answer", (string key, int number, TextBody b, ProjectScopes p, TaskOperations t, CancellationToken ct) =>
         {
             t.Answer(p.Get(key), number, b.Text ?? string.Empty);
-            return t.Detail(p.Get(key), number);
+            return t.DetailAsync(p.Get(key), number, ct);
         });
         project.MapGet("/needs-human", (string key, ProjectScopes p, TaskOperations t, CancellationToken ct) => t.NeedsHumanAsync(p.Get(key), ct));
 

@@ -80,8 +80,16 @@ public sealed class FakeLauncher : IJobLauncher
 
     public int NextPid { get; set; } = 4242;
 
+    /// <summary>Thrown by the next launches when set, to test a process that cannot start.</summary>
+    public Exception? Failure { get; set; }
+
     public int Launch(string fileName, IReadOnlyList<string> arguments, string workingDirectory)
     {
+        if (Failure is not null)
+        {
+            throw Failure;
+        }
+
         Launched.Add((fileName, [.. arguments], workingDirectory));
         return NextPid++;
     }

@@ -15,14 +15,64 @@ public static class PipelineCommands
     {
         var id = new Argument<string?>("id") { Description = "One work item id. Default: every open item.", Arity = ArgumentArity.ZeroOrOne };
         var source = SourceOption();
-        var command = new Command("triage", "Sort work items into agent-ready and needs-human.") { id, source };
-        command.SetAction((parse, ct) => WithPipelineAsync(projectOption.Resolve(parse), parse.GetValue(source), context, ct, async pipeline =>
+        var job = new Option<string?>("--job") { Description = "Used by the web UI: the job this process reports to.", Hidden = true };
+        var command = new Command("triage", "Sort work items into agent-ready and needs-human.") { id, source, job };
+        command.SetAction(async (parse, ct) =>
         {
-            var results = await pipeline.TriageAsync(parse.GetValue(id), ct).ConfigureAwait(false);
-            await PrintTriageAsync(context.Out, results).ConfigureAwait(false);
-            return results.Any(r => !r.Succeeded) ? ExitCodes.Failure : ExitCodes.Ok;
-        }));
+            var target = projectOption.Resolve(parse);
+            if (parse.GetValue(job) is { } jobId)
+            {
+                return await TriageAsJobAsync(target, parse.GetValue(id), jobId, parse.GetValue(source), context, ct).ConfigureAwait(false);
+            }
+
+            return await WithPipelineAsync(target, parse.GetValue(source), context, ct, async pipeline =>
+            {
+                var results = await pipeline.TriageAsync(parse.GetValue(id), ct).ConfigureAwait(false);
+                await PrintTriageAsync(context.Out, results).ConfigureAwait(false);
+                return results.Any(r => !r.Succeeded) ? ExitCodes.Failure : ExitCodes.Ok;
+            }).ConfigureAwait(false);
+        });
         return command;
+    }
+
+    /// <summary>
+    /// Runs the triage the web UI started: the job row says running, then succeeded or failed with the error
+    /// text, so the page that started it can show what happened.
+    /// </summary>
+    private static async Task<int> TriageAsJobAsync(ProjectTarget target, string? itemId, string jobId, string? source, CliContext context, CancellationToken ct)
+    {
+        var (project, workspace) = target.RequireRegistered();
+        var jobs = new JobService(workspace, project.Key, context.IsProcessAlive);
+        var job = jobs.Get(jobId) ?? throw new UsageException($"There is no job \"{jobId}\" in project {project.Key}.");
+        using var log = new JobLogWriter(job.LogPath, step => jobs.SetStep(jobId, step));
+        var jobContext = context with { Out = log, Error = log };
+        jobs.MarkRunning(jobId, Environment.ProcessId);
+        try
+        {
+            var exit = await WithPipelineAsync(target, source, jobContext, ct, async pipeline =>
+            {
+                var results = await pipeline.TriageAsync(itemId, ct).ConfigureAwait(false);
+                await PrintTriageAsync(log, results).ConfigureAwait(false);
+                var errors = results.Where(r => !r.Succeeded).Select(r => r.Error).ToList();
+                jobs.Finish(jobId, errors.Count == 0 ? JobStatus.Succeeded : JobStatus.Failed, errors.Count == 0 ? "Triage done." : string.Join(' ', errors));
+                return errors.Count == 0 ? ExitCodes.Ok : ExitCodes.Failure;
+            }).ConfigureAwait(false);
+
+            // Finish does nothing for a job that already ended, so this only marks a triage that never got that far.
+            jobs.Finish(jobId, JobStatus.Failed, "The triage could not start; see the log.");
+            return exit;
+        }
+        catch (OperationCanceledException)
+        {
+            jobs.Finish(jobId, JobStatus.Cancelled, "Cancelled.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await log.WriteLineAsync($"Error: {ex.Message}").ConfigureAwait(false);
+            jobs.Finish(jobId, JobStatus.Failed, ex.Message);
+            return ExitCodes.Failure;
+        }
     }
 
     public static Command CreateImplement(ProjectOptions projectOption, CliContext context)

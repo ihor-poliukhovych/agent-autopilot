@@ -24,14 +24,22 @@ function lastRun(item) {
   return h('a', { href: `#/p/${encodeURIComponent(r.projectKey)}/runs/${r.id}` }, `${r.outcome}${r.gateVerdict ? ', gate ' + r.gateVerdict : ''}`);
 }
 
+const STATES = [['', 'All', 'all'], ['needs-human', 'Needs a person', 'needsHuman'], ['agent-ready', 'Agent-ready', 'agentReady'], ['not-triaged', 'Not triaged', 'notTriaged'], ['stale', 'Stale triage', 'stale']];
+const PAGE_SIZE = 25;
+
 async function renderList(ctx) {
   const { view, key } = ctx;
   const holder = h('div');
   view.append(holder);
   let timer = null;
+  const query = { state: '', q: '', page: 1 };
 
   async function load() {
-    const data = await get(`${base(key)}/tasks`);
+    const params = new URLSearchParams({ pageSize: String(PAGE_SIZE), page: String(query.page) });
+    if (query.state) params.set('state', query.state);
+    if (query.q) params.set('q', query.q);
+    const data = await get(`${base(key)}/tasks?${params}`);
+    query.page = data.page;
     clear(holder);
     holder.append(
       h('div', { class: 'page-head' },
@@ -45,33 +53,41 @@ async function renderList(ctx) {
     if (data.status.busy) {
       holder.append(h('div', { class: 'banner info' }, `A run is active (${data.status.owner}). `, h('a', { href: `#/p/${encodeURIComponent(key)}/runs` }, 'Follow it on the Runs page.')));
     }
+    if (data.counts.all > 0) holder.append(filterBar(data, query, load));
+    if (data.counts.all > 0 && !data.items.length) {
+      holder.append(h('div', { class: 'card' }, emptyState('No task matches this filter.', { label: 'Clear the filter', onclick: () => { query.state = ''; query.q = ''; query.page = 1; load().catch(e => toast(e.message, true)); } }, 'Nothing to show')));
+      return data;
+    }
     if (!data.items.length) {
       holder.append(h('div', { class: 'card' }, emptyState(data.localTasks ? 'Write down one thing you want done. It does not need to be perfect: triage tells you what is missing.' : 'No open work items were found in the tracker.', data.localTasks ? { label: 'Add a task', onclick: () => showAddForm(ctx, holder, load) } : { label: 'Check the task source', href: `#/p/${encodeURIComponent(key)}/settings` }, data.localTasks ? 'No tasks yet' : 'Nothing to show')));
       return data;
     }
     const rows = data.items.map(item => {
       const running = data.activeJobs[item.id];
+      const triaging = data.triageJobs[item.id];
       return h('tr', {},
         h('td', { 'data-label': 'Id' }, item.url ? h('a', { href: item.url, target: '_blank', rel: 'noopener noreferrer' }, item.id) : h('a', { href: `#/p/${encodeURIComponent(key)}/tasks/${encodeURIComponent(item.id)}` }, '#' + item.id)),
         h('td', { 'data-label': 'Task' },
           item.url ? item.title : h('a', { href: `#/p/${encodeURIComponent(key)}/tasks/${encodeURIComponent(item.id)}` }, item.title),
           h('div', { class: 'row', style: 'margin-top:.25rem' }, triageBadges(item)),
+          triageJobBadge(triaging),
           item.triage ? h('div', { class: 'muted small' }, item.triage.reason) : null),
         h('td', { 'data-label': 'Last run' }, lastRun(item)),
         h('td', { 'data-label': 'Pool' }, item.inPool ? badge(`pool #${item.poolPosition}`, 'info') : h('span', { class: 'muted' }, '-')),
         h('td', { class: 'actions' }, h('div', { class: 'row' },
           running ? badge('running', 'info') : h('button', { type: 'button', disabled: data.status.busy, onclick: ev => start(ev.currentTarget, ctx, item, load) }, 'Start'),
           item.inPool ? null : h('button', { type: 'button', onclick: ev => toPool(ev.currentTarget, ctx, item, load) }, 'Add to pool'),
-          item.triage && !item.triage.stale ? null : h('button', { type: 'button', class: 'ghost', title: 'Ask the agent to triage this item', onclick: ev => triage(ev.currentTarget, ctx, item) }, 'Triage'))));
+          item.triage && !item.triage.stale ? null : h('button', { type: 'button', class: 'ghost', title: 'Ask the agent to triage this item', disabled: triaging?.isActive, onclick: ev => triage(ev.currentTarget, ctx, item, load) }, 'Triage'))));
     });
     holder.append(h('div', { class: 'card table-wrap' }, h('table', { class: 'stack-sm' },
       h('thead', {}, h('tr', {}, ['Id', 'Task', 'Last run', 'Pool', ''].map(t => h('th', {}, t)))),
       h('tbody', {}, rows))));
+    holder.append(pager(data, query, load));
     return data;
   }
 
   const data = await load();
-  if (data.status.busy) timer = setInterval(() => load().catch(() => {}), 5000);
+  if (data.status.busy || Object.values(data.triageJobs).some(j => j.isActive)) timer = setInterval(() => load().catch(() => {}), 5000);
   return () => { if (timer) clearInterval(timer); };
 }
 
@@ -95,11 +111,62 @@ async function toPool(button, { key }, item, reload) {
   });
 }
 
-async function triage(button, { key }, item) {
+function triageJobBadge(job) {
+  if (!job) return null;
+  if (job.isActive) return h('div', { class: 'row', style: 'margin-top:.25rem' }, badge('triage running', 'info'));
+  if (job.status === 'failed') return h('div', { class: 'small', style: 'margin-top:.25rem' }, badge('last triage failed', 'bad'), ' ', h('span', { class: 'muted' }, job.message || 'See the job log.'));
+  return null;
+}
+
+function filterBar(data, query, load) {
+  const go = () => load().catch(e => toast(e.message, true));
+  const search = h('input', { type: 'search', placeholder: 'Search by title or number', value: query.q, 'aria-label': 'Search tasks', maxlength: 100 });
+  search.addEventListener('keydown', ev => { if (ev.key === 'Enter') { query.q = search.value.trim(); query.page = 1; go(); } });
+  return h('div', { class: 'card stack' },
+    h('div', { class: 'row' }, STATES.map(([value, label, count]) => h('button', {
+      type: 'button', class: query.state === value ? 'primary' : 'ghost', 'aria-pressed': String(query.state === value),
+      onclick: () => { query.state = value; query.page = 1; go(); },
+    }, `${label} (${data.counts[count]})`))),
+    h('div', { class: 'row' }, search, h('button', { type: 'button', onclick: () => { query.q = search.value.trim(); query.page = 1; go(); } }, 'Search')));
+}
+
+function pager(data, query, load) {
+  const pages = Math.max(1, Math.ceil(data.total / data.pageSize));
+  const go = page => { query.page = page; load().catch(e => toast(e.message, true)); };
+  const first = (data.page - 1) * data.pageSize + 1;
+  return h('div', { class: 'row between' },
+    h('span', { class: 'muted small' }, `${first}-${Math.min(data.total, first + data.items.length - 1)} of ${data.total}`),
+    pages > 1 ? h('div', { class: 'row' },
+      h('button', { type: 'button', disabled: data.page <= 1, onclick: () => go(data.page - 1) }, 'Previous'),
+      h('span', { class: 'muted small' }, `Page ${data.page} of ${pages}`),
+      h('button', { type: 'button', disabled: data.page >= pages, onclick: () => go(data.page + 1) }, 'Next')) : null);
+}
+
+/**
+ * Starts the triage of one task and follows its job until it ends, then tells the person how it went:
+ * the error text when it failed. Used by the task list, the task page and Needs a person.
+ */
+export async function startTriage(button, key, id, after) {
+  const label = button.textContent;
   await busy(button, async () => {
-    try { await post(`${base(key)}/tasks/${encodeURIComponent(item.id)}/triage`); toast('Triage started in the background. Refresh in a minute.'); }
-    catch (e) { toast(e.message, true); }
+    try {
+      let job = await post(`${base(key)}/tasks/${encodeURIComponent(id)}/triage`);
+      toast('Triage is running. This takes a minute or two.');
+      button.textContent = 'Triaging…';
+      while (job.isActive) {
+        await new Promise(r => setTimeout(r, 2000));
+        job = (await get(`${base(key)}/jobs/${encodeURIComponent(job.id)}`)).job;
+      }
+      if (job.status === 'succeeded') toast('Triage done.');
+      else toast(`Triage failed: ${job.message || 'see the job log'}`, true);
+    } catch (e) { toast(e.message, true); }
+    finally { button.textContent = label; }
+    if (after) await after();
   });
+}
+
+function triage(button, { key }, item, reload) {
+  return startTriage(button, key, item.id, reload);
 }
 
 function showAddForm(ctx, holder, reload) {
@@ -124,6 +191,25 @@ function showAddForm(ctx, holder, reload) {
   });
   holder.children[0].after(form);
   title.focus();
+}
+
+function triageSection(key, task, detail, reload) {
+  const tr = detail.triage;
+  const job = detail.triageJob;
+  const failed = job && job.status === 'failed' && (!tr || new Date(job.createdAt) > new Date(tr.triagedAt));
+  return h('section', { class: 'card stack' },
+    h('div', { class: 'row between' }, h('h2', {}, 'Triage'),
+      task.closed ? null : h('button', { type: 'button', class: tr && !tr.stale ? 'ghost' : '', disabled: job?.isActive, onclick: ev => startTriage(ev.currentTarget, key, task.id, reload) }, tr ? 'Triage again' : 'Triage')),
+    job?.isActive ? h('p', {}, badge('triage running', 'info'), ' Reload in a moment to see the result.') : null,
+    failed ? h('div', { class: 'banner bad' }, `The last triage failed: ${job.message || 'see the job log'}`) : null,
+    tr
+      ? [h('div', { class: 'row' },
+        badge(tr.label, tr.label === 'agent-ready' ? 'ok' : 'warn'),
+        badge(`${tr.risk} risk`, tr.risk === 'high' ? 'bad' : ''),
+        tr.stale ? badge('stale: text changed since triage', 'warn') : null,
+        h('span', { class: 'muted small' }, `triaged ${ago(tr.triagedAt)}`)),
+      h('p', { class: 'prewrap' }, tr.reason)]
+      : h('p', { class: 'muted' }, 'Not triaged yet. Triage tells you whether the agent can do this alone or a person must decide first.'));
 }
 
 async function renderDetail(ctx, id) {
@@ -153,6 +239,7 @@ async function renderDetail(ctx, id) {
           h('button', { type: 'button', class: t.closed ? '' : 'danger', onclick: async () => {
             try { await post(`${base(key)}/tasks/${t.number}/${t.closed ? 'reopen' : 'close'}`); await load(); } catch (e) { toast(e.message, true); }
           } }, t.closed ? 'Reopen' : 'Close task'))),
+      triageSection(key, t, detail, load),
       h('form', { class: 'card stack', onsubmit: async ev => {
         ev.preventDefault();
         try { await put(`${base(key)}/tasks/${t.number}`, { title: title.value, body: body.value, labels: labels.value.split(',').map(s => s.trim()).filter(Boolean) }); toast('Saved. Triage is now stale: triage again.'); await load(); }

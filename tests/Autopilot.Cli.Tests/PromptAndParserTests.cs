@@ -22,6 +22,17 @@ public sealed class PromptAndParserTests
     }
 
     [Fact]
+    public void The_triage_prompt_asks_for_a_check_that_the_work_is_not_already_done_and_for_a_question_with_options()
+    {
+        var prompt = PromptLibrary.SystemPrompt(AgentRole.Triage);
+
+        Assert.Contains("already done", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Already done:", prompt, StringComparison.Ordinal);
+        Assert.Contains("tests", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("recommend", prompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Implementer_prompt_lists_writable_paths_commands_and_findings()
     {
         var item = new WorkItem("001", "Fix", "Body text", []);
