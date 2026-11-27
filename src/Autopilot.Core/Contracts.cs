@@ -103,7 +103,9 @@ public sealed record PublishRequest(
     Gate.GateDecision Decision,
     Evidence Evidence,
     /// <summary>The decision with the facts behind it. Null when only the decision is known.</summary>
-    Local.GateReport? Report = null);
+    Local.GateReport? Report = null,
+    /// <summary>The pull request title (the commit subject). Null keeps the publisher's own wording.</summary>
+    string? Title = null);
 
 public sealed record PublishResult(bool Succeeded, string Location, string? Error);
 
