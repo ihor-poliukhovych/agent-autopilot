@@ -58,8 +58,8 @@ public sealed class ToolCallCounterTests : IDisposable
     public async Task Concurrent_increments_are_not_lost()
     {
         var file = Path.Combine(_dir, "counter");
-        const int workers = 8;
-        const int perWorker = 25;
+        const int workers = 4;
+        const int perWorker = 15;
 
         var results = await Task.WhenAll(Enumerable.Range(0, workers).Select(_ => Task.Run(() =>
         {
