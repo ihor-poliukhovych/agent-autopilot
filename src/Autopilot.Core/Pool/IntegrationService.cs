@@ -26,6 +26,8 @@ public sealed class IntegrationService(
 {
     public const string WorktreeName = "@integration";
 
+    private readonly SemaphoreSlim _mergeGate = new(1, 1);
+
     private static readonly string[] NeverMergedInto = ["main", "master"];
 
     private readonly Func<string, CancellationToken, Task<(bool Ok, string Message)>> _verify = verify ?? ((path, ct) => BuildAndTestAsync(config, path, ct));
@@ -87,6 +89,20 @@ public sealed class IntegrationService(
             return new IntegrationResult(false, "The task branch is the integration branch itself.");
         }
 
+        // All merges share one worktree and one branch: with two agents, the second waits for the first.
+        await _mergeGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await MergeLockedAsync(workItemId, taskBranch, branch, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _mergeGate.Release();
+        }
+    }
+
+    private async Task<IntegrationResult> MergeLockedAsync(string workItemId, string taskBranch, string branch, CancellationToken ct)
+    {
         var worktree = Path.Combine(worktreeRoot, WorktreeName);
         await RemoveAsync(worktree).ConfigureAwait(false);
         await git.AddBranchWorktreeAsync(worktree, branch, ct).ConfigureAwait(false);

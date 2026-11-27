@@ -7,6 +7,28 @@ public sealed record PoolTaskInfo(string Title, string Body, IReadOnlyList<strin
 
 public sealed record IntegrationResult(bool Merged, string Message);
 
+/// <summary>What the stored triage of a task says.</summary>
+public enum PoolTriageState
+{
+    /// <summary>There is no triage for the current text of the task, or the triage agent gave no result.</summary>
+    Missing,
+
+    AgentReady,
+
+    NeedsHuman,
+}
+
+/// <summary>The triage verdict of a task: <c>Detail</c> is the question for a person when needs-human, the error when missing.</summary>
+public sealed record PoolTriage(PoolTriageState State, string Detail)
+{
+    public string Label => State switch
+    {
+        PoolTriageState.AgentReady => "agent-ready",
+        PoolTriageState.NeedsHuman => "needs-human",
+        _ => "no triage",
+    };
+}
+
 /// <summary>
 /// The pool's view of the tasks and of the repository. The runner calls it for the things that are not
 /// scheduling: reading and writing task text, triage, bug tasks, and merging into the integration branch.
@@ -16,14 +38,14 @@ public interface IPoolTasks
 {
     Task<PoolTaskInfo?> DescribeAsync(string workItemId, CancellationToken ct);
 
-    /// <summary>The triage's reason when the task is marked needs-human, otherwise null.</summary>
-    Task<string?> QuestionAsync(string workItemId, CancellationToken ct);
+    /// <summary>Reads the stored triage of the task without running an agent. Missing when there is none for the current text.</summary>
+    Task<PoolTriage> TriageStateAsync(string workItemId, CancellationToken ct);
 
     /// <summary>Appends text (an answer, notes for a retry) to the task so the next triage and implement see it.</summary>
     Task AnswerAsync(string workItemId, string text, CancellationToken ct);
 
-    /// <summary>Triages the task again. True when it is agent-ready now.</summary>
-    Task<bool> RetriageAsync(string workItemId, CancellationToken ct);
+    /// <summary>Triages the task (one agent run) and reads the stored result back.</summary>
+    Task<PoolTriage> RetriageAsync(string workItemId, CancellationToken ct);
 
     /// <summary>Makes room for another attempt (the kept branch of the failed attempt is renamed).</summary>
     Task PrepareRetryAsync(string workItemId, CancellationToken ct);

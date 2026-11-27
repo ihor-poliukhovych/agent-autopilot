@@ -106,7 +106,9 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         }
 
         // Triage reads the code at the base branch, in a worktree outside the project.
-        var worktree = Path.Combine(options.WorktreeRoot, TriageWorktreeName);
+        // One item gets its own folder, so two triages of different items (a pool with several agents, a person
+        // in the web UI) do not remove each other's worktree.
+        var worktree = Path.Combine(options.WorktreeRoot, workItemId is null ? TriageWorktreeName : $"{TriageWorktreeName}-{ProjectPaths.SafeId(workItemId)}");
         await RemoveWorktreeIfPresentAsync(worktree).ConfigureAwait(false);
         await _git.AddDetachedWorktreeAsync(worktree, baseCommit, ct).ConfigureAwait(false);
         try
