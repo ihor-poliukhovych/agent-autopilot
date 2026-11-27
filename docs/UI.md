@@ -76,7 +76,7 @@ the agent read it. The changed text also marks the old triage stale.
 
 ## The add-project wizard
 
-You choose the repository folder and press *Analyze the folder*. Dev Autopilot reads the folder
+You choose the repository folder and press *Analyze the folder*. Autopilot reads the folder
 (it writes nothing, uses no model and sends nothing anywhere) and fills in every setting. The next
 page, *Review the project*, shows all of it at once:
 
@@ -139,7 +139,7 @@ After setup the Settings page shows the same sections, each with its own *Check*
 
 ## For developers
 
-`src/DevAutopilot.Web` is a class library with a minimal API. `WebUi.Build` takes a `WebUiOptions`;
+`src/Autopilot.Web` is a class library with a minimal API. `WebUi.Build` takes a `WebUiOptions`;
 tests build it with an in-memory server and fakes for the checker, the process launcher, the process
 killer and the scheduler. Endpoints (in `Endpoints.cs`) call one service method each; the logic
 lives in `SetupService`, `TaskOperations`, `PoolOperations`, `RunOperations` and the core services.

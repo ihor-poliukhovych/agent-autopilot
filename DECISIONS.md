@@ -226,3 +226,25 @@ resolves `az.cmd` or `az.exe` from `PATH`, starts it by full path and removes `P
 tasks (matched by work item number, so it is idempotent); it never writes to Azure DevOps. The import is a
 core service (`TrackerImportService`) that the command line and the web UI both call; the UI offers a
 preview (dry run) first and a confirmed import in the project settings.
+
+
+## D-019 Rename the product to Autopilot (accepted, 2026-11-27)
+
+The product, repository (`autopilot`), NuGet package id (`Autopilot`), projects and namespaces
+(`Autopilot.*`) and the solution (`Autopilot.slnx`) drop the "Dev" prefix. The command stays
+`autopilot`. D-011 and the older records keep the old name as history. Check that the NuGet
+package id `Autopilot` is free before the first publish; if it is not, only `PackageId` changes.
+
+Compatibility, because real workspaces exist:
+- The default workspace is `%USERPROFILE%\.autopilot`. On the first start with the default
+  location, if that folder does not exist and `.dev-autopilot` does, the old folder is moved (not
+  copied) and a note file is left in it. If both exist the new one is used and a message names the
+  old one; nothing is overwritten or deleted. If the move fails, the old folder is used for that run.
+  `--workspace` and `AUTOPILOT_WORKSPACE` are unchanged and never trigger a move.
+- The default Azure DevOps tag is now the `queryTag` setting, default `autopilot`. A project that
+  stores a `query` or a `queryTag` is unchanged; one that relied on the implicit old default must
+  set `queryTag` to `dev-autopilot` (or tag its items `autopilot`).
+- The scheduled job name is `autopilot-<key>`. A job installed as `dev-autopilot-<key>` keeps
+  running; `schedule show` finds it and `schedule remove` / `set` remove it.
+- Registered project keys, stored settings and task data are data and are not rewritten. A project
+  whose settings name the old solution file (`DevAutopilot.slnx`) needs that command edited.

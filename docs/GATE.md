@@ -1,7 +1,7 @@
 # The merge gate
 
 The gate decides whether an agent's change may reach a person as a draft. It is C#
-code (`src/DevAutopilot.Core/Gate/MergeGate.cs`), not a prompt, and it works only on
+code (`src/Autopilot.Core/Gate/MergeGate.cs`), not a prompt, and it works only on
 facts it collects itself. What the agent says it did is not evidence.
 
 Its result is `Passed` (a draft is published) or `Rejected` (the branch is kept and

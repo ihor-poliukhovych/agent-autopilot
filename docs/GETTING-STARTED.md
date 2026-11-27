@@ -12,7 +12,7 @@ Code's own calls.
 | git | `git --version` |
 | Claude Code, signed in with a Claude subscription | `claude --version`, then run `claude` once and sign in |
 
-Dev Autopilot runs the agent through Claude Code in headless mode (`claude -p`).
+Autopilot runs the agent through Claude Code in headless mode (`claude -p`).
 Runs use your subscription's usage limits. API keys are not used: the tool removes
 `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the agent's environment.
 
@@ -21,12 +21,12 @@ Runs use your subscription's usage limits. API keys are not used: the tool remov
 From a clone of this repository:
 
 ```powershell
-dotnet pack src/DevAutopilot.Cli -c Release -o artifacts
-dotnet tool install --global DevAutopilot --add-source artifacts
+dotnet pack src/Autopilot.Cli -c Release -o artifacts
+dotnet tool install --global Autopilot --add-source artifacts
 autopilot --help
 ```
 
-To update later: `dotnet tool update --global DevAutopilot --add-source artifacts`.
+To update later: `dotnet tool update --global Autopilot --add-source artifacts`.
 
 ## 3. Try the example
 
@@ -120,7 +120,7 @@ autopilot doctor --project shop
 autopilot run --project shop
 ```
 
-The workspace is `%USERPROFILE%\.dev-autopilot` (override with `--workspace <path>` on any
+The workspace is `%USERPROFILE%\.autopilot` (override with `--workspace <path>` on any
 command or the `AUTOPILOT_WORKSPACE` environment variable). It holds one SQLite database,
 `autopilot.db`, and a `projects/<key>/` folder per project with `autopilot.json`, `tasks/`
 and `out/`. Nothing is written into the repository. `--project` takes a registered key; a
