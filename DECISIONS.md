@@ -165,9 +165,9 @@ requests, so the tool stays one package that works offline. Endpoints only call 
 rules stay in the core library and in `SetupService`, `TaskOperations`, `PoolOperations` and
 `RunOperations`, which the tests call through an in-memory host.
 
-- Access: 127.0.0.1 only; a one-time key in the first link becomes a session cookie; changes need
-  the cookie, a custom header and a matching `Origin`; only local host names are served; a strict
-  content policy. The UI is for one person on one computer, not a shared server.
+- Access: 127.0.0.1 only; changes need a custom header and a matching `Origin`; only local host
+  names are served; a strict content policy. The UI is for one person on one computer, not a
+  shared server. (The one-time sign-in key was replaced by D-020.)
 - Setup is one draft object. The wizard and the settings page edit it and the same code turns it
   into the settings file, so there is one place that decides what a valid project is. The checks
   are the `doctor` checks, run against a temporary copy of the draft. A step passes only if its
@@ -248,3 +248,14 @@ Compatibility, because real workspaces exist:
   running; `schedule show` finds it and `schedule remove` / `set` remove it.
 - Registered project keys, stored settings and task data are data and are not rewritten. A project
   whose settings name the old solution file (`DevAutopilot.slnx`) needs that command edited.
+
+## D-020 The UI needs no sign-in on this computer (accepted, 2026-11-27)
+
+The tool runs on one local machine and is not hosted, so a one-time link in a log was friction
+without much protection. The UI now listens on loopback and needs no key. The protection stays,
+invisible: a strict `Host` check (DNS rebinding) and an `Origin` plus custom header check on every
+change. A persistent key (`ui.requireKey`, `autopilot ui link`, a one-year cookie) is opt-in for
+shared machines and mandatory off loopback. The port is picked once per machine from 5100-5999 and
+saved in the workspace so the address is stable. `autopilot ui install` starts it at sign-in with
+per-user means only (Startup script, systemd user unit, launchd agent). Tracker lists are cached
+for 30 seconds and refreshed in the background, so a page does not wait for the tracker each time.

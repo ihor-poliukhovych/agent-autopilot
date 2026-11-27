@@ -138,8 +138,8 @@ For Azure DevOps work items and draft pull requests: [docs/AZURE-DEVOPS.md](docs
 
 ## The local web UI
 
-`autopilot ui` opens a page on your own computer (127.0.0.1 only, one-time key in the link,
-works offline) over the same services as the command line: see every task move through a pipeline board, add projects with a checked
+`autopilot ui` opens a page on your own computer (127.0.0.1 only, no sign-in, same address on
+every start, can start at sign-in, works offline) over the same services as the command line: see every task move through a pipeline board, add projects with a checked
 step-by-step wizard, write and triage tasks, order the pool, run now or at night, follow the
 current step of a run and stop that one job, read the gate report and the diff, answer questions
 that need a person, and edit the settings. Merging stays with a person.

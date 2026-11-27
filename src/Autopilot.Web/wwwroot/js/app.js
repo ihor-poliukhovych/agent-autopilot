@@ -72,7 +72,8 @@ async function route() {
   const stage = h('div');
   const tabBar = h('div', { class: 'tabs-inner', style: 'display:contents' });
   let stop = null;
-  if (!view.firstChild) view.append(loading());
+  // A click must show something at once: put a skeleton in place of the old page while the new one loads.
+  view.replaceChildren(loading(), h('div', { class: 'skeleton' }), h('div', { class: 'skeleton' }));
   document.title = 'Autopilot';
   try {
     if (r.name === 'project') {
@@ -83,6 +84,7 @@ async function route() {
       } else {
         lastTab = r.tab === 'run' ? 'runs' : (TABS.some(t => t[0] === r.tab) ? r.tab : 'pipeline');
         renderTabs(tabBar, r);
+        clear(tabs).append(tabBar);
         const screen = (TABS.find(t => t[0] === lastTab) || TABS[0])[2];
         document.title = `${project.displayName} · Autopilot`;
         stop = await screen.render({ view: stage, project, key: r.key, rest: r.rest, state, go, refreshState }) || null;
@@ -96,7 +98,7 @@ async function route() {
   } catch (e) {
     stage.replaceChildren();
     stage.append(h('div', { class: 'banner bad' }, e instanceof ApiError && e.status === 401
-      ? 'You are signed out. Start "autopilot ui" again and open the new link it prints.'
+      ? 'You are signed out. Run "autopilot ui link" and open the link it prints.'
       : (e.message || 'Something went wrong.')));
   }
   if (mine !== generation) { if (stop) stop(); return; }

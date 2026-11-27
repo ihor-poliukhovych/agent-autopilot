@@ -11,11 +11,31 @@ public sealed class SecurityTests
         System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     [Fact]
-    public async Task The_api_needs_the_session_cookie()
+    public async Task A_plain_get_on_localhost_works_without_any_cookie_or_key()
     {
         await using var ui = new UiFixture(signedIn: false);
         var response = await ui.Client.GetAsync("/api/state");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await ui.Client.GetAsync("/")).StatusCode);
+        Assert.DoesNotContain(response.Headers, h => h.Key == "Set-Cookie");
+    }
+
+    [Fact]
+    public async Task With_the_key_setting_the_api_needs_the_session_cookie()
+    {
+        await using var ui = new UiFixture(signedIn: false, requireKey: true);
+        var response = await ui.Client.GetAsync("/api/state");
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task The_key_setting_in_the_workspace_turns_the_key_on()
+    {
+        await using var ui = new UiFixture(signedIn: false, requireKey: null);
+        Assert.Equal(HttpStatusCode.OK, (await ui.Client.GetAsync("/api/state")).StatusCode);
+        new Autopilot.Core.Workspace.WorkspaceSettings(ui.Workspace).Set(Autopilot.Core.Workspace.WorkspaceSettings.UiRequireKey, "true");
+        await using var again = new UiFixture(signedIn: false, requireKey: null, workspace: ui.Workspace);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await again.Client.GetAsync("/api/state")).StatusCode);
     }
 
     [Fact]
@@ -27,29 +47,35 @@ public sealed class SecurityTests
     }
 
     [Fact]
-    public async Task The_key_works_once_and_starts_a_cookie_session()
+    public async Task The_key_can_be_used_again_and_starts_a_long_lived_cookie()
     {
-        await using var ui = new UiFixture(signedIn: false);
+        await using var ui = new UiFixture(signedIn: false, requireKey: true);
         var first = await ui.Client.GetAsync($"/?key={UiFixture.Key}");
         Assert.Equal(HttpStatusCode.Redirect, first.StatusCode);
         var cookie = first.Headers.GetValues("Set-Cookie").Single();
         Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=strict", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("max-age=31536000", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("/", first.Headers.Location?.OriginalString);
 
-        var second = await ui.Client.GetAsync($"/?key={UiFixture.Key}");
-        Assert.Equal(HttpStatusCode.Forbidden, second.StatusCode);
-        Assert.DoesNotContain(second.Headers, h => h.Key == "Set-Cookie");
+        // A second browser can sign in with the same persistent key.
+        Assert.Equal(HttpStatusCode.Redirect, (await ui.Client.GetAsync($"/?key={UiFixture.Key}")).StatusCode);
     }
 
     [Fact]
     public async Task A_wrong_key_is_refused()
     {
-        await using var ui = new UiFixture(signedIn: false);
+        await using var ui = new UiFixture(signedIn: false, requireKey: true);
         var response = await ui.Client.GetAsync("/?key=nope");
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-        // The wrong key did not use up the real one.
-        Assert.Equal(HttpStatusCode.Redirect, (await ui.Client.GetAsync($"/?key={UiFixture.Key}")).StatusCode);
+        Assert.DoesNotContain(response.Headers, h => h.Key == "Set-Cookie");
+    }
+
+    [Fact]
+    public void A_new_key_makes_the_old_session_cookie_worthless()
+    {
+        Assert.NotEqual(SessionGuard.SessionFor("one"), SessionGuard.SessionFor("two"));
+        Assert.Equal(SessionGuard.SessionFor("one"), SessionGuard.SessionFor("one"));
     }
 
     [Fact]

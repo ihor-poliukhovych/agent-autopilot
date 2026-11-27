@@ -249,3 +249,6 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
   .page-head { align-items: flex-start; }
   .lane.is-empty { display: none; }
 }
+
+.timing { padding: var(--s2) var(--s4); color: var(--muted, #888); font-size: .75rem; text-align: right; }
+.timing [data-slow="true"] { color: var(--bad, #b3261e); font-weight: 600; }

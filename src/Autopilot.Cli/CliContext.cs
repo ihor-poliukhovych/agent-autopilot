@@ -37,6 +37,18 @@ public sealed record CliContext(TextReader In, TextWriter Out, TextWriter Error)
     /// <summary>The program that scheduled and detached runs start, as file and leading arguments. Null means this program.</summary>
     public (string File, IReadOnlyList<string> Arguments)? Program { get; init; }
 
+    /// <summary>Where <c>ui install</c> writes: the user's home and roaming application data folders. Null means the real ones.</summary>
+    public (string Home, string AppData)? UserFolders { get; init; }
+
+    /// <summary>Which autostart system <c>ui install</c> uses. Null means the one of this operating system.</summary>
+    public Commands.AutostartSystem? AutostartSystem { get; init; }
+
+    /// <summary>Runs the system commands of <c>ui install</c> (systemctl, launchctl). Null means start the process.</summary>
+    public Func<string[], Task<int>>? RunSystemCommand { get; init; }
+
+    /// <summary>Tells whether a UI answers on a port of this machine (<c>ui status</c>). Null means try to connect.</summary>
+    public Func<int, bool>? IsPortInUse { get; init; }
+
     /// <summary>False skips the dotnet, git and claude version checks in doctor (tests never start claude).</summary>
     public bool DoctorChecksTools { get; init; } = true;
 

@@ -16,6 +16,7 @@ public static class EmbeddedSite
         var names = assembly.GetManifestResourceNames()
             .Where(n => n.StartsWith(Prefix, StringComparison.Ordinal))
             .ToDictionary(n => n.Replace('\\', '/'), n => n, StringComparer.Ordinal);
+        var etags = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.Ordinal);
         app.Use(async (context, next) =>
         {
             if (!(HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method)) || context.Request.Path.StartsWithSegments("/api", StringComparison.Ordinal))
@@ -37,8 +38,22 @@ public static class EmbeddedSite
                 type = "application/octet-stream";
             }
 
+            // The files cannot change while the program runs, so one hash per file is enough. The browser keeps
+            // its copy and asks "still the same?" (a 304 with no body) instead of downloading again.
+            var etag = etags.GetOrAdd(resource!, r =>
+            {
+                using var s = assembly.GetManifestResourceStream(r)!;
+                return "\"" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(s))[..16] + "\"";
+            });
             context.Response.ContentType = type;
             context.Response.Headers.CacheControl = "no-cache";
+            context.Response.Headers.ETag = etag;
+            if (context.Request.Headers.IfNoneMatch.ToString() == etag)
+            {
+                context.Response.StatusCode = StatusCodes.Status304NotModified;
+                return;
+            }
+
             await using var stream = assembly.GetManifestResourceStream(resource!)!;
             if (HttpMethods.IsHead(context.Request.Method))
             {

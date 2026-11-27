@@ -64,6 +64,11 @@ public sealed class ProjectScope
     {
         var config = ConfigLoader.Load(Project.RepositoryFolder, DataFolder);
         var source = Options.Sources.Create(Project.RepositoryFolder, config, DataFolder, LocalTasks);
+        if (Project.TaskSource != ProjectRegistry.LocalSource)
+        {
+            source = new CachedWorkItemSource(source, Options.ListCache, Project.Key);
+        }
+
         return new WorkItemListService(source, Triage, Pool, Runs);
     }
 

@@ -26,7 +26,7 @@ Ideas that are planned but not built. Order may change.
    these services (mapping in docs/AZURE-DEVOPS.md); the UI wizard now calls the same checks (see item 2).
 
 2. **Local web UI.** *(Done, see D-016 and docs/UI.md.)* `autopilot ui` (127.0.0.1 only,
-   one-time key in the link): projects and a checked add-project wizard, tasks (triage and
+   no sign-in; an opt-in key for shared machines): projects and a checked add-project wizard, tasks (triage and
    staleness, add and edit, comments, Start, add to pool), the pool (order, run now, run at night
    after a confirmation that shows the plan), runs (live step, a Stop button for one job, history,
    gate report, diff, how often a person agreed with the gate), questions that need a person, and
@@ -81,6 +81,12 @@ mostly field mapping.
 - Others later (Jira, Linear, GitLab) on the same adapter interface.
 
 The interface and the sync service exist (see D-014 and docs/TRACKERS.md); the Azure DevOps adapter still has to be moved onto them.
+
+## Agents as a separate operating-system user
+
+The agents run as the person, so they can reach everything the person can, including the UI port. A
+separate OS user for agents is the real boundary; hooks and sandbox rules are the interim. See the
+threat model in docs/UI.md.
 
 ## Gaps before a full migration
 

@@ -320,7 +320,7 @@ public sealed class ProjectAndWizardTests
     [Fact]
     public async Task Analyze_needs_a_session_like_every_other_endpoint()
     {
-        await using var ui = new UiFixture(signedIn: false);
+        await using var ui = new UiFixture(signedIn: false, requireKey: true);
         var (status, _) = await ui.PostAsync("/api/wizard/analyze", new { folder = ui.RepoFolder });
         Assert.NotEqual(HttpStatusCode.OK, status);
     }
