@@ -331,6 +331,117 @@ public sealed class PoolUnattendedCliTests : IDisposable
         Assert.Equal(1, (await Cli("pool", "decisions", "revert", id, "--project", "demo")).Exit);
     }
 
+    // ---------- an untriaged queue: the pool triages first and hands the verdict on ----------
+
+    private static bool IsMasterRun(AgentRunRequest request) => request.OutputJsonSchema?.Contains("reversible", StringComparison.Ordinal) == true;
+
+    private static AgentRunResult MasterAnswer() =>
+        FakeAgentRunner.Answer(new { decide = true, option = 1, answer = "Sort by name.", reason = "It is the recommended option.", category = "other", reversible = true });
+
+    /// <summary>Writes a file of its own per task, so two tasks never touch the same file.</summary>
+    private static AgentRunResult ImplementingTask(AgentRunRequest request, string marker)
+    {
+        Directory.CreateDirectory(Path.Combine(request.WorkingDirectory, "src", marker));
+        File.WriteAllText(Path.Combine(request.WorkingDirectory, "src", marker, "Work.cs"), $"class {marker}Work {{ }}\n");
+        return FakeAgentRunner.Answer(new { summary = "Done.", testsThatProveIt = new[] { "none" }, doubts = Array.Empty<string>() });
+    }
+
+    private string Report() => File.ReadAllText(Path.Combine(new Ws(WorkspacePath).ProjectFolder("demo"), "POOL-REPORT.md"));
+
+    [Fact]
+    public async Task An_untriaged_task_that_needs_a_person_is_answered_by_the_master_and_implemented()
+    {
+        using var repo = await AddProjectAsync();
+        await Cli("task", "add", "Sort the list", "--body", "Sort the list. Ask which order.", "--project", "demo");
+        await Cli("pool", "add", "1", "--project", "demo");
+        var triaged = 0;
+        var runner = new FakeAgentRunner((request, _) =>
+        {
+            if (IsMasterRun(request))
+            {
+                return MasterAnswer();
+            }
+
+            return request.Role switch
+            {
+                AgentRole.Triage when Interlocked.Increment(ref triaged) == 1 => FakeAgentRunner.Answer(new { label = "needs-human", reason = "Which order? Option 1: by name (recommended). Option 2: by date.", acceptanceCriteria = Array.Empty<string>(), risk = "low" }),
+                AgentRole.Triage => FakeAgentRunner.Answer(new { label = "agent-ready", reason = "Clear now.", acceptanceCriteria = new[] { "Sorted by name" }, risk = "low" }),
+                AgentRole.Implementer => Implementing(request),
+                _ => FakeAgentRunner.Answer(new { verdict = "approve", findings = Array.Empty<string>() }),
+            };
+        });
+
+        // No manual triage: the pool does it, and reads the stored result back.
+        var run = await PoolRunAsync(runner, "pool", "run", "--unattended", "--project", "demo");
+
+        Assert.Equal(0, run.Exit);
+        Assert.Contains("Done 1", run.Out, StringComparison.Ordinal);
+        Assert.Contains("parked 0", run.Out, StringComparison.Ordinal);
+        Assert.Contains("Answer: option 1 (pool master)", (await Cli("task", "show", "1", "--project", "demo")).Out, StringComparison.Ordinal);
+        Assert.Equal(2, triaged);
+        Assert.Contains("Agent runs used: 4.", Report(), StringComparison.Ordinal); // triage, master, triage, implement
+    }
+
+    [Fact]
+    public async Task An_untriaged_agent_ready_task_is_triaged_once_and_implemented_without_the_master()
+    {
+        using var repo = await AddProjectAsync();
+        await Cli("task", "add", "Add numbers", "--body", "Add(a, b) returns a + b.", "--project", "demo");
+        await Cli("pool", "add", "1", "--project", "demo");
+        var runner = new FakeAgentRunner((request, _) => IsMasterRun(request)
+            ? throw new InvalidOperationException("The master must not be asked.")
+            : request.Role switch
+            {
+                AgentRole.Triage => FakeAgentRunner.Answer(new { label = "agent-ready", reason = "Clear.", acceptanceCriteria = new[] { "Add works" }, risk = "low" }),
+                AgentRole.Implementer => Implementing(request),
+                _ => FakeAgentRunner.Answer(new { verdict = "approve", findings = Array.Empty<string>() }),
+            });
+
+        var run = await PoolRunAsync(runner, "pool", "run", "--unattended", "--project", "demo");
+
+        Assert.Equal(0, run.Exit);
+        Assert.Contains("Done 1", run.Out, StringComparison.Ordinal);
+        Assert.Single(runner.Requests, r => r.Role == AgentRole.Triage && !IsMasterRun(r));
+        Assert.Contains("Agent runs used: 2.", Report(), StringComparison.Ordinal); // triage, implement
+    }
+
+    [Fact]
+    public async Task Two_untriaged_tasks_run_together_and_each_triage_counts_as_one_agent_run()
+    {
+        using var repo = await AddProjectAsync();
+        Assert.Equal(0, (await Cli("pool", "settings", "--concurrency", "2", "--max-agent-runs", "8", "--unattended", "true", "--project", "demo")).Exit);
+        await Cli("task", "add", "First", "--body", "ONE needs an order.\nPaths: src/ONE/**", "--project", "demo");
+        await Cli("task", "add", "Second", "--body", "TWO is easy.\nPaths: src/TWO/**", "--project", "demo");
+        await Cli("pool", "add", "1", "--project", "demo");
+        await Cli("pool", "add", "2", "--project", "demo");
+        var triagedOne = 0;
+        var runner = new FakeAgentRunner((request, _) =>
+        {
+            if (IsMasterRun(request))
+            {
+                return MasterAnswer();
+            }
+
+            var marker = request.Prompt.Contains("ONE", StringComparison.Ordinal) ? "ONE" : "TWO";
+            return request.Role switch
+            {
+                AgentRole.Triage when marker == "ONE" && Interlocked.Increment(ref triagedOne) == 1 => FakeAgentRunner.Answer(new { label = "needs-human", reason = "Which order? Option 1: by name (recommended). Option 2: by date.", acceptanceCriteria = Array.Empty<string>(), risk = "low" }),
+                AgentRole.Triage => FakeAgentRunner.Answer(new { label = "agent-ready", reason = "Clear.", acceptanceCriteria = new[] { "Works" }, risk = "low" }),
+                AgentRole.Implementer => ImplementingTask(request, marker),
+                _ => FakeAgentRunner.Answer(new { verdict = "approve", findings = Array.Empty<string>() }),
+            };
+        });
+
+        var run = await PoolRunAsync(runner, "pool", "run", "--project", "demo");
+
+        Assert.True(run.Exit == 0, run.Out + run.Err);
+        Assert.Contains("Done 2", run.Out, StringComparison.Ordinal);
+        Assert.Contains("parked 0", run.Out, StringComparison.Ordinal);
+        Assert.Equal(3, runner.Requests.Count(r => r.Role == AgentRole.Triage && !IsMasterRun(r)));
+        Assert.Contains("Answer: option 1 (pool master)", (await Cli("task", "show", "1", "--project", "demo")).Out, StringComparison.Ordinal);
+        Assert.Contains("Agent runs used: 6.", Report(), StringComparison.Ordinal); // task 1: 4, task 2: 2
+    }
+
     private sealed class FakeSchedulerForPool : IScheduler
     {
         public Dictionary<string, ScheduledJob> Jobs { get; } = [];
