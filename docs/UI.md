@@ -6,29 +6,79 @@ runs, schedule, settings and the `doctor` checks. Nothing runs in the cloud, not
 loaded from the internet, and the page works offline.
 
 ```powershell
-autopilot ui                       # the default workspace, port 5178
-autopilot ui --port 6000 --open    # another port, and open the browser
-autopilot ui --workspace D:\autopilot-data
+autopilot ui                       # http://localhost:<port>, opens the browser
+autopilot ui --no-open             # do not open the browser
+autopilot ui --port 6000           # a port of your choice for this run
+autopilot ui --workspace D:utopilot-data
 ```
 
-The command prints a link such as `http://127.0.0.1:5178/?key=...`. Open it once: the key signs
-the browser in and works one time only. Stop the UI with Ctrl+C. To sign in again, start it again.
+There is nothing to sign in to. `autopilot ui` listens on `127.0.0.1`, prints
+`http://localhost:<port>/` and opens it. Stop it with Ctrl+C.
+
+**The port** is picked once per machine from 5100-5999 the first time you start the UI, saved in the
+workspace and reused on every start, so the address and your bookmarks stay the same. If that port is
+busy, the next free one is used for that run (and printed and opened); the saved one is kept.
+`--port N` uses N for that run only, and `--port 0` lets the system choose.
+
+**Always on.** The UI can start when you sign in to the computer, without administrator rights:
+
+```powershell
+autopilot ui install      # Windows: a script in the Startup folder. Linux: a systemd user unit
+                          # (restart on failure). macOS: a launchd agent (kept alive).
+autopilot ui status       # the address, whether it runs, whether it starts at sign-in, key setting
+autopilot ui uninstall    # remove it again
+```
+
+A UI started this way does not open a browser. The Windows Startup script has no restart on
+failure and no log file; run `autopilot ui` in a terminal to see the request log.
+
+**Slow pages.** The footer shows how long the last call took in the browser and on the server. The
+terminal that runs `autopilot ui` prints one line per request (`--quiet` turns that off).
 
 ## Who can use it
 
-The UI is meant for one person on one computer.
+The UI is meant for one person on one computer. The protection is invisible:
 
-- It listens on `127.0.0.1` only, never on a network address.
-- The one-time key in the first link becomes a session cookie (`HttpOnly`, `SameSite=Strict`).
-  Every call to `/api` needs that cookie.
-- Every change (POST, PUT, DELETE) also needs the header `X-Autopilot-Request` and an `Origin`
-  that matches the page's own address, so another web page in your browser cannot send changes.
-- Only the host names `localhost`, `127.0.0.1` and `[::1]` are answered, which stops DNS
-  rebinding.
+- It listens on `127.0.0.1` (and `[::1]`) only.
+- Only the host names `localhost`, `127.0.0.1` and `[::1]` are answered. A web page on the internet
+  cannot reach the UI by pointing its own name at your computer (DNS rebinding).
+- Every change (POST, PUT, DELETE) needs the header `X-Autopilot-Request` and an `Origin` that
+  matches the page's own address, so another web page in your browser cannot send changes.
 - The pages are compiled into the tool and served with a strict content policy: scripts, styles
   and requests come from the page itself, nothing else.
 - Secrets are never shown or stored. Settings hold the *names* of environment variables only. A
   field that should hold a name refuses anything that looks like a pasted token.
+
+### A key, for shared machines
+
+On a computer that other people use, turn on a key:
+
+```powershell
+autopilot ui require-key on     # off again with: autopilot ui require-key off
+autopilot ui link               # prints http://localhost:<port>/?key=...
+autopilot ui link --rotate      # a new key: every browser signed in so far is signed out
+```
+
+The key is stored in the workspace and does not change between starts. The link signs a browser in
+once: it gets a cookie (`HttpOnly`, `SameSite=Strict`, one year), and the API answers only with it.
+The key is required automatically, and cannot be switched off, when the UI is bound to anything but
+loopback (`autopilot ui --bind 0.0.0.0`); in that case other host names are served too and the key
+is the only protection. Restart a running UI after changing the setting.
+
+### Threat model
+
+What the UI protects against, and what it does not.
+
+| Threat | Handling |
+|---|---|
+| A web page in your browser sends requests to `localhost` | Changes need a custom header and a matching `Origin`; a page from another site cannot set both. Reads are answered, but the browser does not show the answer to another site. |
+| DNS rebinding (a name that points at 127.0.0.1) | The `Host` header must be a loopback name; anything else gets 400. |
+| Another person on the same machine | Not stopped by default (any local process can open the port). Turn on the key; it is a speed bump for a casual user, not a boundary against someone who can read your files. |
+| Another computer on the network | Not reachable: loopback only. `--bind` beyond loopback forces the key. |
+| An agent that Autopilot runs (it executes as you) | It can open the port like any local program. The agent runs behind the hook and the sandbox of Claude Code; deny the UI port there so an agent cannot call the UI. Settings that widen rights (settings, risk paths, trust, schedule, merge policy) should be changed from the page only. The real fix is to run agents as a separate operating-system user, which is on the roadmap. |
+
+Not done yet: an action log that shows where each request came from, and the agent deny rule for the
+UI port. Both are tracked as tasks.
 
 ## Screens
 

@@ -54,6 +54,27 @@ public sealed class WorkspaceTests : IDisposable
     }
 
     [Fact]
+    public void A_database_that_already_ran_job_kind_upgrades_to_workspace_settings()
+    {
+        var workspace = NewWorkspace();
+        using (var connection = workspace.Open())
+        {
+            // Put the database back to the state of a build that stopped at migration 004.
+            using var command = connection.CreateCommand();
+            command.CommandText = "DROP TABLE workspace_settings; DELETE FROM schema_version WHERE version > 4;";
+            command.ExecuteNonQuery();
+        }
+
+        var settings = new WorkspaceSettings(workspace);
+        settings.Set(WorkspaceSettings.UiPort, "5123");
+        Assert.Equal(5123, settings.GetInt(WorkspaceSettings.UiPort));
+        using var check = workspace.Open();
+        using var query = check.CreateCommand();
+        query.CommandText = "SELECT MAX(version) FROM schema_version";
+        Assert.Equal(5L, (long)query.ExecuteScalar()!);
+    }
+
+    [Fact]
     public void A_database_from_a_newer_version_is_refused()
     {
         var workspace = NewWorkspace();

@@ -126,7 +126,9 @@ public sealed partial class SetupService(WebUiOptions options)
         var module = new[] { config.Modules.Publisher, config.Modules.WorkItems }.FirstOrDefault(m => m.Type is not null && (m.Type.Equals(ProjectRegistry.AzureDevOpsSource, StringComparison.OrdinalIgnoreCase) || m.Type.Equals("azuredevops", StringComparison.OrdinalIgnoreCase) || m.Type.Equals("ado", StringComparison.OrdinalIgnoreCase)))
             ?? throw new ArgumentException("This project is not connected to Azure DevOps yet. Open Settings, press \"Connect Azure DevOps\", fill in the steps and save.");
         var tasks = new LocalTaskService(scope.Workspace, scope.Project.Key);
-        return await options.AzureDevOps.ImportAsync(module, scope.Project.RepositoryFolder, tasks, limit, dryRun, ct).ConfigureAwait(false);
+        var report = await options.AzureDevOps.ImportAsync(module, scope.Project.RepositoryFolder, tasks, limit, dryRun, ct).ConfigureAwait(false);
+        options.ListCache.Invalidate(scope.Project.Key);
+        return report;
     }
 
     /// <summary>Registers the project and writes its settings. Fails with every problem named when a check fails.</summary>
@@ -175,6 +177,7 @@ public sealed partial class SetupService(WebUiOptions options)
         new ProjectRegistry(options.Workspace).Update(scope.Project.Key, new ProjectUpdate(
             DisplayName: NameOf(draft), BaseBranch: config.BaseBranch, TaskSource: draft.TaskSource));
         ConfigLoader.Save(config, scope.Project.RepositoryFolder, scope.DataFolder);
+        options.ListCache.Invalidate(scope.Project.Key);
         return Load(new ProjectScope(options, new ProjectRegistry(options.Workspace).Get(scope.Project.Key)!));
     }
 

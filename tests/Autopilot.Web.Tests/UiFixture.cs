@@ -119,7 +119,7 @@ public sealed class FakeScheduler : IScheduler
     public Task<bool> ExistsAsync(string name, CancellationToken ct) => Task.FromResult(Jobs.ContainsKey(name));
 }
 
-/// <summary>An in-memory host over a temp workspace, with a client that is already signed in.</summary>
+/// <summary>An in-memory host over a temp workspace. No key by default, like the real UI on this computer; with a key the client is already signed in.</summary>
 public sealed class UiFixture : IAsyncDisposable
 {
     public const string Key = "test-key";
@@ -127,17 +127,17 @@ public sealed class UiFixture : IAsyncDisposable
     private readonly string _temp = Path.Combine(Path.GetTempPath(), "autopilot-ui-" + Guid.NewGuid().ToString("N"));
     private readonly WebApplication _app;
 
-    public UiFixture(bool signedIn = true, bool withAdo = true)
+    public UiFixture(bool signedIn = true, bool withAdo = true, bool? requireKey = false, TimeSpan? cacheTtl = null, Workspace? workspace = null, System.Net.IPAddress? bind = null, IWorkItemSourceFactory? sources = null, Action<string>? requestLog = null)
     {
         Directory.CreateDirectory(_temp);
         RepoFolder = Path.Combine(_temp, "repo");
         Directory.CreateDirectory(Path.Combine(RepoFolder, ".git")); // the registry only needs the entry to exist
-        Workspace = new Workspace(Path.Combine(_temp, "ws"));
+        Workspace = workspace ?? new Workspace(Path.Combine(_temp, "ws"));
         Options = new WebUiOptions
         {
             Workspace = Workspace,
             Checker = Checker,
-            Sources = new FakeSources(),
+            Sources = sources ?? new FakeSources(),
             AzureDevOps = withAdo ? Ado : null,
             Program = new ProgramInfo("autopilot", []),
             Launcher = Launcher,
@@ -146,12 +146,16 @@ public sealed class UiFixture : IAsyncDisposable
             IsProcessAlive = pid => AliveProcesses.Contains(pid),
             Environment = name => name == "AUTOPILOT_ADO_PAT" ? "x" : null,
             SessionKey = Key,
+            RequireKey = requireKey,
+            BindAddress = bind ?? System.Net.IPAddress.Loopback,
+            TrackerCacheTtl = cacheTtl ?? TimeSpan.FromSeconds(30),
+            RequestLog = requestLog,
         };
         _app = WebUi.Build(Options, builder => builder.WebHost.UseTestServer());
         _app.StartAsync().GetAwaiter().GetResult();
         Server = _app.GetTestServer();
         Client = Server.CreateClient();
-        if (signedIn)
+        if (signedIn && requireKey == true)
         {
             SignIn(Client);
         }
