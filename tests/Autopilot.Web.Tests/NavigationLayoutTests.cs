@@ -42,14 +42,17 @@ public sealed class NavigationLayoutTests
     }
 
     [Fact]
-    public void Inbox_is_a_placeholder_linking_to_needs_and_runs_without_api_calls()
+    public void Inbox_lists_questions_and_parked_tasks_from_the_inbox_api()
     {
         var js = Wwwroot("js/inbox.js");
-        Assert.Contains("content comes later", js);
-        Assert.Contains("/needs`", js);
-        Assert.Contains("/runs`", js);
-        Assert.DoesNotContain("get(", js);
-        Assert.DoesNotContain("api.js", js);
+        Assert.Contains("/inbox`", js);
+        Assert.Contains("needs.render(", js);
+        Assert.Contains("/pool/parked/", js);
+        Assert.Contains("'Unpark'", js);
+        Assert.Contains("Nothing waits for you", js);
+        Assert.Contains("class: 'app-layout'", js);
+        Assert.DoesNotContain("content comes later", js);
+        Assert.Contains("/inbox`", Wwwroot("js/app.js"));
     }
 
     [Fact]
@@ -75,7 +78,8 @@ public sealed class NavigationLayoutTests
         var js = Wwwroot("js/app.js");
         var css = Wwwroot("app.css");
         Assert.Contains("function leftColumn(", js);
-        Assert.Contains("h('nav', { class: 'app-links'", js);
+        Assert.DoesNotContain("app-links", js);
+        Assert.DoesNotContain("app-links", css);
         Assert.DoesNotContain(":empty", css);
     }
 

@@ -61,6 +61,15 @@ public sealed record NeedsHumanItem(
     string Id, string Title, string Question, bool Stale, bool CanAnswer, string? Answer = null,
     IReadOnlyList<string>? Options = null, int? Recommended = null, string? Reason = null, bool InPool = false);
 
+public static class InboxKinds
+{
+    public const string Question = "question";
+    public const string Parked = "parked";
+}
+
+/// <summary>One entry of the Inbox. A question carries <see cref="Question"/>; a parked task carries <see cref="ParkReason"/>.</summary>
+public sealed record InboxItem(string Kind, string Id, string Title, DateTimeOffset CreatedAt, string? ParkReason, NeedsHumanItem? Question);
+
 /// <summary>What "Save and continue" did: the task with its answer, whether it is in the pool, and the triage job if one started.</summary>
 public sealed record AnswerContinueView(TaskDetailView Task, bool InPool, JobRecord? TriageJob, string? Note);
 
@@ -180,6 +189,19 @@ public sealed class TaskOperations(WebUiOptions options)
         return [.. items
             .Where(i => i.Triage is { Label: "needs-human" })
             .Select(i => Needs(scope, i))];
+    }
+
+    /// <summary>Everything that waits for a person: needs-human questions and parked tasks, oldest first.</summary>
+    public async Task<IReadOnlyList<InboxItem>> InboxAsync(ProjectScope scope, CancellationToken ct)
+    {
+        var items = await scope.CreateList().ListAsync(ct).ConfigureAwait(false);
+        var titles = items.ToDictionary(i => i.Id, i => i.Title, StringComparer.Ordinal);
+        var questions = items
+            .Where(i => i.Triage is { Label: "needs-human" })
+            .Select(i => new InboxItem(InboxKinds.Question, i.Id, i.Title, i.Triage!.TriagedAt, null, Needs(scope, i)));
+        var parked = new PoolStateStore(scope.Workspace, scope.Project.Key).Parked()
+            .Select(p => new InboxItem(InboxKinds.Parked, p.WorkItemId, titles.GetValueOrDefault(p.WorkItemId, p.WorkItemId), p.ParkedAt, p.Reason, null));
+        return [.. questions.Concat(parked).OrderBy(i => i.CreatedAt)];
     }
 
     private static NeedsHumanItem Needs(ProjectScope scope, WorkItemListEntry i)

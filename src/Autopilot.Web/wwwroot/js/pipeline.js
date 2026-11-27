@@ -92,6 +92,8 @@ export async function render({ view, key, rest, go }) {
     holder.append(h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Pipeline'),
       h('p', {}, 'Every open task, from backlog to a draft a person merges.')),
     h('div', { class: 'row' },
+      h('a', { href: link(key, 'needs') }, 'Needs a person'),
+      h('a', { href: link(key, 'runs') }, 'Runs'),
       h('button', { type: 'button', onclick: () => load().catch(e => toast(e.message, true)) }, 'Refresh'),
       null)));
 

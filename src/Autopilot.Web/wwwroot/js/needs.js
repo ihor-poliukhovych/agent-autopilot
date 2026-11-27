@@ -50,7 +50,8 @@ async function triageAndWait(key, id, stopped, onState) {
   return job;
 }
 
-export async function render({ view, key }) {
+/** `only` shows just that one question without the page header (the Inbox uses this); `onChange` runs after a card was redrawn. */
+export async function render({ view, key, only = null, onChange = null }) {
   const holder = h('div');
   const list = h('div', { class: 'stack' });
   const top = h('div');
@@ -60,10 +61,17 @@ export async function render({ view, key }) {
   let batchRunning = false;
   const continueBox = h('input', { type: 'checkbox', checked: readContinue(), id: 'needs-continue', onchange: () => writeContinue(continueBox.checked) });
 
-  async function fetchItems() { return get(`${base(key)}/needs-human`); }
+  async function fetchItems() {
+    const all = await get(`${base(key)}/needs-human`);
+    return only === null ? all : all.filter(i => i.id === only);
+  }
 
   function header(items) {
     const answered = items.filter(i => i.canAnswer && i.answer && i.stale);
+    if (only !== null) {
+      clear(top).append(h('label', { class: 'check-row' }, continueBox, h('span', {}, 'After an answer is saved, triage the task again and put it in the pool.')));
+      return;
+    }
     clear(top).append(
       h('div', { class: 'page-head' },
         h('div', {}, h('h1', {}, 'Needs a person'),
@@ -105,6 +113,7 @@ export async function render({ view, key }) {
     if (!card) return;
     if (!item) { card.finished(); } else card.update(item);
     header(items);
+    if (onChange) onChange(items);
   }
 
   async function refresh() {
