@@ -79,7 +79,8 @@ public sealed class WorkspaceTests : IDisposable
         "DROP TABLE pool_decisions; DROP TABLE pool_parked; DROP TABLE pool_status; DROP TABLE pool_pause; "
         + "DROP TABLE pool_agent_runs; DROP TABLE task_locks; DROP TABLE pool_integration; DROP TABLE pool_integration_merges; "
         + "ALTER TABLE schedules DROP COLUMN start_date; ALTER TABLE schedules DROP COLUMN repeat; ALTER TABLE schedules DROP COLUMN until_time; "
-        + "ALTER TABLE schedules DROP COLUMN unattended; ALTER TABLE schedules DROP COLUMN last_started_at; ";
+        + "ALTER TABLE schedules DROP COLUMN unattended; ALTER TABLE schedules DROP COLUMN last_started_at; "
+        + "ALTER TABLE tasks DROP COLUMN parent_number; ";
 
     [Fact]
     public void A_database_at_workspace_settings_upgrades_to_the_unattended_pool_tables()
