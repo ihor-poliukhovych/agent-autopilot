@@ -49,6 +49,14 @@ Open `.autopilot/autopilot.json` and check at least:
   for example auth code, settings files, project and package files. The defaults
   cover common .NET files; add your own.
 - `gate`: limits on files and lines per change.
+- `commitStyle`: how the agent words its commits and the draft pull request title.
+  `"conventional"` (the default) writes `type(scope): subject`, so a commit-msg hook that
+  asks for [Conventional Commits](https://www.conventionalcommits.org/) accepts it. The
+  type comes from the task labels (`bug` is `fix`, `docs`, `test`, `refactor`, `perf`,
+  `ci`, `build`, `chore`/`maintenance`; anything else is `feat`), an optional scope from a
+  `scope:xyz` label, and the subject is the task title in lower case, cut at a word so the
+  first line is at most 72 characters. The task id goes in a `Refs: #<id>` footer. No
+  agent or co-author trailer is ever added. `"plain"` keeps the old `<id>: <title>`.
 - `roles.*.model`: the Claude model per role, for example `"sonnet"`. Empty means
   Claude Code's default.
 

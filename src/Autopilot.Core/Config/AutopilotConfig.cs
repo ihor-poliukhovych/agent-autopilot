@@ -17,6 +17,12 @@ public sealed record AutopilotConfig
     /// <summary>Prefix for agent branches, followed by the work item id.</summary>
     public string BranchPrefix { get; init; } = "autopilot/";
 
+    /// <summary>
+    /// How the agent's commits and draft pull request titles are worded: "conventional" (a Conventional
+    /// Commits subject, accepted by the usual commit-msg hooks) or "plain" (<c>&lt;id&gt;: &lt;title&gt;</c>).
+    /// </summary>
+    public string CommitStyle { get; init; } = CommitStyles.Conventional;
+
     public CommandsConfig Commands { get; init; } = new();
 
     /// <summary>Glob patterns (relative to the project root) the implementer may write to.</summary>
@@ -88,6 +94,14 @@ public sealed record IdentityConfig
     public string Name { get; init; } = "Autopilot";
 
     public string Email { get; init; } = "autopilot@localhost";
+}
+
+public static class CommitStyles
+{
+    public const string Conventional = "conventional";
+    public const string Plain = "plain";
+
+    public static IReadOnlyList<string> All { get; } = [Conventional, Plain];
 }
 
 public static class TrustLevels

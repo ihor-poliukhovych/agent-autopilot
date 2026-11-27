@@ -72,7 +72,7 @@ public sealed class AzureDevOpsPublisher : IPublisher
                 new DraftPullRequestRequest(
                     request.BranchName,
                     StripHeads(_baseBranch),
-                    Title(request.WorkItem.Title),
+                    request.Title ?? Title(request.WorkItem.Title),
                     _description(request),
                     int.TryParse(request.WorkItem.Id, NumberStyles.None, CultureInfo.InvariantCulture, out var workItemId) ? workItemId : null),
                 ct).ConfigureAwait(false);
