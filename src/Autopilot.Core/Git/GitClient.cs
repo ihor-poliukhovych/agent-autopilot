@@ -136,6 +136,36 @@ public sealed class GitClient
         return new ResolvedBranch(name, fullName.Length > 0 ? fullName : name, other);
     }
 
+    /// <summary>
+    /// How many commits <c>origin/&lt;branch&gt;</c> has that the local branch lacks, from the refs already
+    /// fetched (nothing is fetched). Null when there is no local branch or no origin ref; 0 when not behind. Never throws.
+    /// </summary>
+    public async Task<int?> GetCommitsBehindOriginAsync(string branch, CancellationToken ct = default)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(branch))
+            {
+                return null;
+            }
+
+            var name = branch.Trim();
+            var local = await TryGetCommitAsync(HeadsPrefix + name, ct).ConfigureAwait(false);
+            var remote = await TryGetCommitAsync($"{RemotesPrefix}origin/{name}", ct).ConfigureAwait(false);
+            if (local is null || remote is null)
+            {
+                return null;
+            }
+
+            var result = await RunGitAsync(RepositoryPath, ["rev-list", "--count", $"{HeadsPrefix}{name}..{RemotesPrefix}origin/{name}"], ct).ConfigureAwait(false);
+            return result.Succeeded && int.TryParse(result.StandardOutput.Trim(), out var count) ? count : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Names of the configured remotes (<c>git remote</c>).</summary>
     public async Task<IReadOnlyList<string>> ListRemotesAsync(CancellationToken ct = default)
     {

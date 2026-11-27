@@ -176,6 +176,12 @@ public static partial class DoctorCommand
             else
             {
                 await Report(new CheckResult(CheckStatus.Ok, "base branch", $"{config.BaseBranch} ({Short(baseBranch.Commit)})")).ConfigureAwait(false);
+                if (await git.GetCommitsBehindOriginAsync(config.BaseBranch, ct).ConfigureAwait(false) is > 0 and var behind)
+                {
+                    await Report(new CheckResult(CheckStatus.Warn, "base freshness",
+                        $"{config.BaseBranch} is {behind} commits behind origin/{config.BaseBranch}; runs use the local {config.BaseBranch} ({Short(baseBranch.Commit)})",
+                        $"git fetch, then update the local branch (for example 'git branch -f {config.BaseBranch} origin/{config.BaseBranch}' when it is not checked out).")).ConfigureAwait(false);
+                }
             }
         }
 

@@ -193,6 +193,7 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         Directory.CreateDirectory(runFolder);
         DeleteIfExists(Path.Combine(runFolder, "REJECTED.md"));
         DeleteIfExists(Path.Combine(runFolder, "PULL_REQUEST.md"));
+        await File.WriteAllTextAsync(Path.Combine(runFolder, BaseFileName), $"{_config.BaseBranch} {baseCommit}", ct).ConfigureAwait(false);
 
         var worktree = Path.Combine(options.WorktreeRoot, id);
         await RemoveWorktreeIfPresentAsync(worktree).ConfigureAwait(false);
@@ -407,6 +408,9 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
     private string BaseMissingMessage =>
         $"Base branch \"{_config.BaseBranch}\" does not exist, locally or as a remote-tracking branch. Create it, run 'git fetch', or set baseBranch in .autopilot/autopilot.json.";
 
+    /// <summary>File in the run folder with the base branch and the full commit the run was built on.</summary>
+    public const string BaseFileName = "base.txt";
+
     private bool _baseNoteWritten;
 
     private ProjectContext? _context;
@@ -419,6 +423,15 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         {
             _baseNoteWritten = true;
             Write("Note: base " + note);
+        }
+
+        if (resolved is not null)
+        {
+            Write($"Base: {_config.BaseBranch} ({resolved.Commit[..Math.Min(12, resolved.Commit.Length)]})");
+            if (await _git.GetCommitsBehindOriginAsync(_config.BaseBranch, ct).ConfigureAwait(false) is > 0 and var behind)
+            {
+                Write($"Warning: {_config.BaseBranch} is {behind} commits behind origin/{_config.BaseBranch}; this run uses the local {_config.BaseBranch}. Run 'git fetch' and update it to build on the newer code.");
+            }
         }
 
         return resolved?.Commit;
