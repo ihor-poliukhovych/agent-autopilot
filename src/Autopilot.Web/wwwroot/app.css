@@ -268,8 +268,6 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
 :root { --left-col: 420px; }
 .app-layout { display: grid; gap: var(--s4); grid-template-columns: var(--left-col) minmax(0, 1fr); align-items: start; }
 .app-left, .app-right { min-width: 0; }
-.app-links { display: flex; flex-direction: column; gap: var(--s1, .25rem); }
-.app-links a[aria-current="page"] { font-weight: 600; }
 .drawer-open, .drawer-close { display: none; }
 @media (max-width: 760px) {
   .app-layout { grid-template-columns: minmax(0, 1fr); }

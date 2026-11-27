@@ -129,17 +129,9 @@ async function route() {
   view.focus({ preventScroll: true });
 }
 
-// The fixed left column: quick links to the project pages, with the current one marked.
+// The fixed left column: page content only (the pages fill it) plus the drawer button.
 function leftColumn(key, page, showButton) {
-  const base = `#/p/${encodeURIComponent(key)}/`;
-  const links = [['pipeline', 'Pipeline'], ['tasks', 'Tasks'], ['pool', 'Pool'], ['needs', 'Needs a person'], ['runs', 'Runs']];
-  const list = h('nav', { class: 'app-links', 'aria-label': 'Project pages' });
-  for (const [id, label] of links) {
-    const a = h('a', { href: base + id }, label);
-    if (id === page) a.setAttribute('aria-current', 'page');
-    list.append(a);
-  }
-  return h('div', { class: 'app-left' }, list, showButton);
+  return h('div', { class: 'app-left' }, showButton);
 }
 
 function renderTabs(bar, r, current) {
