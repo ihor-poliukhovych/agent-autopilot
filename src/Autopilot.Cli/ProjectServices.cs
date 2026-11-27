@@ -25,7 +25,7 @@ public static class ProjectServices
     /// <c>.autopilot/tasks/</c> for this run whatever <c>modules.workItems</c> says, and then drafts stay
     /// local bundles too, so a local task id is never linked to an unrelated remote work item.
     /// </summary>
-    public static async Task<AutopilotPipeline> CreatePipelineAsync(string projectRoot, CliContext context, CancellationToken ct, string? source = null, string? dataFolder = null, LocalTaskService? tasks = null)
+    public static async Task<AutopilotPipeline> CreatePipelineAsync(string projectRoot, CliContext context, CancellationToken ct, string? source = null, string? dataFolder = null, LocalTaskService? tasks = null, Func<AutopilotConfig, AutopilotConfig>? adjustConfig = null)
     {
         AutopilotConfig config;
         try
@@ -45,6 +45,9 @@ public static class ProjectServices
                 + string.Join(Environment.NewLine, problems.Select(p => "  - " + p)) + Environment.NewLine
                 + "Run 'autopilot doctor' for a full check.");
         }
+
+        // A pool run builds on the integration branch: the caller swaps the base branch before anything reads it.
+        config = adjustConfig?.Invoke(config) ?? config;
 
         var repoRoot = await GitClient.FindRepositoryRootAsync(projectRoot, ct).ConfigureAwait(false)
             ?? throw new ProjectSetupException($"{projectRoot} is not in a git repository. Run 'git init' and commit your code first.");
@@ -69,11 +72,7 @@ public static class ProjectServices
             Config = config,
             WorkItems = workItems,
             Publisher = publisher,
-            Runner = context.RunnerFactory?.Invoke() ?? new ClaudeCodeRunner(new ClaudeCodeRunnerOptions
-            {
-                HookCommand = HookCommandLine.Build(Environment.ProcessPath, System.Reflection.Assembly.GetEntryAssembly()?.Location),
-                PassEnvironment = config.PassEnvironment,
-            }),
+            Runner = CreateRunner(context, config),
             Git = git,
             Facts = context.FactsCollectorFactory?.Invoke(config) ?? new GateFactsCollector(git, config, worktreeRoot) { BaseCacheFolder = ProjectPaths.GateBaseCacheFolder(projectRoot, dataFolder) },
             WorktreeRoot = worktreeRoot,
@@ -82,6 +81,14 @@ public static class ProjectServices
             DiagnosticsServer = diagnosticsServer,
         });
     }
+
+    /// <summary>The agent runner: the one the context gives (tests), otherwise Claude Code headless.</summary>
+    public static IAgentRunner CreateRunner(CliContext context, AutopilotConfig config) =>
+        context.RunnerFactory?.Invoke() ?? new ClaudeCodeRunner(new ClaudeCodeRunnerOptions
+        {
+            HookCommand = HookCommandLine.Build(Environment.ProcessPath, System.Reflection.Assembly.GetEntryAssembly()?.Location),
+            PassEnvironment = config.PassEnvironment,
+        });
 
     /// <summary>
     /// Picks the work item source and the publisher from the config. The local bundle is always

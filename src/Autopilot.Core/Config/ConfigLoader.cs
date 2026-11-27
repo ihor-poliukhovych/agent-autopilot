@@ -177,6 +177,8 @@ public static class ConfigLoader
             problems.Add($"trust is \"{config.Trust}\". Use one of: {string.Join(", ", TrustLevels.All)}.");
         }
 
+        ValidatePool(config, problems);
+
         if (config.Gate is null)
         {
             problems.Add("gate is missing. Remove the \"gate\" key to use the defaults, or fill in its limits.");
@@ -256,6 +258,102 @@ public static class ConfigLoader
             || normalized.StartsWith("**/" + AutopilotConfig.FolderName, StringComparison.OrdinalIgnoreCase)
             || normalized.StartsWith(".autopilot*", StringComparison.OrdinalIgnoreCase)
             || normalized.StartsWith(".*", StringComparison.Ordinal);
+    }
+
+    private static void ValidatePool(AutopilotConfig config, List<string> problems)
+    {
+        if (config.Pool is not { } pool)
+        {
+            problems.Add("pool is missing. Remove the \"pool\" key to use the defaults.");
+            return;
+        }
+
+        if (pool.Concurrency is < 1 or > PoolConfig.MaxConcurrency)
+        {
+            problems.Add($"pool.concurrency is {pool.Concurrency}. Use a number from 1 to {PoolConfig.MaxConcurrency}.");
+        }
+
+        if (pool.Master is null)
+        {
+            problems.Add("pool.master is missing. Remove it to use the defaults.");
+        }
+        else if (pool.Master.MaxDecisionsPerRun < 0)
+        {
+            problems.Add("pool.master.maxDecisionsPerRun cannot be negative.");
+        }
+
+        if (pool.OnFailure is null)
+        {
+            problems.Add("pool.onFailure is missing. Remove it to use the defaults.");
+        }
+        else
+        {
+            if (pool.OnFailure.Retries is < 0 or > 3)
+            {
+                problems.Add("pool.onFailure.retries must be from 0 to 3.");
+            }
+
+            if (!string.Equals(pool.OnFailure.Then, PoolFailureActions.Park, StringComparison.Ordinal))
+            {
+                problems.Add($"pool.onFailure.then is \"{pool.OnFailure.Then}\". The only value is \"{PoolFailureActions.Park}\".");
+            }
+
+            if (pool.OnFailure.PauseMinutes < 1)
+            {
+                problems.Add("pool.onFailure.pauseMinutes must be at least 1.");
+            }
+        }
+
+        foreach (var category in pool.AlwaysAsk ?? [])
+        {
+            if (!PoolCategories.All.Contains(category, StringComparer.Ordinal))
+            {
+                problems.Add($"pool.alwaysAsk entry \"{category}\" is unknown. Use any of: {string.Join(", ", PoolCategories.All)}.");
+            }
+        }
+
+        if (pool.Budget is null)
+        {
+            problems.Add("pool.budget is missing. Remove it to use the defaults.");
+        }
+        else
+        {
+            if (pool.Budget.MaxAgentRuns is <= 0)
+            {
+                problems.Add("pool.budget.maxAgentRuns must be greater than 0, or left out for no limit.");
+            }
+
+            if (pool.Budget.StopAtUsagePercent is < 1 or > 100)
+            {
+                problems.Add("pool.budget.stopAtUsagePercent must be from 1 to 100.");
+            }
+        }
+
+        if (pool.Integration is not { } integration)
+        {
+            problems.Add("pool.integration is missing. Remove it to use the defaults.");
+            return;
+        }
+
+        if (!string.Equals(integration.FinalPr, "draft", StringComparison.Ordinal))
+        {
+            problems.Add($"pool.integration.finalPr is \"{integration.FinalPr}\". The only value is \"draft\": a person marks the final PR ready and merges it.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(integration.Branch))
+        {
+            var branch = integration.Branch.Trim();
+            var baseBranch = integration.BaseBranch ?? config.BaseBranch;
+            if (!branch.StartsWith(IntegrationConfig.BranchPrefix, StringComparison.Ordinal) || branch.Length == IntegrationConfig.BranchPrefix.Length
+                || branch.Any(c => char.IsWhiteSpace(c) || char.IsControl(c)) || branch.Contains("..", StringComparison.Ordinal))
+            {
+                problems.Add($"pool.integration.branch \"{integration.Branch}\" must look like \"integration/<name>\", with no spaces.");
+            }
+            else if (string.Equals(branch, baseBranch, StringComparison.OrdinalIgnoreCase))
+            {
+                problems.Add("pool.integration.branch is the same as the base branch. The pool never merges into the base branch.");
+            }
+        }
     }
 
     private static void AddIfNotPositive(List<string> problems, string name, int value)

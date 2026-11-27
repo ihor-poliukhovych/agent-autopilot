@@ -186,7 +186,8 @@ public static class BackendCommands
         command.Subcommands.Add(clear);
 
         var limit = new Option<int?>("--limit") { Description = "Try at most this many items; the rest stay in the pool." };
-        var run = new Command("run", $"Implement the pool one item at a time. Stops on infrastructure errors. Writes {PoolRunner.ReportFileName} to the project's workspace folder. Exit code 0 when nothing was rejected or stopped.") { limit };
+        var extra = PoolUnattendedCommands.RunOptions.Create();
+        var run = new Command("run", $"Implement the pool, up to pool.concurrency agents at a time. Stops on infrastructure errors. Task PRs go into the integration branch (pool.integration), never into the base branch. Writes {PoolRunner.ReportFileName} to the project's workspace folder. Exit code 0 when nothing was rejected or stopped.") { limit, extra.Unattended, extra.Until, extra.OnlyOn, extra.Scheduled };
         run.SetAction(async (parse, ct) =>
         {
             var max = parse.GetValue(limit);
@@ -196,25 +197,12 @@ public static class BackendCommands
             }
 
             var target = options.Resolve(parse);
-            var (project, workspace) = target.RequireRegistered();
-            var pipeline = await TryCreatePipelineAsync(target, context, ct).ConfigureAwait(false);
-            if (pipeline is null)
-            {
-                return ExitCodes.Failure;
-            }
-
-            var runner = new PoolRunner(new PoolService(workspace, project.Key), new RunStore(workspace, project.Key), LockFor(context, workspace), project.Key, pipeline.ImplementAsync);
-            var result = await runner.RunAsync(max, workspace.ProjectFolder(project.Key), ct).ConfigureAwait(false);
-            await context.Out.WriteLineAsync($"Done {result.Done.Count}, rejected {result.Rejected.Count}, needs a person {result.NeedsHuman.Count}, not reached {result.NotReached.Count}.").ConfigureAwait(false);
-            if (result.StoppedBecause is not null)
-            {
-                await context.Error.WriteLineAsync(result.StoppedBecause).ConfigureAwait(false);
-            }
-
-            await context.Out.WriteLineAsync($"Report: {result.ReportPath}").ConfigureAwait(false);
-            return result.Succeeded ? ExitCodes.Ok : ExitCodes.Failure;
+            target.RequireRegistered();
+            return await PoolUnattendedCommands.RunPoolAsync(target, context, extra, max, parse.GetValue(extra.Unattended), parse.GetValue(extra.Until),
+                parse.GetValue(extra.OnlyOn), parse.GetValue(extra.Scheduled), ct).ConfigureAwait(false);
         });
         command.Subcommands.Add(run);
+        PoolUnattendedCommands.AddTo(command, options, context);
         return command;
     }
 
@@ -321,15 +309,34 @@ public static class BackendCommands
     {
         var command = new Command("schedule", "Run the pool every night. Windows Task Scheduler for the current user, a crontab line elsewhere.");
 
-        var at = new Option<string>("--at") { Description = "Time of day, HH:mm (24 hours, local time).", Required = true };
-        var limit = new Option<int?>("--limit") { Description = "Try at most this many items per night." };
+        var at = new Option<string>("--at") { Description = "When to start: a time of day, HH:mm (24 hours, local time), or a date and time \"yyyy-MM-dd HH:mm\".", Required = true };
+        var limit = new Option<int?>("--limit") { Description = "Try at most this many items per run." };
+        var repeat = new Option<string?>("--repeat") { Description = "none, daily, weekdays, or days such as mon,wed,fri. With a date the default is none; with only a time it is daily." };
+        var until = new Option<string?>("--until") { Description = "Start no new task after this time of day, HH:mm." };
+        var unattended = new Option<bool>("--unattended") { Description = "Run without a person (the pool master answers questions). The default follows pool.unattended." };
         var yes = new Option<bool>("--yes") { Description = "Install the schedule. Without it only the plan is printed." };
-        var set = new Command("set", "Plan or install the night run of the pool.") { at, limit, yes };
+        var set = new Command("set", "Plan or install a scheduled run of the pool.") { at, limit, repeat, until, unattended, yes };
         set.SetAction(async (parse, ct) =>
         {
-            var (project, workspace) = options.Resolve(parse).RequireRegistered();
+            var target = options.Resolve(parse);
+            var (project, workspace) = target.RequireRegistered();
             var service = new ScheduleService(workspace, project.Key, SchedulerFor(context));
-            var plan = service.Plan(parse.GetRequiredValue(at), parse.GetValue(limit), ProgramCommandLine(context, project.Key, workspace));
+            var when = parse.GetRequiredValue(at);
+            var program = ProgramCommandLine(context, project.Key, workspace);
+            var poolUnattended = false;
+            try
+            {
+                poolUnattended = ConfigLoader.Load(target.RepoRoot, target.DataFolder).Pool.Unattended;
+            }
+            catch (ConfigException)
+            {
+                // The plan does not need the settings; the run reads them again.
+            }
+
+            var wantsUnattended = parse.GetValue(unattended) || poolUnattended;
+            var plan = when.Contains(' ', StringComparison.Ordinal) || parse.GetValue(repeat) is not null || parse.GetValue(until) is not null || wantsUnattended
+                ? service.Plan(new ScheduleRequest(when, parse.GetValue(repeat), parse.GetValue(until), parse.GetValue(limit), wantsUnattended), program)
+                : service.Plan(when, parse.GetValue(limit), program);
             await context.Out.WriteLineAsync(plan.ToString()).ConfigureAwait(false);
             if (!parse.GetValue(yes))
             {
@@ -337,11 +344,35 @@ public static class BackendCommands
                 return ExitCodes.Ok;
             }
 
-            await service.SetAsync(plan, ct).ConfigureAwait(false);
+            var note = await service.SetAsync(plan, ct).ConfigureAwait(false);
             await context.Out.WriteLineAsync("Installed.").ConfigureAwait(false);
+            if (note is not null)
+            {
+                await context.Error.WriteLineAsync(note).ConfigureAwait(false);
+            }
+
             return ExitCodes.Ok;
         });
         command.Subcommands.Add(set);
+
+        var catchUp = new Command("catch-up", "Start the scheduled run now when it was missed (the computer was off) and its stop time has not passed.");
+        catchUp.SetAction(async (parse, ct) =>
+        {
+            var (project, workspace) = options.Resolve(parse).RequireRegistered();
+            var service = new ScheduleService(workspace, project.Key, SchedulerFor(context));
+            var missed = await service.MissedAsync(ct).ConfigureAwait(false);
+            if (missed is null)
+            {
+                await context.Out.WriteLineAsync("No scheduled run was missed.").ConfigureAwait(false);
+                return ExitCodes.Ok;
+            }
+
+            await context.Out.WriteLineAsync($"A scheduled run was missed ({missed.When}). Starting it now.").ConfigureAwait(false);
+            var result = await Autopilot.Core.Process.ShellRunner.RunAsync(missed.Command, Environment.CurrentDirectory, null, null, ct).ConfigureAwait(false);
+            await context.Out.WriteLineAsync(result.StandardOutput).ConfigureAwait(false);
+            return result.Succeeded ? ExitCodes.Ok : ExitCodes.Failure;
+        });
+        command.Subcommands.Add(catchUp);
 
         var show = new Command("show", "Show the night schedule.");
         show.SetAction(async (parse, ct) =>
