@@ -1,7 +1,7 @@
 <Project>
   <!--
     Stand-alone settings for the example. This file deliberately does not import the
-    Directory.Build.props of the dev-autopilot repository, so the example builds the
+    Directory.Build.props of the autopilot repository, so the example builds the
     same way when it is copied somewhere else (as the eval runner does).
   -->
   <PropertyGroup>
