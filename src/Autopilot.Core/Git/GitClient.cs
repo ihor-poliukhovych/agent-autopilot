@@ -171,6 +171,46 @@ public sealed class GitClient
         await RunCheckedAsync(RepositoryPath, ["-c", "core.longpaths=true", "worktree", "add", "-b", newBranch, path, baseRevision], ct).ConfigureAwait(false);
     }
 
+    /// <summary>Creates a local branch at a revision without checking it out.</summary>
+    public Task CreateBranchAsync(string branch, string startPoint, CancellationToken ct = default) =>
+        RunCheckedAsync(RepositoryPath, ["branch", branch, startPoint], ct);
+
+    /// <summary>Renames a local branch (used to keep a failed attempt before the next one).</summary>
+    public Task RenameBranchAsync(string from, string to, CancellationToken ct = default) =>
+        RunCheckedAsync(RepositoryPath, ["branch", "-m", from, to], ct);
+
+    /// <summary>Checks out an existing branch into a new worktree. The branch must not be checked out anywhere else.</summary>
+    public async Task AddBranchWorktreeAsync(string path, string branch, CancellationToken ct = default)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        await RunCheckedAsync(RepositoryPath, ["-c", "core.longpaths=true", "worktree", "add", path, branch], ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Merges <paramref name="branch"/> into the branch checked out in <paramref name="worktreePath"/> with a merge commit.
+    /// Returns the new head, or null (after aborting) when the merge conflicts.
+    /// </summary>
+    public async Task<string?> MergeNoFastForwardAsync(string worktreePath, string branch, string message, CancellationToken ct = default)
+    {
+        var result = await RunGitAsync(worktreePath,
+            ["-c", "user.name=" + Identity.Name, "-c", "user.email=" + Identity.Email, "-c", "commit.gpgsign=false", "merge", "--no-ff", "--no-edit", "-m", message, branch], ct).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            await RunGitAsync(worktreePath, ["merge", "--abort"], ct).ConfigureAwait(false);
+            return null;
+        }
+
+        return (await RunCheckedAsync(worktreePath, ["rev-parse", "HEAD"], ct).ConfigureAwait(false)).Trim();
+    }
+
+    /// <summary>Moves the checked-out branch of a worktree back to a commit, dropping what came after.</summary>
+    public Task ResetHardAsync(string worktreePath, string commit, CancellationToken ct = default) =>
+        RunCheckedAsync(worktreePath, ["reset", "--hard", commit], ct);
+
+    /// <summary>Runs git in any folder and returns the result without throwing on a non-zero exit code.</summary>
+    public static Task<ProcessResult> RunAsync(string workingDirectory, IReadOnlyList<string> arguments, CancellationToken ct = default) =>
+        RunGitAsync(workingDirectory, arguments, ct);
+
     /// <summary>Checks out a commit into a new worktree without creating a branch.</summary>
     public async Task AddDetachedWorktreeAsync(string path, string revision, CancellationToken ct = default)
     {
