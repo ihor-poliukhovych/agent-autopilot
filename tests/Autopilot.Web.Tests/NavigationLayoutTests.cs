@@ -68,4 +68,34 @@ public sealed class NavigationLayoutTests
         Assert.Contains("const LAYOUT = new Set(['pipeline', 'tasks', 'pool', 'needs'])", js);
         Assert.Contains("class: 'app-layout'", js);
     }
+
+    [Fact]
+    public void Left_column_is_filled_and_never_hidden_as_empty()
+    {
+        var js = Wwwroot("js/app.js");
+        var css = Wwwroot("app.css");
+        Assert.Contains("function leftColumn(", js);
+        Assert.Contains("h('nav', { class: 'app-links'", js);
+        Assert.DoesNotContain(":empty", css);
+    }
+
+    [Fact]
+    public void Drawer_can_be_opened_and_closed_on_phone_width()
+    {
+        var js = Wwwroot("js/app.js");
+        var css = Wwwroot("app.css");
+        Assert.Contains("target.classList.add('open')", js);
+        Assert.Contains("target.classList.remove('open')", js);
+        Assert.Matches(@"\.app-right\.open\s*\{\s*transform:\s*none", css);
+        Assert.Matches(@"\.drawer-open,\s*\.drawer-close\s*\{\s*display:\s*none", css);
+    }
+
+    [Fact]
+    public void Legacy_lookup_ignores_inherited_object_keys()
+    {
+        var js = Wwwroot("js/app.js");
+        Assert.Contains("Object.hasOwn(LEGACY, r.tab)", js);
+        Assert.DoesNotContain("LEGACY[r.tab] ?", js);
+        Assert.DoesNotContain("LEGACY[page] ?", js);
+    }
 }

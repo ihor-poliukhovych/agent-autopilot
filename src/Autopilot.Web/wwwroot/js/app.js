@@ -88,17 +88,23 @@ async function route() {
         stage.append(h('div', { class: 'banner bad' }, `There is no project "${r.key}".`));
       } else {
         const legacy = r.tab === 'run' ? 'runs' : r.tab;
-        const page = TABS.some(t => t[0] === r.tab) ? r.tab : (LEGACY[r.tab] ? legacy : 'inbox');
+        const page = TABS.some(t => t[0] === r.tab) ? r.tab : (Object.hasOwn(LEGACY, r.tab) ? legacy : 'inbox');
         lastTab = page;
-        const screen = LEGACY[page] || (TABS.find(t => t[0] === page) || TABS[0])[2];
-        const current = LEGACY[page] ? 'inbox' : page;
+        const isLegacy = Object.hasOwn(LEGACY, page);
+        const screen = isLegacy ? LEGACY[page] : (TABS.find(t => t[0] === page) || TABS[0])[2];
+        const current = isLegacy ? 'inbox' : page;
         renderTabs(tabBar, r, current);
         clear(tabs).append(tabBar);
         document.title = `${project.displayName} · Autopilot`;
         let target = stage;
         if (LAYOUT.has(page)) {
-          target = h('div', { class: 'app-right' });
-          stage.append(h('div', { class: 'app-layout' }, h('div', { class: 'app-left' }), target));
+          target = h('div', { class: 'app-right open' });
+          const body = h('div');
+          const close = h('button', { type: 'button', class: 'drawer-close', onclick: () => target.classList.remove('open') }, 'Back to menu');
+          target.append(close, body);
+          const show = h('button', { type: 'button', class: 'drawer-open', onclick: () => target.classList.add('open') }, 'Show page');
+          stage.append(h('div', { class: 'app-layout' }, leftColumn(r.key, page, show), target));
+          target = body;
         }
         stop = await screen.render({ view: target, project, key: r.key, rest: r.rest, state, go, refreshState }) || null;
       }
@@ -121,6 +127,19 @@ async function route() {
   clear(tabs).append(tabBar);
   view.replaceChildren(stage);
   view.focus({ preventScroll: true });
+}
+
+// The fixed left column: quick links to the project pages, with the current one marked.
+function leftColumn(key, page, showButton) {
+  const base = `#/p/${encodeURIComponent(key)}/`;
+  const links = [['pipeline', 'Pipeline'], ['tasks', 'Tasks'], ['pool', 'Pool'], ['needs', 'Needs a person'], ['runs', 'Runs']];
+  const list = h('nav', { class: 'app-links', 'aria-label': 'Project pages' });
+  for (const [id, label] of links) {
+    const a = h('a', { href: base + id }, label);
+    if (id === page) a.setAttribute('aria-current', 'page');
+    list.append(a);
+  }
+  return h('div', { class: 'app-left' }, list, showButton);
 }
 
 function renderTabs(bar, r, current) {

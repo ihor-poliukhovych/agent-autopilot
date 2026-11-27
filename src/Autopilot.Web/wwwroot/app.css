@@ -268,13 +268,16 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
 :root { --left-col: 420px; }
 .app-layout { display: grid; gap: var(--s4); grid-template-columns: var(--left-col) minmax(0, 1fr); align-items: start; }
 .app-left, .app-right { min-width: 0; }
-.app-left:empty { display: none; }
-.app-layout:has(> .app-left:empty) { grid-template-columns: minmax(0, 1fr); }
+.app-links { display: flex; flex-direction: column; gap: var(--s1, .25rem); }
+.app-links a[aria-current="page"] { font-weight: 600; }
+.drawer-open, .drawer-close { display: none; }
 @media (max-width: 760px) {
-  .app-layout, .app-layout:has(> .app-left:empty) { grid-template-columns: minmax(0, 1fr); }
-  /* With a left column present, the right column becomes a drawer that slides over the page. */
-  .app-layout:has(> .app-left:not(:empty)) > .app-right { position: fixed; inset: 0 0 0 auto; width: min(100vw, 480px); overflow-y: auto; background: var(--bg); padding: var(--s4); z-index: 15; transform: translateX(100%); transition: transform .2s; }
-  .app-layout:has(> .app-left:not(:empty)) > .app-right.open { transform: none; }
+  .app-layout { grid-template-columns: minmax(0, 1fr); }
+  /* On phone width the right column becomes a drawer that slides over the page. */
+  .app-right { position: fixed; inset: 0 0 0 auto; width: min(100vw, 480px); overflow-y: auto; background: var(--bg); padding: var(--s4); z-index: 15; transform: translateX(100%); transition: transform .2s; }
+  .app-right.open { transform: none; }
+  .drawer-open, .drawer-close { display: inline-block; margin-top: var(--s3, .75rem); }
+  .drawer-close { margin: 0 0 var(--s3, .75rem); }
 }
 @media (max-width: 640px) {
   main { padding: var(--s4) .75rem 4rem; }
