@@ -125,11 +125,16 @@ public sealed class CliTests
     }
 
     [Theory]
-    [InlineData(@"C:\tools\autopilot.exe", @"C:\tools\autopilot.dll", "\"C:\\tools\\autopilot.exe\" hook pre-tool-use")]
-    [InlineData(@"C:\Program Files\dotnet\dotnet.exe", @"C:\x y\autopilot.dll", "\"C:\\Program Files\\dotnet\\dotnet.exe\" \"C:\\x y\\autopilot.dll\" hook pre-tool-use")]
-    [InlineData("/usr/share/dotnet/dotnet", "/opt/a/autopilot.dll", "\"/usr/share/dotnet/dotnet\" \"/opt/a/autopilot.dll\" hook pre-tool-use")]
-    public void Hook_command_line_adds_the_assembly_only_for_the_dotnet_host(string processPath, string assembly, string expected)
+    [InlineData(@"C:\tools\autopilot.exe", @"C:\tools\autopilot.dll", "\"C:\\tools\\autopilot.exe\" hook pre-tool-use", true)]
+    [InlineData(@"C:\Program Files\dotnet\dotnet.exe", @"C:\x y\autopilot.dll", "\"C:\\Program Files\\dotnet\\dotnet.exe\" \"C:\\x y\\autopilot.dll\" hook pre-tool-use", true)]
+    [InlineData("/usr/share/dotnet/dotnet", "/opt/a/autopilot.dll", "\"/usr/share/dotnet/dotnet\" \"/opt/a/autopilot.dll\" hook pre-tool-use", false)]
+    public void Hook_command_line_adds_the_assembly_only_for_the_dotnet_host(string processPath, string assembly, string expected, bool windowsPaths)
     {
+        if (windowsPaths && !OperatingSystem.IsWindows())
+        {
+            return; // A Windows path is only split into folder and file name on Windows.
+        }
+
         Assert.Equal(expected, HookCommandLine.Build(processPath, assembly, _ => false));
     }
 

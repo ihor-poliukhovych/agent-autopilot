@@ -39,7 +39,7 @@ public static class DiagnosticsPath
         }
 
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectRoot));
-        var full = Path.GetFullPath(raw, root);
+        var full = Path.GetFullPath(normalized, root);
         var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
