@@ -12,7 +12,7 @@ public sealed record MoveBody(int Position);
 
 public sealed record LimitBody(int? Limit);
 
-public sealed record ScheduleBody(string? At, int? Limit, bool Confirmed);
+public sealed record ScheduleBody(string? At, int? Limit, bool Confirmed, string? Repeat = null, string? Until = null, bool? Unattended = null);
 
 public sealed record DecisionBody(string? Decision);
 
@@ -99,12 +99,19 @@ internal static class Endpoints
         pool.MapPost("/run", (string key, LimitBody b, ProjectScopes p, PoolOperations o) => new { pid = o.RunNow(p.Get(key), b.Limit) });
         pool.MapGet("/schedule", (string key, ProjectScopes p, PoolOperations o, CancellationToken ct) => o.ShowAsync(p.Get(key), ct));
         pool.MapPost("/schedule/plan", (string key, ScheduleBody b, ProjectScopes p, PoolOperations o, CancellationToken ct) =>
-            o.PlanAsync(p.Get(key), b.At ?? string.Empty, b.Limit, ct));
+            o.PlanAsync(p.Get(key), b, ct));
         pool.MapPost("/schedule", async (string key, ScheduleBody b, ProjectScopes p, PoolOperations o, CancellationToken ct) =>
         {
-            await o.SetAsync(p.Get(key), b.At ?? string.Empty, b.Limit, b.Confirmed, ct).ConfigureAwait(false);
-            return await o.ShowAsync(p.Get(key), ct).ConfigureAwait(false);
+            var note = await o.SetAsync(p.Get(key), b, ct).ConfigureAwait(false);
+            return await o.ShowAsync(p.Get(key), ct, note).ConfigureAwait(false);
         });
+        pool.MapGet("/status", (string key, ProjectScopes p, PoolOperations o, CancellationToken ct) => o.StatusAsync(p.Get(key), ct));
+        pool.MapPut("/settings", (string key, PoolSettingsBody b, ProjectScopes p, PoolOperations o) => o.SaveSettings(p.Get(key), b));
+        pool.MapPost("/decisions/{id:long}/revert", (string key, long id, ProjectScopes p, PoolOperations o) => new { reverted = o.RevertDecision(p.Get(key), id) });
+        pool.MapPost("/parked/{id}/unpark", (string key, string id, ProjectScopes p, PoolOperations o) => new { unparked = o.Unpark(p.Get(key), id) });
+        pool.MapPost("/resume", (string key, ProjectScopes p, PoolOperations o) => new { resumed = o.Resume(p.Get(key)) });
+        pool.MapPost("/integration/pr", async (string key, ProjectScopes p, PoolOperations o, CancellationToken ct) =>
+            new { url = await o.OpenFinalPrAsync(p.Get(key), ct).ConfigureAwait(false) });
         pool.MapDelete("/schedule", async (string key, ProjectScopes p, PoolOperations o, CancellationToken ct) =>
             new { removed = await o.RemoveScheduleAsync(p.Get(key), ct).ConfigureAwait(false) });
 

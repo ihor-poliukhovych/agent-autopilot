@@ -57,6 +57,9 @@ public sealed class PoolRunOptions
 
     /// <summary>No task is started after this local time of day (a night run that stops at six).</summary>
     public TimeOnly? Until { get; init; }
+
+    /// <summary>How often a pool with waiting tasks looks at the settings again while agents work.</summary>
+    public TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(2);
 }
 
 /// <summary>
@@ -272,7 +275,19 @@ public sealed class PoolRunner(
                 break;
             }
 
-            var completed = await Task.WhenAny(running.Keys).ConfigureAwait(false);
+            // While tasks wait for a slot, look again now and then: a person may have raised the concurrency.
+            var waiting = new List<Task>(running.Keys);
+            if (pending.Count > 0 && stopped is null)
+            {
+                waiting.Add(Task.Delay(_options.PollInterval, ct));
+            }
+
+            var woken = await Task.WhenAny(waiting).ConfigureAwait(false);
+            if (woken is not Task<Processed> completed)
+            {
+                continue;
+            }
+
             var (doneId, doneStarted) = running[completed];
             running.Remove(completed);
             state?.ClearSlot(doneId);

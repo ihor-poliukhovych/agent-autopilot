@@ -224,9 +224,53 @@ public sealed class TaskOperations(WebUiOptions options)
 
 public sealed record PoolItemView(string Id, string Title, int Position, string? Triage, string? Risk, bool Stale);
 
-public sealed record SchedulePlanView(string ProjectKey, string JobName, string AtTime, int? Limit, string Command, string Scheduler, string Summary, IReadOnlyList<PoolItemView> Items);
+public sealed record SchedulePlanView(string ProjectKey, string JobName, string AtTime, int? Limit, string Command, string Scheduler, string Summary, IReadOnlyList<PoolItemView> Items)
+{
+    public string? Date { get; init; }
 
-public sealed record ScheduleView(bool Set, bool InstalledInOs, SchedulePlanView? Plan);
+    public string Repeat { get; init; } = "daily";
+
+    public string? Until { get; init; }
+
+    public bool Unattended { get; init; }
+
+    public string When { get; init; } = string.Empty;
+
+    /// <summary>The time zone the times are in, shown so nobody guesses.</summary>
+    public string TimeZone { get; init; } = string.Empty;
+
+    public int Concurrency { get; init; } = 1;
+
+    public double? StopAtUsagePercent { get; init; }
+}
+
+public sealed record ScheduleView(bool Set, bool InstalledInOs, SchedulePlanView? Plan)
+{
+    public DateTimeOffset? Next { get; init; }
+
+    public DateTimeOffset? LastStartedAt { get; init; }
+
+    public string? Note { get; init; }
+}
+
+/// <summary>The pool settings the Pool page edits. Null means "leave as it is".</summary>
+public sealed record PoolSettingsBody(bool? Unattended, int? Concurrency, bool? MasterEnabled, bool? IntegrationEnabled, int? MaxAgentRuns, int? StopAtUsagePercent);
+
+public sealed record PoolSettingsView(
+    bool Unattended, int Concurrency, int MaxConcurrency, bool MasterEnabled, bool IntegrationEnabled,
+    int? MaxAgentRuns, int StopAtUsagePercent, IReadOnlyList<string> AlwaysAsk, int Retries);
+
+public sealed record PoolSlotView(string Id, string Title, string State, string? Detail, DateTimeOffset Since);
+
+public sealed record PoolStatusView(
+    PoolSettingsView Settings,
+    IReadOnlyList<PoolSlotView> Slots,
+    PoolPause? Pause,
+    IReadOnlyList<ParkedTask> Parked,
+    IReadOnlyList<PoolDecision> Decisions,
+    int RevertedDecisions,
+    IntegrationInfo Integration,
+    bool Busy);
 
 /// <summary>The pool and its runs: order, remove, run now, run at night.</summary>
 public sealed class PoolOperations(WebUiOptions options)
@@ -275,24 +319,29 @@ public sealed class PoolOperations(WebUiOptions options)
         return options.Launcher.Launch(options.Program.File, args, scope.Project.RepositoryFolder);
     }
 
-    public async Task<SchedulePlanView> PlanAsync(ProjectScope scope, string at, int? limit, CancellationToken ct)
+    public async Task<SchedulePlanView> PlanAsync(ProjectScope scope, ScheduleBody body, CancellationToken ct)
     {
-        var plan = PlanOf(scope, at, limit);
-        return new SchedulePlanView(plan.ProjectKey, plan.JobName, plan.AtTime, plan.Limit, plan.Command, plan.SchedulerDescription, plan.ToString(), await ListAsync(scope, ct).ConfigureAwait(false));
+        var plan = PlanOf(scope, body);
+        var pool = ReadPool(scope);
+        var summary = plan.ToString() + Environment.NewLine
+            + $"  At the start the pool takes up to {plan.Limit?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "all"} task(s), {pool.Concurrency} agent(s) at a time"
+            + (plan.Unattended ? ", without a person" : string.Empty)
+            + $", and stops at {pool.Budget.StopAtUsagePercent}% of the usage limit when that is known.";
+        return View(plan, summary, await ListAsync(scope, ct).ConfigureAwait(false), pool);
     }
 
-    /// <summary>Installs the night run. The caller must say it confirmed the plan it was shown.</summary>
-    public async Task SetAsync(ProjectScope scope, string at, int? limit, bool confirmed, CancellationToken ct)
+    /// <summary>Installs the run. The caller must say it confirmed the plan it was shown. Returns a note when the catch-up job could not be installed.</summary>
+    public async Task<string?> SetAsync(ProjectScope scope, ScheduleBody body, CancellationToken ct)
     {
-        if (!confirmed)
+        if (!body.Confirmed)
         {
             throw new ArgumentException("Confirm the plan first.");
         }
 
-        await scope.Schedule.Create().SetAsync(PlanOf(scope, at, limit), ct).ConfigureAwait(false);
+        return await scope.Schedule.Create().SetAsync(PlanOf(scope, body), ct).ConfigureAwait(false);
     }
 
-    public async Task<ScheduleView> ShowAsync(ProjectScope scope, CancellationToken ct)
+    public async Task<ScheduleView> ShowAsync(ProjectScope scope, CancellationToken ct, string? note = null)
     {
         var state = await scope.Schedule.Create().ShowAsync(ct).ConfigureAwait(false);
         if (state is null)
@@ -301,13 +350,127 @@ public sealed class PoolOperations(WebUiOptions options)
         }
 
         var p = state.Plan;
-        return new ScheduleView(true, state.InstalledInOs, new SchedulePlanView(p.ProjectKey, p.JobName, p.AtTime, p.Limit, p.Command, p.SchedulerDescription, p.ToString(), []));
+        return new ScheduleView(true, state.InstalledInOs, View(p, p.ToString(), [], ReadPool(scope))) { Next = state.Next, LastStartedAt = state.LastStartedAt, Note = note };
     }
 
     public Task<bool> RemoveScheduleAsync(ProjectScope scope, CancellationToken ct) => scope.Schedule.Create().RemoveAsync(ct);
 
-    private static SchedulePlan PlanOf(ProjectScope scope, string at, int? limit) =>
-        scope.Schedule.Create().Plan(at, limit, scope.ProgramCommandLine());
+    private static SchedulePlanView View(SchedulePlan p, string summary, IReadOnlyList<PoolItemView> items, Autopilot.Core.Config.PoolConfig pool) =>
+        new(p.ProjectKey, p.JobName, p.AtTime, p.Limit, p.Command, p.SchedulerDescription, summary, items)
+        {
+            Date = p.Date,
+            Repeat = p.Repeat,
+            Until = p.Until,
+            Unattended = p.Unattended,
+            When = p.When,
+            TimeZone = TimeZoneInfo.Local.Id + " (UTC" + (TimeZoneInfo.Local.GetUtcOffset(DateTimeOffset.UtcNow) is var o && o >= TimeSpan.Zero ? "+" : "-") + o.ToString(@"hh\:mm") + ")",
+            Concurrency = pool.Concurrency,
+            StopAtUsagePercent = pool.Budget.StopAtUsagePercent,
+        };
+
+    private static SchedulePlan PlanOf(ProjectScope scope, ScheduleBody body)
+    {
+        var service = scope.Schedule.Create();
+        var unattended = body.Unattended ?? ReadPool(scope).Unattended;
+        var at = body.At ?? string.Empty;
+        return at.Contains(' ', StringComparison.Ordinal) || body.Repeat is not null || body.Until is not null || unattended
+            ? service.Plan(new ScheduleRequest(at, body.Repeat, body.Until, body.Limit, unattended), scope.ProgramCommandLine())
+            : service.Plan(at, body.Limit, scope.ProgramCommandLine());
+    }
+
+    // ---------- unattended pool: settings, decisions, parked tasks, integration ----------
+
+    private static Autopilot.Core.Config.PoolConfig ReadPool(ProjectScope scope) => scope.Settings.Read().Config.Pool;
+
+    public async Task<PoolStatusView> StatusAsync(ProjectScope scope, CancellationToken ct)
+    {
+        var view = scope.Settings.Read();
+        var pool = view.Config.Pool;
+        var state = new PoolStateStore(scope.Workspace, scope.Project.Key);
+        var titles = (await scope.CreateList().ListAsync(ct).ConfigureAwait(false)).ToDictionary(e => e.Id, e => e.Title, StringComparer.Ordinal);
+        var integration = Integration(scope, view.Config).Info();
+        return new PoolStatusView(
+            new PoolSettingsView(pool.Unattended, pool.Concurrency, Autopilot.Core.Config.PoolConfig.MaxConcurrency, pool.Master.Enabled, pool.Integration.Enabled,
+                pool.Budget.MaxAgentRuns, pool.Budget.StopAtUsagePercent, pool.AlwaysAsk, pool.OnFailure.Retries),
+            [.. state.Slots().Select(s => new PoolSlotView(s.WorkItemId, titles.GetValueOrDefault(s.WorkItemId, s.WorkItemId), s.State, s.Detail, s.Since))],
+            state.CurrentPause(),
+            state.Parked(),
+            state.Decisions(50),
+            state.RevertedCount(),
+            integration,
+            scope.Lock.Holder(scope.Project.Key) is not null);
+    }
+
+    public PoolSettingsView SaveSettings(ProjectScope scope, PoolSettingsBody body)
+    {
+        var pool = new System.Text.Json.Nodes.JsonObject();
+        if (body.Unattended is { } u) { pool["unattended"] = u; }
+        if (body.Concurrency is { } c) { pool["concurrency"] = c; }
+        if (body.MasterEnabled is { } m) { pool["master"] = new System.Text.Json.Nodes.JsonObject { ["enabled"] = m }; }
+        if (body.IntegrationEnabled is { } i) { pool["integration"] = new System.Text.Json.Nodes.JsonObject { ["enabled"] = i }; }
+        var budget = new System.Text.Json.Nodes.JsonObject();
+        if (body.MaxAgentRuns is { } r) { budget["maxAgentRuns"] = r; }
+        if (body.StopAtUsagePercent is { } s) { budget["stopAtUsagePercent"] = s; }
+        if (budget.Count > 0) { pool["budget"] = budget; }
+        var saved = pool.Count == 0 ? scope.Settings.Read() : scope.Settings.Save(new System.Text.Json.Nodes.JsonObject { ["pool"] = pool });
+        var p = saved.Config.Pool;
+        return new PoolSettingsView(p.Unattended, p.Concurrency, Autopilot.Core.Config.PoolConfig.MaxConcurrency, p.Master.Enabled, p.Integration.Enabled,
+            p.Budget.MaxAgentRuns, p.Budget.StopAtUsagePercent, p.AlwaysAsk, p.OnFailure.Retries);
+    }
+
+    /// <summary>Undoes a decision of the pool master: its answer leaves the task, the task goes back in the pool.</summary>
+    public bool RevertDecision(ProjectScope scope, long id)
+    {
+        var state = new PoolStateStore(scope.Workspace, scope.Project.Key);
+        var decision = state.Decision(id);
+        if (decision is null || decision.RevertedAt is not null)
+        {
+            return false;
+        }
+
+        if (decision.Kind == DecisionKinds.Answer && scope.LocalTasks is { } tasks && LocalTaskService.TryParseNumber(decision.WorkItemId, out var number) && tasks.Get(number) is { } task)
+        {
+            tasks.Update(number, null, MasterGuard.RetractAnswers(task.Body), LocalTaskService.DefaultAuthor());
+        }
+
+        state.Revert(id, DateTimeOffset.UtcNow);
+        state.Unpark(decision.WorkItemId);
+        scope.Pool.Add(decision.WorkItemId);
+        return true;
+    }
+
+    public bool Unpark(ProjectScope scope, string id)
+    {
+        var removed = new PoolStateStore(scope.Workspace, scope.Project.Key).Unpark(id);
+        if (removed)
+        {
+            scope.Pool.Add(id);
+        }
+
+        return removed;
+    }
+
+    public bool Resume(ProjectScope scope) => new PoolStateStore(scope.Workspace, scope.Project.Key).Resume();
+
+    /// <summary>Pushes the integration branch and opens the final PR as a draft. A person marks it ready and merges it.</summary>
+    public async Task<string> OpenFinalPrAsync(ProjectScope scope, CancellationToken ct)
+    {
+        try
+        {
+            return await Integration(scope, scope.Settings.Read().Config).OpenFinalPrAsync(null, ct).ConfigureAwait(false);
+        }
+        catch (Autopilot.Core.Git.GitException ex)
+        {
+            throw new ConflictException(ex.Message);
+        }
+    }
+
+    private static IntegrationService Integration(ProjectScope scope, Autopilot.Core.Config.AutopilotConfig config)
+    {
+        var repo = scope.Project.RepositoryFolder;
+        return new IntegrationService(scope.Workspace, scope.Project.Key, new Autopilot.Core.Git.GitClient(repo, config.Identity is { } id ? new Autopilot.Core.Git.GitIdentity(id.Name, id.Email) : null),
+            config, Autopilot.Core.Git.GitClient.DefaultWorktreeRoot(repo));
+    }
 }
 
 public sealed record RunOverview(
