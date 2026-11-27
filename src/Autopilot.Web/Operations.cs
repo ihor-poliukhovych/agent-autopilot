@@ -522,7 +522,7 @@ public sealed record RunStatsView(int TotalRuns, int GatePassed, int GateRejecte
 
 public sealed record JobView(JobRecord Job, string? LogTail);
 
-public sealed record RunDetail(RunRecord Run, JsonElement? Gate, string? Report, string? Diff, bool DiffTruncated, string? GateLog);
+public sealed record RunDetail(RunRecord Run, JsonElement? Gate, string? Report, string? Diff, bool DiffTruncated, string? GateLog, string? Base = null);
 
 /// <summary>Run history, one run's gate report and diff, jobs and the Stop button.</summary>
 public sealed class RunOperations(WebUiOptions options)
@@ -586,7 +586,8 @@ public sealed class RunOperations(WebUiOptions options)
         var diff = await ReadAsync(Path.Combine(folder, "change.patch"), ct).ConfigureAwait(false);
         var truncated = diff is not null && diff.Length > MaxDiffChars;
         var gateLog = await ReadAsync(Path.Combine(folder, "gate-log.txt"), ct).ConfigureAwait(false);
-        return new RunDetail(run, gate, report, truncated ? diff![..MaxDiffChars] : diff, truncated, gateLog is { Length: > 20_000 } ? gateLog[^20_000..] : gateLog);
+        var baseText = (await ReadAsync(Path.Combine(folder, Autopilot.Core.Pipeline.AutopilotPipeline.BaseFileName), ct).ConfigureAwait(false))?.Trim();
+        return new RunDetail(run, gate, report, truncated ? diff![..MaxDiffChars] : diff, truncated, gateLog is { Length: > 20_000 } ? gateLog[^20_000..] : gateLog, baseText is { Length: > 0 } ? baseText : null);
     }
 
     public bool Decide(ProjectScope scope, long id, string decision) =>
