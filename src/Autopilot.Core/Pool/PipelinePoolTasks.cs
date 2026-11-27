@@ -32,8 +32,29 @@ public sealed class PipelinePoolTasks(
             return null;
         }
 
-        var paths = PoolTaskHints.PathsFrom(item.Body);
-        return new PoolTaskInfo(item.Title, item.Body, paths.Count > 0 ? paths : config.WritablePaths, PoolTaskHints.DependenciesFrom(item.Labels));
+        // Paths, most reliable first: a Paths: line a person wrote, then what triage expects, then (unknown) the whole project.
+        var record = await triage.LoadRecordAsync(workItemId, ct).ConfigureAwait(false);
+        var current = record is not null && record.TextHash == TriageStore.TextHash(item) ? record.Result : null;
+        var declared = PoolTaskHints.PathsFrom(item.Body);
+        var (paths, source) = declared.Count > 0 ? (declared, PathSource.Declared)
+            : current?.WritePaths is { Count: > 0 } expected ? (expected, PathSource.Triage)
+            : (config.WritablePaths, PathSource.Project);
+        return new PoolTaskInfo(item.Title, item.Body, paths, PoolTaskHints.DependenciesFrom(item.Labels), current?.Topic, source);
+    }
+
+    public Task<string?> ReleaseLeftoversAsync(string workItemId, CancellationToken ct) =>
+        new RunLeftovers(git, config.BranchPrefix, BaseBranches).ReleaseAsync(workItemId, ct);
+
+    // The branches a task branch may have been merged into: the base branch and the integration branch.
+    private IReadOnlyList<string> BaseBranches()
+    {
+        var names = new List<string> { config.BaseBranch };
+        if (integration?.CurrentBranch() is { } branch)
+        {
+            names.Add(branch);
+        }
+
+        return names;
     }
 
     public async Task<PoolTriage> TriageStateAsync(string workItemId, CancellationToken ct)

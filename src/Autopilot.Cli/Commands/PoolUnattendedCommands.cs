@@ -126,6 +126,7 @@ internal static class PoolUnattendedCommands
                 Tasks = new PipelinePoolTasks(pipeline, items, triage, target.LocalTasks, git, config, integration),
                 State = state,
                 TaskLock = new TaskRunLock(workspace, context.IsProcessAlive),
+                IsProcessAlive = context.IsProcessAlive,
                 Clock = clock,
                 Until = stopAt,
             });
@@ -248,6 +249,7 @@ internal static class PoolUnattendedCommands
         {
             var (project, workspace) = options.Resolve(parse).RequireRegistered();
             var state = new PoolStateStore(workspace, project.Key);
+            state.ReleaseDead(DateTimeOffset.UtcNow, PoolStateStore.DefaultStaleAfter, context.IsProcessAlive ?? ProjectRunLock.IsAlive, Environment.ProcessId);
             var slots = state.Slots();
             var pause = state.CurrentPause();
             var parked = state.Parked();

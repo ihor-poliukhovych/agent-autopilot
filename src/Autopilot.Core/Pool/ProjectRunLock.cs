@@ -13,10 +13,12 @@ public sealed class RunLockHeldException(string projectKey, int pid, string owne
 /// One run per project at a time. The lock is a row in the workspace database with the process id of the
 /// holder. A row whose process is gone is stale and is taken over, so a crash never blocks the project.
 /// </summary>
-public sealed class ProjectRunLock(Workspace.Workspace workspace, Func<int, bool>? isProcessAlive = null, Func<int>? currentPid = null)
+public sealed class ProjectRunLock(Workspace.Workspace workspace, Func<int, bool>? isProcessAlive = null, Func<int>? currentPid = null, TimeProvider? clock = null, TimeSpan? staleAfter = null)
 {
     private readonly Func<int, bool> _isAlive = isProcessAlive ?? IsAlive;
     private readonly Func<int> _pid = currentPid ?? (() => Environment.ProcessId);
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+    private readonly TimeSpan _staleAfter = staleAfter ?? PoolStateStore.DefaultStaleAfter;
 
     /// <summary>Takes the lock or throws <see cref="RunLockHeldException"/>. Dispose the result to release it.</summary>
     public IDisposable Acquire(string projectKey, string owner)
@@ -27,14 +29,16 @@ public sealed class ProjectRunLock(Workspace.Workspace workspace, Func<int, bool
         {
             var held = Db.Query(connection, r => (Pid: r.GetInt32(0), Owner: r.GetString(1)),
                 "SELECT pid, owner FROM project_locks WHERE project_key = $k", ("$k", projectKey));
-            if (held.Count > 0 && held[0].Pid != _pid() && _isAlive(held[0].Pid))
+            // A holder whose process lives on but whose pool stopped beating is dead too (the process id was reused).
+            if (held.Count > 0 && held[0].Pid != _pid() && _isAlive(held[0].Pid)
+                && !PoolStateStore.IsSilent(connection, projectKey, held[0].Pid, _clock.GetUtcNow(), _staleAfter))
             {
                 throw new RunLockHeldException(projectKey, held[0].Pid, held[0].Owner);
             }
 
             Db.Execute(connection, "DELETE FROM project_locks WHERE project_key = $k", ("$k", projectKey));
             Db.Execute(connection, "INSERT INTO project_locks (project_key, pid, owner, acquired_at) VALUES ($k, $p, $o, $t)",
-                ("$k", projectKey), ("$p", _pid()), ("$o", owner), ("$t", Db.Stamp(DateTimeOffset.UtcNow)));
+                ("$k", projectKey), ("$p", _pid()), ("$o", owner), ("$t", Db.Stamp(_clock.GetUtcNow())));
             Db.Execute(connection, "COMMIT");
         }
         catch
@@ -52,7 +56,7 @@ public sealed class ProjectRunLock(Workspace.Workspace workspace, Func<int, bool
         using var connection = workspace.Open();
         var held = Db.Query(connection, r => (Pid: r.GetInt32(0), Owner: r.GetString(1)),
             "SELECT pid, owner FROM project_locks WHERE project_key = $k", ("$k", projectKey));
-        return held.Count > 0 && _isAlive(held[0].Pid) ? held[0] : null;
+        return held.Count > 0 && _isAlive(held[0].Pid) && !PoolStateStore.IsSilent(connection, projectKey, held[0].Pid, _clock.GetUtcNow(), _staleAfter) ? held[0] : null;
     }
 
     /// <summary>Removes the project's lock when the given process holds it (used when that process is cancelled).</summary>

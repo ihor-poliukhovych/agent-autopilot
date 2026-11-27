@@ -39,12 +39,18 @@ They live in the project's `autopilot.json` under `pool`, in the Pool page of th
 
 When a task comes back as needs-human and the pool is unattended:
 
-1. Code checks the question against `alwaysAsk` first (by topic words). A match parks the task
-   without asking the model.
+1. Code checks the topic that triage stored for the task (a structured field, `topic`). When it is
+   in `alwaysAsk` the task is parked without asking the model, and the reason says so ("Triage says
+   the question is about paid, which is always left to a person"). A word such as "settings" or
+   "rules" in the task text is not a topic.
+   A narrow safety net runs too, for real signals only: a secret value in the text (a private key
+   block, a GitHub or AWS token, `password = <value>`), or a task whose expected write paths include
+   a sensitive file (`.env*`, key and certificate files, `secrets/`, `migrations/`, `.autopilot/`,
+   `CLAUDE.md`, `AGENTS.md`). The park reason names the match and never repeats the secret.
 2. Otherwise the master gets the task, the question with its options, and the project's context
    files, and returns an option or an answer, a topic, and whether the answer is easy to undo.
-3. Code checks the answer. It parks the task when the topic is in `alwaysAsk`, when the answer is
-   not reversible, when the master did not decide, or when the per-run limit is used up.
+3. Code checks the answer. It parks the task when the master's topic is in `alwaysAsk`, when the
+   answer is not reversible, when the master did not decide, or when the per-run limit is used up.
 4. A usable answer is written into the task as `Answer: option N (pool master)` with a
    `Reason:` line, the task is triaged again and, if it is agent-ready now, implemented.
 
@@ -57,6 +63,23 @@ that cannot start). The pool pauses with the reason and a retry time. Other fail
 - **defect in Autopilot**: a `bug` task with a log excerpt is created, the task is parked, the pool goes on.
 
 A pause blocks new runs until its retry time or until `autopilot pool resume`.
+
+A used-up budget is not a failure. When `maxAgentRuns` or the usage limit is reached, the pool stops,
+the task that was about to run stays queued (no failure decision, no retry used, nothing parked), and
+the Pool page shows "Budget used up, resets at ..." (the time the oldest counted run leaves the 24-hour
+window). That message is only informational: the next run checks the budget again, so a raised limit
+applies at once.
+
+## A run that died
+
+A running pool records a heartbeat every 30 seconds. If the process is killed, crashes or the machine
+restarts, its slots and locks would stay forever. Instead, a run with no heartbeat for 3 minutes (or
+whose process is gone) is dead. The next pool run, `autopilot pool status` and the Pool page release
+what it owned: its project lock and task locks (even when the process id was reused), and its
+running slots, which show as "interrupted" ("The run was interrupted ... The task is still in the pool
+and starts again with the next run"). Before a task starts, the pool also cleans up what the dead run left
+for it: the worktree is removed, an empty task branch is deleted, and a branch with commits is renamed
+to `<branch>-attempt-N` so nothing is lost and the name is free again. The pool report lists both.
 
 Every decision is stored (task, question, answer, reason, topic, time). `autopilot pool decisions`
 lists them; `pool decisions revert <id>` (or the button in the UI) takes the answer out of the task,
@@ -78,14 +101,19 @@ are working finish first. Rules:
 - each agent has its own worktree and branch, and each task its own lock (a row in the workspace
   database; a lock whose process is gone is taken over);
 - two tasks that may write the same files do not run together. A task's write paths are the globs in
-  a `Paths:` line of its text (`Paths: src/Billing/**, tests/Billing.Tests/**`), or the project's
-  `writablePaths` when it has none, which overlaps everything. Two globs overlap when the literal
-  folder prefix of one contains the other's;
+  a `Paths:` line of its text (`Paths: src/Billing/**, tests/Billing.Tests/**`), else the expected
+  write paths triage stored for it (`writePaths`, a structured field), else the project's
+  `writablePaths`, which overlaps almost everything and so serializes the task. A task that is not
+  triaged yet falls back to the project's paths until its triage finishes, then the pool looks again.
+  Two globs overlap when the literal folder prefix of one contains the other's (a pattern without a
+  wildcard names one file and overlaps only a pattern that matches it). Triage can guess wrong: the
+  implementer may still write inside the project's writable paths, and two such tasks then meet at the
+  integration branch, where a merge conflict or a red build parks the later one;
 - a label `depends-on:<id>` holds a task back until that task is done; if that task is rejected or
   parked the dependent task is parked too;
 - all agents share one budget, and an infrastructure failure stops the whole pool;
 - the Pool page shows who works on what, and why a task waits ("all 2 slots are busy",
-  "shares files with task 4", "waits for task 3 (depends-on)").
+  "shares files with task 4 (both change src/Pool/**)", "waits for task 3 (depends-on)").
 
 ## The integration branch (on by default)
 

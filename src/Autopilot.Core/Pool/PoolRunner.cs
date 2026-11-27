@@ -30,6 +30,12 @@ public sealed record PoolRunResult(
 
     public bool Unattended { get; init; }
 
+    /// <summary>Tasks whose run in an earlier pool died; their slots were released and they are tried again.</summary>
+    public IReadOnlyList<string> Recovered { get; init; } = [];
+
+    /// <summary>What was cleaned up for tasks that an earlier, dead run left behind (branches, worktrees).</summary>
+    public IReadOnlyList<string> CleanedUp { get; init; } = [];
+
     public bool Succeeded => StoppedBecause is null && Rejected.Count == 0;
 }
 
@@ -60,6 +66,18 @@ public sealed class PoolRunOptions
 
     /// <summary>How often a pool with waiting tasks looks at the settings again while agents work.</summary>
     public TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>How often a running pool records that it is alive.</summary>
+    public TimeSpan HeartbeatInterval { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>A run that has not beaten for this long is dead: its slots and locks are released.</summary>
+    public TimeSpan StaleAfter { get; init; } = PoolStateStore.DefaultStaleAfter;
+
+    /// <summary>Tells whether a process still runs. Null uses the operating system.</summary>
+    public Func<int, bool>? IsProcessAlive { get; init; }
+
+    /// <summary>The id of this process (a test gives its own). Null uses the real one.</summary>
+    public Func<int>? CurrentPid { get; init; }
 }
 
 /// <summary>
@@ -80,6 +98,9 @@ public sealed class PoolRunner(
     PoolRunOptions? options = null)
 {
     public const string ReportFileName = "POOL-REPORT.md";
+
+    /// <summary>A pool pause that only says the budget is used up. It starts the pause reason the Pool page shows.</summary>
+    public const string BudgetPausePrefix = "Budget used up";
 
     private readonly PoolRunOptions _options = options ?? new PoolRunOptions();
 
@@ -117,12 +138,24 @@ public sealed class PoolRunner(
         var decisionsMade = 0;
         string? stopped = null;
         var budgetLock = new object();
-        state?.ClearSlots();
+        var cleanedUp = new List<string>();
+        var pid = (_options.CurrentPid ?? (() => Environment.ProcessId))();
 
-        // A pause from an earlier run (infrastructure, budget) holds until its retry time.
+        // An earlier run that died (killed, crashed, rebooted) left slots and locks behind. We hold the project
+        // now, so whatever it owned is released and its tasks, still in the pool, are tried again.
+        var recovered = state?.ReleaseDead(clock.GetUtcNow(), _options.StaleAfter, _options.IsProcessAlive ?? ProjectRunLock.IsAlive, pid) ?? [];
+        state?.ClearSlots();
+        using var beat = new Heartbeat(state, pid, clock);
+
+        // A pause from an earlier run (infrastructure) holds until its retry time. A budget pause is only a
+        // message: the budget itself is checked again below, so a raised limit takes effect at once.
         if (state?.CurrentPause() is { } pause)
         {
-            if (pause.RetryAt is { } retry && retry > clock.GetUtcNow())
+            if (pause.Reason.StartsWith(BudgetPausePrefix, StringComparison.Ordinal))
+            {
+                state.Resume();
+            }
+            else if (pause.RetryAt is { } retry && retry > clock.GetUtcNow())
             {
                 stopped = $"The pool is paused until {retry.ToLocalTime():yyyy-MM-dd HH:mm}: {pause.Reason}";
             }
@@ -157,13 +190,13 @@ public sealed class PoolRunner(
                     var used = state?.AgentRunsInLastDay(now) ?? agentRuns;
                     if (used >= max)
                     {
-                        return $"The budget of {max} agent runs in 24 hours is used up.";
+                        return BudgetStop($"The budget of {max} agent runs in 24 hours is used up.", state?.BudgetResetsAt(now, max));
                     }
                 }
 
                 if (_options.UsagePercent?.Invoke() is { } percent && percent >= config.Budget.StopAtUsagePercent)
                 {
-                    return $"Subscription usage is {percent:0}%, at or above the limit of {config.Budget.StopAtUsagePercent}%.";
+                    return BudgetStop($"Subscription usage is {percent:0}%, at or above the limit of {config.Budget.StopAtUsagePercent}%.", null);
                 }
 
                 agentRuns++;
@@ -177,15 +210,29 @@ public sealed class PoolRunner(
             lock (budgetLock)
             {
                 var config = _options.Config();
-                if (config.Budget.MaxAgentRuns is { } max && (state?.AgentRunsInLastDay(clock.GetUtcNow()) ?? agentRuns) >= max)
+                var now = clock.GetUtcNow();
+                if (config.Budget.MaxAgentRuns is { } max && (state?.AgentRunsInLastDay(now) ?? agentRuns) >= max)
                 {
-                    return $"The budget of {max} agent runs in 24 hours is used up.";
+                    return BudgetStop($"The budget of {max} agent runs in 24 hours is used up.", state?.BudgetResetsAt(now, max));
                 }
 
                 return _options.UsagePercent?.Invoke() is { } percent && percent >= config.Budget.StopAtUsagePercent
-                    ? $"Subscription usage is {percent:0}%, at or above the limit of {config.Budget.StopAtUsagePercent}%."
+                    ? BudgetStop($"Subscription usage is {percent:0}%, at or above the limit of {config.Budget.StopAtUsagePercent}%.", null)
                     : null;
             }
+        }
+
+        // A used-up budget is a pool state, not a task failure: the pool says so (with the time the budget has room
+        // again, when known) and stops; the task that was about to run stays queued.
+        string BudgetStop(string reason, DateTimeOffset? resetsAt)
+        {
+            if (unattended)
+            {
+                var when = resetsAt is { } at ? $", resets at {TimeZoneInfo.ConvertTime(at, clock.LocalTimeZone):yyyy-MM-dd HH:mm}" : string.Empty;
+                state?.Pause($"{BudgetPausePrefix}{when}. {reason}", resetsAt, clock.GetUtcNow());
+            }
+
+            return reason;
         }
 
         var infos = new Dictionary<string, PoolTaskInfo>(StringComparer.Ordinal);
@@ -202,6 +249,15 @@ public sealed class PoolRunner(
             if (stopped is null)
             {
                 var slots = Math.Clamp(_options.Config().Concurrency, 1, PoolConfig.MaxConcurrency);
+
+                // A task whose paths are only the project's writable paths may have been triaged since (by its own
+                // run, which holds a slot while it triages): look again, so tasks with disjoint paths start together.
+                foreach (var known in infos.Where(p => p.Value.PathSource == PathSource.Project).Select(p => p.Key).ToList())
+                {
+                    infos.Remove(known);
+                    await InfoAsync(known).ConfigureAwait(false);
+                }
+
                 for (var i = 0; i < pending.Count && stopped is null;)
                 {
                     var id = pending[i];
@@ -253,7 +309,7 @@ public sealed class PoolRunner(
                     lastWait.Remove(id);
                     var started = clock.GetUtcNow();
                     state?.SetSlot(id, "running", $"slot {running.Count + 1}", started);
-                    running[Work(id, unattended, Reserve, decisions, bugs, () => Interlocked.Increment(ref decisionsMade), ct)] = (id, started);
+                    running[Work(id, unattended, Reserve, decisions, bugs, cleanedUp, () => Interlocked.Increment(ref decisionsMade), ct)] = (id, started);
                 }
             }
 
@@ -276,11 +332,10 @@ public sealed class PoolRunner(
             }
 
             // While tasks wait for a slot, look again now and then: a person may have raised the concurrency.
+            // The pool also beats now and then, so a run that dies is noticed.
+            beat.Touch();
             var waiting = new List<Task>(running.Keys);
-            if (pending.Count > 0 && stopped is null)
-            {
-                waiting.Add(Task.Delay(_options.PollInterval, ct));
-            }
+            waiting.Add(Task.Delay(pending.Count > 0 && stopped is null ? Min(_options.PollInterval, _options.HeartbeatInterval) : _options.HeartbeatInterval, ct));
 
             var woken = await Task.WhenAny(waiting).ConfigureAwait(false);
             if (woken is not Task<Processed> completed)
@@ -345,6 +400,8 @@ public sealed class PoolRunner(
             Bugs = bugs,
             AgentRuns = agentRuns,
             Unattended = unattended,
+            Recovered = recovered,
+            CleanedUp = cleanedUp,
         };
         Directory.CreateDirectory(reportFolder);
         await File.WriteAllTextAsync(result.ReportPath!, Report(result, clock.GetUtcNow()), ct).ConfigureAwait(false);
@@ -377,11 +434,15 @@ public sealed class PoolRunner(
                 }
             }
 
-            foreach (var (_, other) in running.Values.Select(r => (r.Id, r.Id)))
+            foreach (var other in running.Values.Select(r => r.Id))
             {
-                if (infos.TryGetValue(other, out var otherInfo) && PathOverlap.Overlaps(info.Paths, otherInfo.Paths))
+                if (infos.TryGetValue(other, out var otherInfo) && PathOverlap.Find(info.Paths, otherInfo.Paths) is { } overlap)
                 {
-                    return $"shares files with task {other}";
+                    var why = PathOverlap.Describe(overlap);
+                    var unknown = info.PathSource == PathSource.Project ? id : otherInfo.PathSource == PathSource.Project ? other : null;
+                    return unknown is null
+                        ? $"shares files with task {other} ({why})"
+                        : $"shares files with task {other} ({why}); the expected paths of task {unknown} are not known yet, so the project's writable paths stand in";
                 }
             }
 
@@ -405,10 +466,10 @@ public sealed class PoolRunner(
         }
     }
 
-    private Task<Processed> Work(string id, bool unattended, Func<string?, string, string?> reserve, List<PoolDecision> decisions, List<string> bugs, Func<int> nextDecision, CancellationToken ct) =>
-        Task.Run(() => WorkAsync(id, unattended, reserve, decisions, bugs, nextDecision, ct), CancellationToken.None);
+    private Task<Processed> Work(string id, bool unattended, Func<string?, string, string?> reserve, List<PoolDecision> decisions, List<string> bugs, List<string> cleanedUp, Func<int> nextDecision, CancellationToken ct) =>
+        Task.Run(() => WorkAsync(id, unattended, reserve, decisions, bugs, cleanedUp, nextDecision, ct), CancellationToken.None);
 
-    private async Task<Processed> WorkAsync(string id, bool unattended, Func<string?, string, string?> reserve, List<PoolDecision> decisions, List<string> bugs, Func<int> nextDecision, CancellationToken ct)
+    private async Task<Processed> WorkAsync(string id, bool unattended, Func<string?, string, string?> reserve, List<PoolDecision> decisions, List<string> bugs, List<string> cleanedUp, Func<int> nextDecision, CancellationToken ct)
     {
         IDisposable? taskLock = null;
         try
@@ -428,6 +489,13 @@ public sealed class PoolRunner(
             var config = _options.Config();
             var master = unattended && config.Master.Enabled ? _options.Master : null;
             var clock = _options.Clock;
+
+            // We hold the task's lock, so no live run owns it: what a dead run left (its branch, its worktree) goes.
+            if (_options.Tasks is { } cleaning && await cleaning.ReleaseLeftoversAsync(id, ct).ConfigureAwait(false) is { } cleaned)
+            {
+                lock (cleanedUp) { cleanedUp.Add($"{id}: {cleaned}"); }
+            }
+
             var attempts = 0;
             var retriages = 0;
             var firstAttempt = true;
@@ -488,6 +556,14 @@ public sealed class PoolRunner(
                         var verdict = master is null
                             ? new FailureVerdict(FailureKind.Task, string.Empty, "No pool master, so the failure is treated as the task's own.", null)
                             : await ClassifyAsync(id, result, master, reserve, ct).ConfigureAwait(false);
+                        if (verdict.Kind == FailureKind.Budget)
+                        {
+                            // Not the task's fault and not a decision: no failure is recorded, no retry is used up.
+                            // The failed attempt's branch is set aside so the task starts clean when the budget has room.
+                            await tasks.PrepareRetryAsync(id, ct).ConfigureAwait(false);
+                            return new Processed(BucketStopped, null, verdict.Reason, true, "The budget ran out before the failed run could be looked at, so the task stays queued.");
+                        }
+
                         if (master is not null)
                         {
                             lock (decisions) { decisions.Add(Store(id, DecisionKinds.Failure, result.Message, verdict.Kind.ToString(), verdict.Reason, null)); }
@@ -573,6 +649,11 @@ public sealed class PoolRunner(
                 return NotReadyPark(null, $"Triage marked the task needs-human, and it cannot be answered: {ex.Message}");
             }
 
+            if (verdict.Stop is { } stop)
+            {
+                return new Processed(BucketStopped, null, stop, true);
+            }
+
             if (verdict.Park is { } park)
             {
                 return NotReadyPark(verdict.Category, park);
@@ -623,16 +704,25 @@ public sealed class PoolRunner(
         return new Processed(BucketParked, result, null, false, merged.Message);
     }
 
-    private sealed record AnswerVerdict(string? Park, string? Category);
+    /// <summary><c>Park</c>: leave the task for a person. <c>Stop</c>: the budget is used up, the task stays queued and the pool stops.</summary>
+    private sealed record AnswerVerdict(string? Park, string? Category, string? Stop = null);
 
     private async Task<AnswerVerdict> AnswerAsync(
         string id, PoolTaskInfo? info, string question, IPoolMaster master, PoolConfig config,
         Func<string?, string, string?> reserve, List<PoolDecision> decisions, Func<int> nextDecision, IPoolTasks tasks, CancellationToken ct)
     {
-        var text = $"{info?.Title}\n{info?.Body}\n{question}";
-        if (MasterGuard.MatchedCategory(text, config.AlwaysAsk) is { } matched)
+        // What the question is about comes from triage (and, below, from the master) as a structured field.
+        if (info?.Topic is { } topic && config.AlwaysAsk.Contains(topic, StringComparer.OrdinalIgnoreCase))
         {
-            return new AnswerVerdict($"The question is about {matched}, which is always left to a person.", matched);
+            return new AnswerVerdict($"Triage says the question is about {topic}, which is always left to a person.", topic);
+        }
+
+        // Only a real signal stops the task without asking: a secret value in the text, or a sensitive file to change.
+        var text = $"{info?.Title}\n{info?.Body}\n{question}";
+        var writePaths = info is { PathSource: not PathSource.Project } ? info.Paths : [];
+        if (MasterGuard.SafetyNet(text, writePaths, config.AlwaysAsk) is { } hit)
+        {
+            return new AnswerVerdict(hit.Reason, hit.Category);
         }
 
         if (nextDecision() > config.Master.MaxDecisionsPerRun)
@@ -642,7 +732,7 @@ public sealed class PoolRunner(
 
         if (reserve(id, "master") is { } problem)
         {
-            return new AnswerVerdict(problem, null);
+            return new AnswerVerdict(null, null, problem);
         }
 
         var answer = await master.DecideAsync(new MasterQuestion(id, info?.Title ?? id, info?.Body ?? string.Empty, question), ct).ConfigureAwait(false);
@@ -661,7 +751,7 @@ public sealed class PoolRunner(
     {
         if (reserve(id, "master") is { } problem)
         {
-            return new FailureVerdict(FailureKind.Task, string.Empty, problem, null);
+            return new FailureVerdict(FailureKind.Budget, string.Empty, problem, null);
         }
 
         var info = _options.Tasks is { } tasks ? await tasks.DescribeAsync(id, ct).ConfigureAwait(false) : null;
@@ -671,6 +761,28 @@ public sealed class PoolRunner(
     private PoolDecision Store(string id, string kind, string question, string answer, string reason, string? category) =>
         _options.State?.AddDecision(id, kind, question, answer, reason, category, _options.Clock.GetUtcNow())
         ?? new PoolDecision(0, id, kind, question, answer, reason, category, _options.Clock.GetUtcNow(), null);
+
+    private static TimeSpan Min(TimeSpan a, TimeSpan b) => a < b ? a : b;
+
+    /// <summary>Beats while the run lives and removes its beat when it ends, so only a run that died leaves a stale one.</summary>
+    private sealed class Heartbeat : IDisposable
+    {
+        private readonly PoolStateStore? _state;
+        private readonly int _pid;
+        private readonly TimeProvider _clock;
+
+        public Heartbeat(PoolStateStore? state, int pid, TimeProvider clock)
+        {
+            _state = state;
+            _pid = pid;
+            _clock = clock;
+            Touch();
+        }
+
+        public void Touch() => _state?.Beat(_pid, _clock.GetUtcNow());
+
+        public void Dispose() => _state?.EndBeat(_pid);
+    }
 
     private static string Excerpt(string text) => text.Length <= 2000 ? text : text[..2000] + "...";
 
@@ -693,6 +805,8 @@ public sealed class PoolRunner(
         Section(text, "Parked for a person", result.Parked.Select(p => $"{p.WorkItemId}: {p.Reason}" + (p.Category is not null ? $" [{p.Category}]" : string.Empty)));
         Section(text, "Decisions of the pool master", result.Decisions.Select(d => $"{d.WorkItemId} ({d.Kind}): {d.Answer}. Why: {d.Reason}"));
         Section(text, "Bugs found in Autopilot", result.Bugs);
+        Section(text, "Interrupted earlier (the run died, the task was tried again)", result.Recovered.Select(id => $"{id}: no sign of life from the earlier run."));
+        Section(text, "Cleaned up after a run that died", result.CleanedUp);
         Section(text, "Not reached", result.NotReached);
         text.AppendLine();
         text.AppendLine($"Agent runs used: {result.AgentRuns.ToString(CultureInfo.InvariantCulture)}.");

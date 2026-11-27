@@ -179,6 +179,42 @@ public sealed class GitClient
     public Task RenameBranchAsync(string from, string to, CancellationToken ct = default) =>
         RunCheckedAsync(RepositoryPath, ["branch", "-m", from, to], ct);
 
+    /// <summary>Force-deletes a local branch. The branch must not be checked out in a worktree.</summary>
+    public Task DeleteBranchAsync(string branch, CancellationToken ct = default) =>
+        RunCheckedAsync(RepositoryPath, ["branch", "-D", branch], ct);
+
+    /// <summary>True when every commit of <paramref name="revision"/> is already in <paramref name="descendant"/>, so deleting the first loses nothing.</summary>
+    public async Task<bool> IsAncestorAsync(string revision, string descendant, CancellationToken ct = default) =>
+        (await RunGitAsync(RepositoryPath, ["merge-base", "--is-ancestor", revision, descendant], ct).ConfigureAwait(false)).Succeeded;
+
+    /// <summary>The folders of the worktrees that have <paramref name="branch"/> checked out (normally none or one).</summary>
+    public async Task<IReadOnlyList<string>> WorktreesOfBranchAsync(string branch, CancellationToken ct = default)
+    {
+        var result = await RunGitAsync(RepositoryPath, ["worktree", "list", "--porcelain"], ct).ConfigureAwait(false);
+        var found = new List<string>();
+        if (!result.Succeeded)
+        {
+            return found;
+        }
+
+        string? path = null;
+        foreach (var line in result.StandardOutput.ReplaceLineEndings("\n").Split('\n'))
+        {
+            if (line.StartsWith("worktree ", StringComparison.Ordinal))
+            {
+                path = line["worktree ".Length..].Trim();
+            }
+            else if (line.StartsWith("branch ", StringComparison.Ordinal) && path is not null
+                && string.Equals(line["branch ".Length..].Trim(), HeadsPrefix + branch, StringComparison.Ordinal)
+                && !string.Equals(Path.GetFullPath(path).TrimEnd('\\', '/'), Path.GetFullPath(RepositoryPath).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+            {
+                found.Add(path);
+            }
+        }
+
+        return found;
+    }
+
     /// <summary>Checks out an existing branch into a new worktree. The branch must not be checked out anywhere else.</summary>
     public async Task AddBranchWorktreeAsync(string path, string branch, CancellationToken ct = default)
     {

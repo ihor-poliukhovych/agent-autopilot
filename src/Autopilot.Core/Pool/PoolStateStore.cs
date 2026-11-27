@@ -133,6 +133,96 @@ public sealed class PoolStateStore(Workspace.Workspace workspace, string project
             "SELECT work_item_id, state, detail, since FROM pool_status WHERE project_key = $k ORDER BY since", ("$k", projectKey));
     }
 
+    // ---------- heartbeat ----------
+
+    /// <summary>How long a run may stay silent before its slots and locks count as dead.</summary>
+    public static readonly TimeSpan DefaultStaleAfter = TimeSpan.FromMinutes(3);
+
+    /// <summary>Records that the pool run of process <paramref name="pid"/> is alive.</summary>
+    public void Beat(int pid, DateTimeOffset at)
+    {
+        using var connection = workspace.Open();
+        Db.Execute(connection, "INSERT OR REPLACE INTO pool_heartbeats (project_key, pid, beat_at) VALUES ($k, $p, $t)",
+            ("$k", projectKey), ("$p", pid), ("$t", Db.Stamp(at)));
+    }
+
+    /// <summary>The runs of this project that beat, with the time of their last beat.</summary>
+    public IReadOnlyList<(int Pid, DateTimeOffset At)> Beats()
+    {
+        using var connection = workspace.Open();
+        return Db.Query(connection, r => (Pid: r.GetInt32(0), At: Db.ParseStamp(r.GetString(1))),
+            "SELECT pid, beat_at FROM pool_heartbeats WHERE project_key = $k", ("$k", projectKey));
+    }
+
+    /// <summary>Removes the heartbeat of a run that ended on its own.</summary>
+    public void EndBeat(int pid)
+    {
+        using var connection = workspace.Open();
+        Db.Execute(connection, "DELETE FROM pool_heartbeats WHERE project_key = $k AND pid = $p", ("$k", projectKey), ("$p", pid));
+    }
+
+    /// <summary>True when the owner <paramref name="pid"/> beat before but not within <paramref name="staleAfter"/>. False when it never beat (an older build, or not a pool run).</summary>
+    public static bool IsSilent(Microsoft.Data.Sqlite.SqliteConnection connection, string projectKey, int pid, DateTimeOffset now, TimeSpan staleAfter)
+    {
+        var beats = Db.Query(connection, r => r.GetString(0), "SELECT beat_at FROM pool_heartbeats WHERE project_key = $k AND pid = $p", ("$k", projectKey), ("$p", pid));
+        return beats.Count > 0 && now - Db.ParseStamp(beats[0]) > staleAfter;
+    }
+
+    /// <summary>
+    /// Finds out whether the pool run that owned this project's slots is dead: no run beat within
+    /// <paramref name="staleAfter"/> (or its process is gone). If so, running slots become "interrupted" (the
+    /// task stays in the pool), waiting slots go away, and the dead run's task locks and project lock are
+    /// released. Returns the ids of the tasks whose run was interrupted. Does nothing while a live run beats.
+    /// </summary>
+    /// <param name="ownPid">The calling process: it never counts as the dead owner.</param>
+    public IReadOnlyList<string> ReleaseDead(DateTimeOffset now, TimeSpan staleAfter, Func<int, bool> isAlive, int ownPid)
+    {
+        using var connection = workspace.Open();
+        var beats = Db.Query(connection, r => (Pid: r.GetInt32(0), At: Db.ParseStamp(r.GetString(1))),
+            "SELECT pid, beat_at FROM pool_heartbeats WHERE project_key = $k", ("$k", projectKey));
+        bool Dead((int Pid, DateTimeOffset At) b) => b.Pid != ownPid && (now - b.At > staleAfter || !isAlive(b.Pid));
+        if (beats.Any(b => b.Pid == ownPid || !Dead(b)))
+        {
+            return [];
+        }
+
+        var holder = Db.Query(connection, r => r.GetInt32(0), "SELECT pid FROM project_locks WHERE project_key = $k", ("$k", projectKey));
+        if (beats.Count == 0 && holder.Count > 0 && holder[0] != ownPid && isAlive(holder[0]))
+        {
+            return []; // someone holds the project without beating (an older build, a job): leave it alone
+        }
+
+        var deadPids = beats.Select(b => b.Pid).ToHashSet();
+        var lastBeat = beats.Count > 0 ? beats.Max(b => b.At) : (DateTimeOffset?)null;
+        var slots = Db.Query(connection, r => (Id: r.GetString(0), State: r.GetString(1), Since: Db.ParseStamp(r.GetString(2))),
+            "SELECT work_item_id, state, since FROM pool_status WHERE project_key = $k", ("$k", projectKey));
+        var interrupted = new List<string>();
+        foreach (var slot in slots.Where(s => s.State == "running"))
+        {
+            var seen = lastBeat ?? slot.Since;
+            Db.Execute(connection, "UPDATE pool_status SET state = 'interrupted', detail = $d WHERE project_key = $k AND work_item_id = $i",
+                ("$d", $"The run was interrupted: no sign of life since {seen.ToLocalTime():HH:mm}. The task is still in the pool and starts again with the next run."),
+                ("$k", projectKey), ("$i", slot.Id));
+            interrupted.Add(slot.Id);
+        }
+
+        Db.Execute(connection, "DELETE FROM pool_status WHERE project_key = $k AND state = 'waiting'", ("$k", projectKey));
+        Db.Execute(connection, "DELETE FROM pool_heartbeats WHERE project_key = $k AND pid <> $p", ("$k", projectKey), ("$p", ownPid));
+        var locks = Db.Query(connection, r => (Id: r.GetString(0), Pid: r.GetInt32(1)),
+            "SELECT work_item_id, pid FROM task_locks WHERE project_key = $k", ("$k", projectKey));
+        foreach (var held in locks.Where(l => l.Pid != ownPid && (deadPids.Contains(l.Pid) || !isAlive(l.Pid))))
+        {
+            Db.Execute(connection, "DELETE FROM task_locks WHERE project_key = $k AND work_item_id = $i AND pid = $p", ("$k", projectKey), ("$i", held.Id), ("$p", held.Pid));
+        }
+
+        if (holder.Count > 0 && holder[0] != ownPid && (deadPids.Contains(holder[0]) || !isAlive(holder[0])))
+        {
+            Db.Execute(connection, "DELETE FROM project_locks WHERE project_key = $k AND pid = $p", ("$k", projectKey), ("$p", holder[0]));
+        }
+
+        return interrupted;
+    }
+
     // ---------- pause ----------
 
     public void Pause(string reason, DateTimeOffset? retryAt, DateTimeOffset at)
@@ -162,6 +252,18 @@ public sealed class PoolStateStore(Workspace.Workspace workspace, string project
         using var connection = workspace.Open();
         Db.Execute(connection, "INSERT INTO pool_agent_runs (project_key, work_item_id, kind, started_at) VALUES ($k, $i, $kind, $t)",
             ("$k", projectKey), ("$i", workItemId), ("$kind", kind), ("$t", Db.Stamp(at)));
+    }
+
+    /// <summary>
+    /// When the budget of <paramref name="max"/> agent runs in 24 hours has room again: the moment the oldest run
+    /// that still counts leaves the window. Null while there is room now.
+    /// </summary>
+    public DateTimeOffset? BudgetResetsAt(DateTimeOffset now, int max)
+    {
+        using var connection = workspace.Open();
+        var starts = Db.Query(connection, r => Db.ParseStamp(r.GetString(0)), "SELECT started_at FROM pool_agent_runs WHERE project_key = $k", ("$k", projectKey))
+            .Where(s => s > now.AddHours(-24)).Order().ToList();
+        return starts.Count >= max && max > 0 ? starts[starts.Count - max].AddHours(24) : null;
     }
 
     /// <summary>Agent runs started in the 24 hours before <paramref name="now"/>.</summary>

@@ -107,6 +107,34 @@ public sealed class PromptAndParserTests
     }
 
     [Fact]
+    public void Triage_gives_the_topic_and_the_expected_write_paths_as_structured_fields()
+    {
+        var run = FakeAgentRunner.Answer(new
+        {
+            label = "agent-ready",
+            reason = "Clear.",
+            acceptanceCriteria = new[] { "works" },
+            risk = "low",
+            topic = "Settings",
+            writePaths = new[] { "src\\Pool\\**", " `tests/Pool/**` ", "../outside/**", "" },
+        });
+
+        Assert.True(OutputParser.TryParseTriage(run, out var triage, out _));
+        Assert.Equal("settings", triage.Topic);
+        Assert.Equal(["src/Pool/**", "tests/Pool/**"], triage.WritePaths);
+
+        var unknown = FakeAgentRunner.Answer(new { label = "agent-ready", reason = "Clear.", acceptanceCriteria = new[] { "works" }, risk = "low", topic = "gossip" });
+        Assert.True(OutputParser.TryParseTriage(unknown, out var older, out _));
+        Assert.Null(older.Topic);
+        Assert.Empty(older.WritePaths!);
+
+        Assert.Contains("`writePaths`", PromptLibrary.SystemPrompt(AgentRole.Triage), StringComparison.Ordinal);
+        using var schema = JsonDocument.Parse(PromptLibrary.OutputSchema(AgentRole.Triage));
+        Assert.True(schema.RootElement.GetProperty("properties").TryGetProperty("topic", out _));
+        Assert.True(schema.RootElement.GetProperty("properties").TryGetProperty("writePaths", out _));
+    }
+
+    [Fact]
     public void Agent_ready_without_criteria_becomes_needs_human()
     {
         var run = FakeAgentRunner.Answer(new { label = "agent-ready", reason = "Looks easy.", acceptanceCriteria = Array.Empty<string>(), risk = "low" });
