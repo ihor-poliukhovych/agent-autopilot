@@ -71,6 +71,51 @@ function card(key, item, job, stage) {
     step ? h('div', { class: 'foot' }, h('span', {}, step), job ? h('span', { class: 'spinner', 'aria-hidden': 'true' }) : null) : null);
 }
 
+const EMPTY_CARD = { dots: [], outsideAutopilot: false, release: null, actionDue: false, actionLabel: null, labels: [] };
+const cardOf = (tasks, item) => (tasks.cards && tasks.cards[item.id]) || EMPTY_CARD;
+const labelsOf = (item, c) => item.labels || c.labels || [];
+
+/** Filters only, no grouping: an item stays in the list when it matches every chosen value. */
+export function matches(item, c, f) {
+  return (!f.state || item.state === f.state)
+    && (!f.assignee || item.assignedTo === f.assignee)
+    && (!f.release || c.release === f.release)
+    && (!f.label || labelsOf(item, c).includes(f.label));
+}
+
+function filtersBar(tasks, filters, repaint) {
+  const uniq = values => [...new Set(values.filter(Boolean))].sort();
+  const cards = tasks.items.map(i => [i, cardOf(tasks, i)]);
+  const select = (name, label, values) => {
+    const el = h('select', { 'data-filter': name, onchange: ev => { filters[name] = ev.target.value; repaint(); } },
+      h('option', { value: '' }, 'All'), values.map(v => h('option', { value: v }, v)));
+    if (values.includes(filters[name])) el.value = filters[name]; else filters[name] = '';
+    return h('label', { class: 'pf' }, h('span', { class: 'muted small' }, label), el);
+  };
+  return h('div', { class: 'pipeline-filters row', role: 'group', 'aria-label': 'Filters' },
+    select('state', 'State', uniq(tasks.items.map(i => i.state))),
+    select('assignee', 'Assignee', uniq(tasks.items.map(i => i.assignedTo))),
+    select('release', 'Release', uniq(cards.map(([, c]) => c.release))),
+    select('label', 'Label', uniq(cards.flatMap(([i, c]) => labelsOf(i, c)))));
+}
+
+/** One card: id, outside-autopilot badge and age, the wrapped title, then the dot strip and a button only when a person is due. */
+function pipelineCard(key, item, c, isSelected, onSelect) {
+  const r = item.lastRun;
+  const when = (r && r.finishedAt) || (item.triage && item.triage.triagedAt);
+  const target = r && c.actionDue ? link(key, `runs/${r.id}`) : (item.url || link(key, `tasks/${encodeURIComponent(item.id)}`));
+  return h('div', { class: 'card pcard' + (isSelected ? ' selected' : ''), 'data-id': item.id, 'aria-current': isSelected ? 'true' : null, onclick: onSelect },
+    h('div', { class: 'pcard-head' },
+      h('span', { class: 'pcard-id' }, `#${item.id}`),
+      c.outsideAutopilot ? h('span', { class: 'badge-dashed' }, 'outside autopilot') : null,
+      h('span', { class: 'pcard-age muted small' }, when ? ago(when) : '')),
+    h('div', { class: 'pcard-title' }, item.title),
+    h('div', { class: 'pcard-strip' },
+      h('ol', { class: 'dots', 'aria-label': 'Pipeline steps' }, c.dots.map(d =>
+        h('li', { class: `dot ${d.state}`, title: `${d.step}: ${d.state}` }, h('span', { class: 'sr-only' }, `${d.step}: ${d.state}`)))),
+      c.actionDue ? h('a', { class: 'btn sm primary', href: target, onclick: ev => ev.stopPropagation() }, c.actionLabel || 'Open') : null));
+}
+
 function waitingPanel(key, items) {
   if (!items.length) return null;
   return h('section', { class: 'card waiting', 'aria-label': 'Waiting for a person' },
@@ -84,6 +129,8 @@ export async function render({ view, key, rest, go }) {
   const holder = h('div', {}, loading());
   view.append(holder);
   let timer = null;
+  const filters = { state: '', assignee: '', release: '', label: '' };
+  let selected = null;
 
   async function load() {
     const [tasks, runs, needs] = await Promise.all([
@@ -105,23 +152,32 @@ export async function render({ view, key, rest, go }) {
       return;
     }
 
-    const lanes = Object.fromEntries(STAGES.map(([id]) => [id, []]));
     const waiting = [];
     for (const item of tasks.items) {
       const jobId = tasks.activeJobs[item.id];
       const job = jobId ? (runs.jobs.find(j => j.job.id === jobId) || {}).job || { id: jobId, status: 'running' } : null;
       const stage = stageOf(item, job);
-      lanes[stage].push([item, job, stage]);
       const needsInfo = needs.find(n => n.id === item.id);
       if (needsInfo) waiting.push({ id: item.id, title: item.title, why: needsInfo.question });
       else if (stage === 'pr') waiting.push({ id: item.id, title: item.title, why: 'Draft is ready: review it, merge or reject, and record your decision.' });
       else if (stage === 'gate') waiting.push({ id: item.id, title: item.title, why: 'The gate rejected this run: read why, then retry or reject.' });
     }
     const fun = funnel(runs.stats, runs.runs);
-    holder.append(waitingPanel(key, waiting), fun,
-      h('div', { class: 'board', role: 'list' }, STAGES.map(([id, label]) => h('section', { class: `lane s-${id}${lanes[id].length ? '' : ' is-empty'}`, role: 'listitem', 'aria-label': label },
-        h('div', { class: 'lane-head' }, h('span', {}, h('span', { class: 'bar' }), label), h('span', { class: 'n' }, String(lanes[id].length))),
-        lanes[id].length ? lanes[id].map(([item, job, stage]) => card(key, item, job, stage)) : h('div', { class: 'lane-empty' }, 'Empty')))));
+    const list = h('div', { class: 'stack', 'data-part': 'pipeline-list' });
+    const detail = h('div', { class: 'stack', 'data-part': 'pipeline-detail' });
+    const paintList = () => {
+      clear(list);
+      const shown = tasks.items.filter(i => matches(i, cardOf(tasks, i), filters));
+      if (!shown.length) list.append(emptyState('No work item matches these filters.', null, 'Nothing to show'));
+      for (const item of shown) {
+        list.append(pipelineCard(key, item, cardOf(tasks, item), selected === item.id, () => { selected = item.id; paintList(); }));
+      }
+    };
+    const filterBar = filtersBar(tasks, filters, paintList);
+    paintList();
+    detail.append(waitingPanel(key, waiting), fun);
+    holder.append(h('div', { class: 'app-layout', 'data-page': 'pipeline' },
+      h('div', { class: 'app-left' }, filterBar, list), h('div', { class: 'app-right open' }, detail)));
     return runs;
   }
 

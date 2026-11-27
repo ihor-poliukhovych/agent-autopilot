@@ -19,7 +19,8 @@ public sealed record TaskListView(
     int Page,
     int PageSize,
     TaskCounts Counts,
-    IReadOnlyDictionary<string, JobRecord> TriageJobs);
+    IReadOnlyDictionary<string, JobRecord> TriageJobs,
+    IReadOnlyDictionary<string, PipelineCard>? Cards = null);
 
 /// <summary>How many open tasks each state filter would show.</summary>
 public sealed record TaskCounts(int All, int NeedsHuman, int AgentReady, int NotTriaged, int Stale);
@@ -104,7 +105,8 @@ public sealed class TaskOperations(WebUiOptions options)
         var pages = Math.Max(1, (matching.Count + pageSize - 1) / pageSize);
         var page = Math.Clamp(query.Page, 1, pages);
         var items = matching.Skip((page - 1) * pageSize).Take(pageSize).ToList();
-        return new TaskListView(items, scope.LocalTasks is not null, scope.LegacyTaskFiles, active, Status(scope), matching.Count, page, pageSize, counts, triageJobs);
+        return new TaskListView(items, scope.LocalTasks is not null, scope.LegacyTaskFiles, active, Status(scope), matching.Count, page, pageSize, counts, triageJobs,
+            items.ToDictionary(i => i.Id, i => PipelineSteps.CardOf(i, active.ContainsKey(i.Id)), StringComparer.Ordinal));
     }
 
     public static RunStatus Status(ProjectScope scope) =>
