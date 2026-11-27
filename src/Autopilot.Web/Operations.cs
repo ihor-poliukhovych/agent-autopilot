@@ -199,7 +199,9 @@ public sealed class TaskOperations(WebUiOptions options)
         var questions = items
             .Where(i => i.Triage is { Label: "needs-human" })
             .Select(i => new InboxItem(InboxKinds.Question, i.Id, i.Title, i.Triage!.TriagedAt, null, Needs(scope, i)));
-        var parked = new PoolStateStore(scope.Workspace, scope.Project.Key).Parked()
+        var store = new PoolStateStore(scope.Workspace, scope.Project.Key);
+        store.PruneParked(titles.Keys.ToHashSet(StringComparer.Ordinal));
+        var parked = store.Parked()
             .Select(p => new InboxItem(InboxKinds.Parked, p.WorkItemId, titles.GetValueOrDefault(p.WorkItemId, p.WorkItemId), p.ParkedAt, p.Reason, null));
         return [.. questions.Concat(parked).OrderBy(i => i.CreatedAt)];
     }
