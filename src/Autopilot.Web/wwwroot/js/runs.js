@@ -103,6 +103,7 @@ async function show(holder, key, id) {
       h('div', { class: 'row' }, r.gateVerdict ? badge(`gate ${r.gateVerdict}`, verdictKind(r.gateVerdict)) : badge('no gate verdict'),
         r.humanDecision ? badge(decisionText(r.humanDecision), r.humanDecision === 'merged' ? 'ok' : 'bad') : null)),
     r.message ? h('div', { class: 'banner info' }, r.message) : null,
+    detail.base ? h('p', { class: 'muted' }, 'Base: ', h('code', {}, baseText(detail.base))) : null,
     h('div', { class: 'split' },
       h('section', { class: 'card' }, h('h2', {}, 'Steps'), timeline(runSteps(detail))),
       h('div', {}, decisionCard(r, decide), detail.diff ? h('p', {}, h('a', { class: 'btn', href: '#diff', onclick: ev => { ev.preventDefault(); document.getElementById('diff')?.scrollIntoView(); } }, 'Jump to the diff')) : null)),
@@ -110,6 +111,12 @@ async function show(holder, key, id) {
     detail.report ? h('section', { class: 'card' }, h('h2', {}, r.gateVerdict === 'rejected' ? 'Why it was rejected' : 'Draft description'), h('pre', {}, detail.report)) : null,
     detail.diff ? h('section', { class: 'card', id: 'diff' }, h('h2', {}, 'Diff'), diffView(detail.diff), detail.diffTruncated ? h('p', { class: 'muted' }, 'The diff is shortened here; the full patch is in the run folder.') : null) : null,
     detail.gateLog ? h('details', { class: 'card' }, h('summary', {}, 'Build and test log (end)'), h('pre', {}, detail.gateLog)) : null);
+}
+
+/** "main <full commit>" as "main (abcdef123456)". */
+function baseText(text) {
+  const [branch, commit] = text.split(/\s+/);
+  return commit ? `${branch} (${commit.slice(0, 12)})` : text;
 }
 
 function gateCard(detail) {

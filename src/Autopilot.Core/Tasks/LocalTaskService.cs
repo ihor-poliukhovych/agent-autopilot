@@ -16,7 +16,8 @@ public sealed record LocalTask(
     string Author,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    DateTimeOffset? ClosedAt)
+    DateTimeOffset? ClosedAt,
+    int? ParentNumber = null)
 {
     public string Id => Number.ToString(CultureInfo.InvariantCulture);
 
@@ -63,6 +64,7 @@ public sealed class LocalTaskService(Workspace.Workspace workspace, string proje
         public const string Triage = "triage";
         public const string Gate = "gate";
         public const string Draft = "draft";
+        public const string Split = "split";
     }
 
     public LocalTask Add(string title, string? body = null, IEnumerable<string>? labels = null, string? author = null) =>
@@ -100,6 +102,25 @@ public sealed class LocalTaskService(Workspace.Workspace workspace, string proje
         return label is null
             ? tasks
             : tasks.Where(t => t.Labels.Contains(label, StringComparer.OrdinalIgnoreCase)).ToList();
+    }
+
+    /// <summary>The tasks created as children of a task (see <see cref="AddChild"/>), in number order.</summary>
+    public IReadOnlyList<LocalTask> Children(int parentNumber)
+    {
+        using var connection = workspace.Open();
+        return ChildrenCore(connection, parentNumber);
+    }
+
+    /// <summary>Creates a task linked to a parent task. The parent must exist.</summary>
+    public LocalTask AddChild(int parentNumber, string title, string? body = null, IEnumerable<string>? labels = null, string? author = null)
+    {
+        using (var connection = workspace.Open())
+        {
+            RequireTask(connection, parentNumber);
+        }
+
+        return Create(RequireTitle(title), body ?? string.Empty, NormalizeLabels(labels), author ?? DefaultAuthor(), null, null, false,
+            HistoryKind.Created, $"Task created as part of #{parentNumber}.", parentNumber);
     }
 
     public LocalTask? Get(int number)
@@ -263,13 +284,13 @@ public sealed class LocalTaskService(Workspace.Workspace workspace, string proje
     // ---------- internals ----------
 
     private const string Select =
-        "SELECT number, title, body, state, labels_json, external_id, external_url, author, created_at, updated_at, closed_at FROM tasks";
+        "SELECT number, title, body, state, labels_json, external_id, external_url, author, created_at, updated_at, closed_at, parent_number FROM tasks";
 
     private static LocalTask ReadTask(SqliteDataReader r) => new(
         r.GetInt32(0), r.GetString(1), r.GetString(2), r.GetString(3) == ClosedState,
         JsonSerializer.Deserialize<List<string>>(r.GetString(4)) ?? [],
         Db.StringOrNull(r, 5), Db.StringOrNull(r, 6), r.GetString(7),
-        Db.ParseStamp(r.GetString(8)), Db.ParseStamp(r.GetString(9)), Db.ParseStampOrNull(r, 10));
+        Db.ParseStamp(r.GetString(8)), Db.ParseStamp(r.GetString(9)), Db.ParseStampOrNull(r, 10), r.IsDBNull(11) ? null : r.GetInt32(11));
 
     private LocalTask? GetCore(SqliteConnection connection, int number) =>
         Db.Query(connection, ReadTask, $"{Select} WHERE project_key = $k AND number = $n", ("$k", projectKey), ("$n", number)).FirstOrDefault();
@@ -277,7 +298,7 @@ public sealed class LocalTaskService(Workspace.Workspace workspace, string proje
     private LocalTask RequireTask(SqliteConnection connection, int number) =>
         GetCore(connection, number) ?? throw new WorkspaceException($"There is no task {number} in project {projectKey}.");
 
-    private LocalTask Create(string title, string body, List<string> labels, string author, string? externalId, string? url, bool closed, string kind, string summary)
+    private LocalTask Create(string title, string body, List<string> labels, string author, string? externalId, string? url, bool closed, string kind, string summary, int? parentNumber = null)
     {
         using var connection = workspace.Open();
         using var transaction = connection.BeginTransaction();
@@ -285,13 +306,30 @@ public sealed class LocalTaskService(Workspace.Workspace workspace, string proje
         var number = Convert.ToInt32(max.ExecuteScalar(), CultureInfo.InvariantCulture);
         var now = DateTimeOffset.UtcNow;
         Db.Execute(connection,
-            "INSERT INTO tasks (project_key, number, title, body, state, labels_json, external_id, external_url, author, created_at, updated_at, closed_at) "
-            + "VALUES ($k, $n, $t, $b, $s, $l, $e, $u, $a, $now, $now, $c)",
+            "INSERT INTO tasks (project_key, number, title, body, state, labels_json, external_id, external_url, author, created_at, updated_at, closed_at, parent_number) "
+            + "VALUES ($k, $n, $t, $b, $s, $l, $e, $u, $a, $now, $now, $c, $p)",
             ("$k", projectKey), ("$n", number), ("$t", title), ("$b", body), ("$s", closed ? ClosedState : OpenState), ("$l", JsonSerializer.Serialize(labels)),
-            ("$e", externalId), ("$u", url), ("$a", author), ("$now", Db.Stamp(now)), ("$c", closed ? Db.Stamp(now) : null));
+            ("$e", externalId), ("$u", url), ("$a", author), ("$now", Db.Stamp(now)), ("$c", closed ? Db.Stamp(now) : null), ("$p", parentNumber));
         AddHistory(connection, number, kind, summary, null, now, synced: externalId is not null);
         transaction.Commit();
         return GetCore(connection, number)!;
+    }
+
+    private List<LocalTask> ChildrenCore(SqliteConnection connection, int parentNumber) =>
+        Db.Query(connection, ReadTask, $"{Select} WHERE project_key = $k AND parent_number = $p ORDER BY number", ("$k", projectKey), ("$p", parentNumber));
+
+    /// <summary>Closes the parent when the child that was just closed was the last open one.</summary>
+    private void CloseParentWhenDone(SqliteConnection connection, int parentNumber, int closedChild, DateTimeOffset now)
+    {
+        var parent = GetCore(connection, parentNumber);
+        if (parent is null || parent.Closed || ChildrenCore(connection, parentNumber).Any(c => !c.Closed && c.Number != closedChild))
+        {
+            return;
+        }
+
+        Db.Execute(connection, "UPDATE tasks SET state = $s, closed_at = $t, updated_at = $t WHERE project_key = $k AND number = $n",
+            ("$s", ClosedState), ("$t", Db.Stamp(now)), ("$k", projectKey), ("$n", parentNumber));
+        AddHistory(connection, parentNumber, HistoryKind.Closed, "Closed automatically: all child tasks are closed.", null, now);
     }
 
     private bool SetState(int number, bool close, string? author)
@@ -308,6 +346,11 @@ public sealed class LocalTaskService(Workspace.Workspace workspace, string proje
         Db.Execute(connection, "UPDATE tasks SET state = $s, closed_at = $c, updated_at = $t WHERE project_key = $k AND number = $n",
             ("$s", close ? ClosedState : OpenState), ("$c", close ? Db.Stamp(now) : null), ("$t", Db.Stamp(now)), ("$k", projectKey), ("$n", number));
         AddHistory(connection, number, close ? HistoryKind.Closed : HistoryKind.Reopened, (close ? "Closed" : "Reopened") + $" by {author ?? DefaultAuthor()}.", null, now);
+        if (close && task.ParentNumber is { } parentNumber)
+        {
+            CloseParentWhenDone(connection, parentNumber, number, now);
+        }
+
         transaction.Commit();
         return true;
     }
