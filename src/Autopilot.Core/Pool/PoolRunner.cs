@@ -527,7 +527,10 @@ public sealed class PoolRunner(
                 var infrastructure = result.Outcome == ImplementOutcome.Failed ? InfrastructureErrors.Classify(result.Message) : null;
                 if (infrastructure is not null)
                 {
-                    return Pause(id, infrastructure, config);
+                    // A usage limit is not the task's fault: the task stays, no retry is used, and the pause
+                    // lasts until the reset time in the message (or the configured minutes).
+                    var resetAt = UsageLimit.IsUsageLimit(result.Message) ? UsageLimit.ParseResetTime(result.Message, clock) : null;
+                    return Pause(id, infrastructure, config, resetAt);
                 }
 
                 switch (result.Outcome)
@@ -673,10 +676,10 @@ public sealed class PoolRunner(
         Processed NotReadyPark(string? category, string reason) =>
             Parked(new ImplementResult(id, ImplementOutcome.NotReady, reason), category, reason);
 
-        Processed Pause(string taskId, string reason, PoolConfig config)
+        Processed Pause(string taskId, string reason, PoolConfig config, DateTimeOffset? resetAt = null)
         {
             var now = _options.Clock.GetUtcNow();
-            var retryAt = now.AddMinutes(config.OnFailure.PauseMinutes);
+            var retryAt = resetAt ?? now.AddMinutes(config.OnFailure.PauseMinutes);
             if (unattended)
             {
                 _options.State?.Pause(reason, retryAt, now);
