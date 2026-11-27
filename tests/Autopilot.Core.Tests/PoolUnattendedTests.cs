@@ -63,6 +63,17 @@ internal sealed class FakeTasks : IPoolTasks
 
     public List<string> Bugs { get; } = [];
 
+    /// <summary>What was left over from a dead run, by task id; the task ids the pool asked about are in <see cref="LeftoversAsked"/>.</summary>
+    public Dictionary<string, string> Leftovers { get; } = [];
+
+    public List<string> LeftoversAsked { get; } = [];
+
+    public Task<string?> ReleaseLeftoversAsync(string id, CancellationToken ct)
+    {
+        lock (LeftoversAsked) { LeftoversAsked.Add(id); }
+        return Task.FromResult(Leftovers.TryGetValue(id, out var said) ? said : null);
+    }
+
     public Task<PoolTaskInfo?> DescribeAsync(string id, CancellationToken ct) =>
         Task.FromResult<PoolTaskInfo?>(Infos.TryGetValue(id, out var info) ? info : new PoolTaskInfo("Task " + id, "Body of " + id, ["src/" + id + "/**"], []));
 
@@ -338,9 +349,10 @@ public sealed class PoolUnattendedTests : IDisposable
     }
 
     [Fact]
-    public async Task A_question_about_a_secret_is_parked_without_asking_the_master_and_the_pool_goes_on()
+    public async Task A_question_triage_files_under_secrets_is_parked_without_asking_the_master_and_the_pool_goes_on()
     {
         Add("1", "2");
+        _tasks.Infos["1"] = new PoolTaskInfo("Send a key", "The client needs a key.", ["src/1/**"], [], Topic: PoolCategories.Secrets);
         _tasks.Questions["1"] = "Which API key should the client send?";
         var result = await RunAsync(id => Task.FromResult(id == "1" ? Result(id, ImplementOutcome.NotReady, "needs-human") : Result(id, ImplementOutcome.Published)));
 
@@ -349,6 +361,7 @@ public sealed class PoolUnattendedTests : IDisposable
         var parked = Assert.Single(_state.Parked());
         Assert.Equal("1", parked.WorkItemId);
         Assert.Equal(PoolCategories.Secrets, parked.Category);
+        Assert.Contains("Triage says the question is about secrets", parked.Reason, StringComparison.Ordinal);
         Assert.Empty(_pool.List());
     }
 
@@ -698,7 +711,7 @@ public sealed class PoolUnattendedTests : IDisposable
         await WaitAsync(() => _state.Slots().Any(s => s.WorkItemId == "2"));
         var slots = _state.Slots();
         Assert.Contains(slots, s => s.WorkItemId == "1" && s.State == "running");
-        Assert.Contains(slots, s => s.WorkItemId == "2" && s.State == "waiting" && s.Detail == "shares files with task 1");
+        Assert.Contains(slots, s => s.WorkItemId == "2" && s.State == "waiting" && s.Detail == "shares files with task 1 (src/x/y.cs and src/x/** cover the same files)");
         release.SetResult();
         await run;
     }
@@ -801,8 +814,6 @@ public sealed class PoolUnattendedTests : IDisposable
         Assert.NotNull(MasterGuard.ParkReason(answer, PoolCategories.All));
         Assert.Null(MasterGuard.ParkReason(answer with { Category = "other" }, PoolCategories.All));
         Assert.Null(MasterGuard.ParkReason(answer, []));
-        Assert.Equal(PoolCategories.StoredData, MasterGuard.MatchedCategory("We need a migration for existing data", PoolCategories.All));
-        Assert.Null(MasterGuard.MatchedCategory("Sort by name", PoolCategories.All));
         Assert.Null(JsonSerializer.Deserialize<string?>("null"));
     }
 

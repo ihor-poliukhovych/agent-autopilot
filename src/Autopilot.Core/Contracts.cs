@@ -25,6 +25,9 @@ public enum RiskLevel
 /// What triage decided. For a needs-human item, <paramref name="Options"/> are the answers a person can pick
 /// and <paramref name="Recommended"/> is the 1-based number of the one triage recommends (null when it has
 /// none). Both are null in results stored before they existed; see <c>TriageQuestion</c> for those.
+/// <paramref name="Topic"/> is what a needs-human question is about, one of <c>PoolCategories</c> (or "other");
+/// the pool master's always-ask check uses it. <paramref name="WritePaths"/> are the globs the change is expected
+/// to write; the pool uses them to run tasks with disjoint paths together. Both are null in older results.
 /// </summary>
 public sealed record TriageResult(
     TriageLabel Label,
@@ -32,7 +35,9 @@ public sealed record TriageResult(
     IReadOnlyList<string> AcceptanceCriteria,
     RiskLevel Risk,
     IReadOnlyList<string>? Options = null,
-    int? Recommended = null);
+    int? Recommended = null,
+    string? Topic = null,
+    IReadOnlyList<string>? WritePaths = null);
 
 public interface IWorkItemSource
 {

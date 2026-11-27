@@ -1,9 +1,32 @@
 using System.Text.RegularExpressions;
+using Autopilot.Core.Paths;
 
 namespace Autopilot.Core.Pool;
 
-/// <summary>What the pool needs to know about a task to schedule it: where it writes and what it waits for.</summary>
-public sealed record PoolTaskInfo(string Title, string Body, IReadOnlyList<string> Paths, IReadOnlyList<string> DependsOn);
+/// <summary>Where the write paths of a task come from, most reliable first.</summary>
+public enum PathSource
+{
+    /// <summary>A <c>Paths:</c> line a person wrote in the task text (or a test).</summary>
+    Declared,
+
+    /// <summary>The expected write paths triage gave for the task.</summary>
+    Triage,
+
+    /// <summary>Nothing narrower is known, so the project's writable paths stand in: the task may touch anything there.</summary>
+    Project,
+}
+
+/// <summary>
+/// What the pool needs to know about a task to schedule it: where it writes and what it waits for.
+/// <paramref name="Topic"/> is what triage says the task's question is about (see <see cref="Config.PoolCategories"/>), null when unknown.
+/// </summary>
+public sealed record PoolTaskInfo(
+    string Title,
+    string Body,
+    IReadOnlyList<string> Paths,
+    IReadOnlyList<string> DependsOn,
+    string? Topic = null,
+    PathSource PathSource = PathSource.Declared);
 
 public sealed record IntegrationResult(bool Merged, string Message);
 
@@ -50,6 +73,12 @@ public interface IPoolTasks
     /// <summary>Makes room for another attempt (the kept branch of the failed attempt is renamed).</summary>
     Task PrepareRetryAsync(string workItemId, CancellationToken ct);
 
+    /// <summary>
+    /// Called once the pool holds the task's lock, so no live run owns the task: removes or sets aside what an
+    /// earlier run that died left behind (its branch and worktree). Returns a sentence about what was done, or null.
+    /// </summary>
+    Task<string?> ReleaseLeftoversAsync(string workItemId, CancellationToken ct) => Task.FromResult<string?>(null);
+
     /// <summary>Creates a bug task and returns its id.</summary>
     Task<string> CreateBugAsync(string title, string body, CancellationToken ct);
 
@@ -95,7 +124,10 @@ public static class PathOverlap
     /// literal folder prefix of each glob: <c>src/a/**</c> and <c>src/a/b/*.cs</c> overlap, <c>src/a/**</c> and
     /// <c>src/b/**</c> do not. A pattern that starts with a wildcard overlaps everything.
     /// </summary>
-    public static bool Overlaps(IReadOnlyList<string> first, IReadOnlyList<string> second)
+    public static bool Overlaps(IReadOnlyList<string> first, IReadOnlyList<string> second) => Find(first, second) is not null;
+
+    /// <summary>The first pair of patterns (one of each set) that can match the same file, or null when the sets are disjoint.</summary>
+    public static (string First, string Second)? Find(IReadOnlyList<string> first, IReadOnlyList<string> second)
     {
         foreach (var a in first)
         {
@@ -103,15 +135,38 @@ public static class PathOverlap
             foreach (var b in second)
             {
                 var right = Prefix(b);
-                if (StartsWith(left, right) || StartsWith(right, left))
+                if (!StartsWith(left, right) && !StartsWith(right, left))
                 {
-                    return true;
+                    continue;
                 }
+
+                // A pattern with no wildcard names one file: it overlaps only when the other pattern matches it.
+                if (!HasWildcard(a) && HasWildcard(b) && !GlobMatcher.IsMatch(Clean(a), [Clean(b)]))
+                {
+                    continue;
+                }
+
+                if (!HasWildcard(b) && HasWildcard(a) && !GlobMatcher.IsMatch(Clean(b), [Clean(a)]))
+                {
+                    continue;
+                }
+
+                return (a, b);
             }
         }
 
-        return false;
+        return null;
     }
+
+    /// <summary>A sentence part that says why two tasks collide, for example "both change src/a/**".</summary>
+    public static string Describe((string First, string Second) pair) =>
+        string.Equals(Clean(pair.First), Clean(pair.Second), StringComparison.OrdinalIgnoreCase)
+            ? $"both change {Clean(pair.First)}"
+            : $"{Clean(pair.First)} and {Clean(pair.Second)} cover the same files";
+
+    private static string Clean(string pattern) => pattern.Trim().Replace('\\', '/').TrimStart('/');
+
+    private static bool HasWildcard(string pattern) => pattern.IndexOfAny(['*', '?', '[', '{']) >= 0;
 
     private static string[] Prefix(string pattern)
     {

@@ -14,10 +14,12 @@ public sealed class TaskLockHeldException(string projectKey, string workItemId, 
 /// before an agent starts on a task, so two agents never share a task. A row whose process is gone is stale
 /// and is taken over. Several tasks of one project can be locked at the same time by one pool run.
 /// </summary>
-public sealed class TaskRunLock(Workspace.Workspace workspace, Func<int, bool>? isProcessAlive = null, Func<int>? currentPid = null)
+public sealed class TaskRunLock(Workspace.Workspace workspace, Func<int, bool>? isProcessAlive = null, Func<int>? currentPid = null, TimeProvider? clock = null, TimeSpan? staleAfter = null)
 {
     private readonly Func<int, bool> _isAlive = isProcessAlive ?? ProjectRunLock.IsAlive;
     private readonly Func<int> _pid = currentPid ?? (() => Environment.ProcessId);
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+    private readonly TimeSpan _staleAfter = staleAfter ?? PoolStateStore.DefaultStaleAfter;
 
     public IDisposable Acquire(string projectKey, string workItemId, string owner)
     {
@@ -27,14 +29,16 @@ public sealed class TaskRunLock(Workspace.Workspace workspace, Func<int, bool>? 
         {
             var held = Db.Query(connection, r => (Pid: r.GetInt32(0), Owner: r.GetString(1)),
                 "SELECT pid, owner FROM task_locks WHERE project_key = $k AND work_item_id = $i", ("$k", projectKey), ("$i", workItemId));
-            if (held.Count > 0 && held[0].Pid != _pid() && _isAlive(held[0].Pid))
+            // A holder whose process lives on but whose pool stopped beating is dead too (the process id was reused).
+            if (held.Count > 0 && held[0].Pid != _pid() && _isAlive(held[0].Pid)
+                && !PoolStateStore.IsSilent(connection, projectKey, held[0].Pid, _clock.GetUtcNow(), _staleAfter))
             {
                 throw new TaskLockHeldException(projectKey, workItemId, held[0].Pid, held[0].Owner);
             }
 
             Db.Execute(connection, "DELETE FROM task_locks WHERE project_key = $k AND work_item_id = $i", ("$k", projectKey), ("$i", workItemId));
             Db.Execute(connection, "INSERT INTO task_locks (project_key, work_item_id, pid, owner, acquired_at) VALUES ($k, $i, $p, $o, $t)",
-                ("$k", projectKey), ("$i", workItemId), ("$p", _pid()), ("$o", owner), ("$t", Db.Stamp(DateTimeOffset.UtcNow)));
+                ("$k", projectKey), ("$i", workItemId), ("$p", _pid()), ("$o", owner), ("$t", Db.Stamp(_clock.GetUtcNow())));
             Db.Execute(connection, "COMMIT");
         }
         catch
@@ -52,7 +56,7 @@ public sealed class TaskRunLock(Workspace.Workspace workspace, Func<int, bool>? 
         using var connection = workspace.Open();
         var held = Db.Query(connection, r => (Pid: r.GetInt32(0), Owner: r.GetString(1)),
             "SELECT pid, owner FROM task_locks WHERE project_key = $k AND work_item_id = $i", ("$k", projectKey), ("$i", workItemId));
-        return held.Count > 0 && _isAlive(held[0].Pid) ? held[0] : null;
+        return held.Count > 0 && _isAlive(held[0].Pid) && !PoolStateStore.IsSilent(connection, projectKey, held[0].Pid, _clock.GetUtcNow(), _staleAfter) ? held[0] : null;
     }
 
     private sealed class Handle(Workspace.Workspace workspace, string projectKey, string workItemId, int pid) : IDisposable

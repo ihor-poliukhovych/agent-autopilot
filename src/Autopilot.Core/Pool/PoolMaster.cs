@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Autopilot.Core.Config;
 
 namespace Autopilot.Core.Pool;
@@ -23,6 +24,9 @@ public enum FailureKind
 
     /// <summary>A defect in Autopilot, not in the task.</summary>
     AutopilotDefect,
+
+    /// <summary>The agent-run budget is used up. Not a failure of the task: it stays queued and the pool stops.</summary>
+    Budget,
 }
 
 public sealed record FailureInfo(string WorkItemId, string Title, string Outcome, string Message, string? LogExcerpt);
@@ -40,24 +44,80 @@ public interface IPoolMaster
 /// <summary>Code that checks the master's answer. The model suggests, the code decides what is allowed.</summary>
 public static class MasterGuard
 {
-    private static readonly Dictionary<string, string[]> Keywords = new(StringComparer.Ordinal)
-    {
-        [PoolCategories.Secrets] = ["secret", "password", "passphrase", "credential", "api key", "api-key", "apikey", "access token", "private key", "certificate", "connection string"],
-        [PoolCategories.StoredData] = ["migration", "drop table", "delete data", "delete all", "existing data", "stored data", "backfill", "truncate", "production data", "database schema"],
-        [PoolCategories.Contracts] = ["public api", "breaking change", "contract", "backwards compat", "backward compat", "wire format", "public interface"],
-        [PoolCategories.Paid] = ["billing", "paid ", "subscription", "pricing", "invoice", "per month", "cost money", "credit card", "payment"],
-        [PoolCategories.Settings] = ["setting", "configuration", "feature flag", "environment variable", "permission", "access rights"],
-        [PoolCategories.Rules] = ["project rules", "agent rules", "coding rules", "the rules", "policy", "gate limit", "risk path", "writable path"],
-    };
+    /// <summary>What the safety net found: the <c>alwaysAsk</c> category and a sentence that names the match.</summary>
+    public sealed record SafetyHit(string Category, string Reason);
 
-    /// <summary>The first <c>alwaysAsk</c> category whose words appear in the text, or null. A cheap check before any model is asked.</summary>
-    public static string? MatchedCategory(string text, IReadOnlyList<string> alwaysAsk)
+    // Real signals of a secret in the text. A word such as "secret" or "password" alone is not one.
+    private static readonly (Regex Pattern, string What)[] SecretShapes =
+    [
+        (new Regex(@"-----BEGIN [A-Z ]*PRIVATE KEY-----", RegexOptions.Compiled), "a private key block"),
+        (new Regex(@"\bAKIA[0-9A-Z]{16}\b", RegexOptions.Compiled), "an AWS access key id"),
+        (new Regex(@"\bgh[pousr]_[A-Za-z0-9]{30,}\b", RegexOptions.Compiled), "a GitHub token"),
+        (new Regex(@"\bsk-[A-Za-z0-9_\-]{20,}", RegexOptions.Compiled), "an API key (sk-...)"),
+        (new Regex(@"\bxox[abprs]-[A-Za-z0-9\-]{10,}", RegexOptions.Compiled), "a Slack token"),
+        (new Regex(@"\beyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.", RegexOptions.Compiled), "a JSON web token"),
+    ];
+
+    private static readonly Regex AssignedSecret = new(
+        @"\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|client[_-]?secret)\s*[:=]\s*[""']?([^\s""'<>{}\[\]`]{12,})",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // Files whose change is always a person's call, with the category it belongs to.
+    private static readonly (string Pattern, string Category, string Name)[] SensitivePaths =
+    [
+        ("**/.env", PoolCategories.Secrets, "an environment file with secrets"),
+        ("**/.env.*", PoolCategories.Secrets, "an environment file with secrets"),
+        ("**/*.pem", PoolCategories.Secrets, "a key or certificate file"),
+        ("**/*.pfx", PoolCategories.Secrets, "a key or certificate file"),
+        ("**/*.key", PoolCategories.Secrets, "a key or certificate file"),
+        ("**/secrets/**", PoolCategories.Secrets, "a secrets folder"),
+        ("**/migrations/**", PoolCategories.StoredData, "database migrations"),
+        (".autopilot/**", PoolCategories.Rules, "the project's Autopilot rules and settings"),
+        ("CLAUDE.md", PoolCategories.Rules, "the agent rules file"),
+        ("AGENTS.md", PoolCategories.Rules, "the agent rules file"),
+    ];
+
+    /// <summary>
+    /// A narrow check that runs before any model is asked, only for real signals: a secret value in the text
+    /// (a key block, a known token shape, <c>password=...</c> with a value) or a change to files in a sensitive
+    /// path. A word such as "settings" or "rules" in the text is not a signal; what a question is about comes
+    /// from triage and the master as a structured field. <paramref name="writePaths"/> are the paths the task
+    /// is expected to write (leave empty when only the project's default paths are known). Only categories in
+    /// <paramref name="alwaysAsk"/> count. The reason names the match but never repeats a secret value.
+    /// </summary>
+    public static SafetyHit? SafetyNet(string text, IReadOnlyList<string> writePaths, IReadOnlyList<string> alwaysAsk)
     {
-        foreach (var category in alwaysAsk)
+        if (alwaysAsk.Contains(PoolCategories.Secrets, StringComparer.OrdinalIgnoreCase))
         {
-            if (Keywords.TryGetValue(category, out var words) && words.Any(w => text.Contains(w, StringComparison.OrdinalIgnoreCase)))
+            foreach (var (pattern, what) in SecretShapes)
             {
-                return category;
+                if (pattern.IsMatch(text))
+                {
+                    return new SafetyHit(PoolCategories.Secrets, $"The text contains {what}, so a person decides.");
+                }
+            }
+
+            foreach (Match match in AssignedSecret.Matches(text))
+            {
+                var value = match.Groups[1].Value;
+                if (value.Any(char.IsDigit) && value.Any(char.IsLetter))
+                {
+                    return new SafetyHit(PoolCategories.Secrets, $"The text assigns a value to \"{match.Value[..match.Value.IndexOfAny([':', '=']) ].Trim()}\" that looks like a real secret, so a person decides.");
+                }
+            }
+        }
+
+        foreach (var path in writePaths)
+        {
+            var clean = path.Trim().Replace('\\', '/').TrimStart('/');
+            var wildcard = clean.IndexOfAny(['*', '?', '[', '{']);
+            var probe = wildcard < 0 ? clean : clean[..wildcard].TrimEnd('/') + "/probe";
+            foreach (var (pattern, category, name) in SensitivePaths)
+            {
+                if (alwaysAsk.Contains(category, StringComparer.OrdinalIgnoreCase) && Autopilot.Core.Paths.GlobMatcher.IsMatch(probe, [pattern]))
+                {
+                    return new SafetyHit(category, $"The task changes {clean}, which is {name} ({category}), so a person decides.");
+                }
             }
         }
 
@@ -74,7 +134,7 @@ public static class MasterGuard
 
         if (alwaysAsk.Contains(answer.Category, StringComparer.OrdinalIgnoreCase))
         {
-            return $"The question is about {answer.Category}, which is always left to a person.";
+            return $"The pool master says the question is about {answer.Category}, which is always left to a person.";
         }
 
         if (!answer.Reversible)
@@ -154,7 +214,9 @@ public sealed class ClaudePoolMaster(IAgentRunner runner, PoolMasterConfig confi
         that is safest and easiest to undo, using the project rules and the task text. If the question lists
         options and a recommendation, prefer the recommendation unless it breaks a rule.
         Set decide to false when you cannot answer from what you were given. Classify the question into one
-        category; use "other" when none fits. Set reversible to false when the answer cannot be undone cheaply.
+        category; use "other" when none fits, which is the usual case: pick another category only when the
+        decision itself is about it. A word in the text, or a mention of a config option, is not enough.
+        Set reversible to false when the answer cannot be undone cheaply.
         Never invent facts about secrets, money, stored data or public contracts.
         """;
 

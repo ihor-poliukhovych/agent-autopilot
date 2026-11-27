@@ -62,6 +62,16 @@ public sealed class TriageStore(string projectRoot, string? dataFolder = null)
         text.AppendLine();
         text.AppendLine($"- Label: **{Label(result.Label)}**");
         text.AppendLine($"- Risk: {result.Risk.ToString().ToLowerInvariant()}");
+        if (result.Topic is not null)
+        {
+            text.AppendLine($"- Topic: {result.Topic}");
+        }
+
+        if (result.WritePaths is { Count: > 0 })
+        {
+            text.AppendLine($"- Expected write paths: {string.Join(", ", result.WritePaths)}");
+        }
+
         text.AppendLine();
         text.AppendLine("## Reason");
         text.AppendLine();

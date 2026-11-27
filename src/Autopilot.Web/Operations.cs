@@ -422,6 +422,9 @@ public sealed class PoolOperations(WebUiOptions options)
         var view = scope.Settings.Read();
         var pool = view.Config.Pool;
         var state = new PoolStateStore(scope.Workspace, scope.Project.Key);
+
+        // A run that was killed leaves its slots 'working': a run with no sign of life for a few minutes is dead.
+        state.ReleaseDead(DateTimeOffset.UtcNow, PoolStateStore.DefaultStaleAfter, scope.Options.IsProcessAlive ?? ProjectRunLock.IsAlive, Environment.ProcessId);
         var titles = (await scope.CreateList().ListAsync(ct).ConfigureAwait(false)).ToDictionary(e => e.Id, e => e.Title, StringComparer.Ordinal);
         var integration = Integration(scope, view.Config).Info();
         return new PoolStatusView(

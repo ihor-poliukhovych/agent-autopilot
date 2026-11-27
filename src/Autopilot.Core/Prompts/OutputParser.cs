@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
+using Autopilot.Core.Config;
 
 namespace Autopilot.Core.Prompts;
 
@@ -49,7 +50,14 @@ public static class OutputParser
 
         var options = ReadList(json, "options");
         int? recommended = json.TryGetProperty("recommended", out var rec) && rec.ValueKind == JsonValueKind.Number && rec.TryGetInt32(out var n) && n >= 1 && n <= options.Count ? n : null;
-        result = new TriageResult(parsedLabel.Value, reason.Trim(), criteria, risk, options, recommended);
+        var topic = ReadString(json, "topic")?.Trim().ToLowerInvariant();
+        topic = topic is not null && (topic == PoolCategories.Other || PoolCategories.All.Contains(topic)) ? topic : null;
+        var writePaths = ReadList(json, "writePaths")
+            .Select(p => p.Replace('\\', '/').Trim('`', ' ', '/'))
+            .Where(p => p.Length > 0 && !p.Split('/').Contains(".."))
+            .Take(30)
+            .ToList();
+        result = new TriageResult(parsedLabel.Value, reason.Trim(), criteria, risk, options, recommended, topic, writePaths);
         return true;
     }
 

@@ -99,7 +99,7 @@ public sealed class WorkspaceTests : IDisposable
         using var check = workspace.Open();
         using var query = check.CreateCommand();
         query.CommandText = "SELECT MAX(version) FROM schema_version";
-        Assert.Equal(6L, (long)query.ExecuteScalar()!);
+        Assert.Equal((long)Workspace.Workspace.LatestVersion, (long)query.ExecuteScalar()!);
     }
 
     [Fact]
