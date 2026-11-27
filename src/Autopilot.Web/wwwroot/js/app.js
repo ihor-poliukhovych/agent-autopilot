@@ -1,6 +1,7 @@
 import { get, ApiError } from './api.js';
 import { h, clear, toast, loading } from './dom.js';
 import * as projects from './projects.js';
+import * as inbox from './inbox.js';
 import * as pipeline from './pipeline.js';
 import * as tasks from './tasks.js';
 import * as pool from './pool.js';
@@ -11,16 +12,20 @@ import * as wizard from './wizard.js';
 import './feedback.js';
 
 const TABS = [
-  ['pipeline', 'Pipeline', pipeline], ['tasks', 'Tasks', tasks], ['pool', 'Pool', pool], ['runs', 'Runs', runs],
-  ['needs', 'Needs a person', needs], ['settings', 'Settings', settings],
+  ['inbox', 'Inbox', inbox], ['tasks', 'Tasks', tasks], ['pipeline', 'Pipeline', pipeline], ['pool', 'Pool', pool],
+  ['settings', 'Settings', settings],
 ];
+// Old addresses keep working; they sit under the Inbox tab.
+const LEGACY = { runs: runs, run: runs, needs: needs };
+// Pages drawn in the shared two-column layout.
+const LAYOUT = new Set(['pipeline', 'tasks', 'pool', 'needs']);
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const switcher = document.getElementById('project-switch');
 const statusChip = document.getElementById('status-chip');
 let state = { projects: [] };
 let cleanup = null;
-let lastTab = 'pipeline';
+let lastTab = 'inbox';
 
 // ---- theme ----
 function storedTheme() { try { return localStorage.getItem('autopilot-theme'); } catch { return null; } }
@@ -40,7 +45,7 @@ document.getElementById('theme-toggle').addEventListener('click', () => {
 // ---- routing ----
 function parse() {
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
-  if (parts[0] === 'p' && parts[1]) return { name: 'project', key: parts[1], tab: parts[2] || 'pipeline', rest: parts.slice(3) };
+  if (parts[0] === 'p' && parts[1]) return { name: 'project', key: parts[1], tab: parts[2] || 'inbox', rest: parts.slice(3) };
   if (parts[0] === 'new') return { name: 'new' };
   return { name: 'projects' };
 }
@@ -82,12 +87,26 @@ async function route() {
       if (!project) {
         stage.append(h('div', { class: 'banner bad' }, `There is no project "${r.key}".`));
       } else {
-        lastTab = r.tab === 'run' ? 'runs' : (TABS.some(t => t[0] === r.tab) ? r.tab : 'pipeline');
-        renderTabs(tabBar, r);
+        const legacy = r.tab === 'run' ? 'runs' : r.tab;
+        const page = TABS.some(t => t[0] === r.tab) ? r.tab : (Object.hasOwn(LEGACY, r.tab) ? legacy : 'inbox');
+        lastTab = page;
+        const isLegacy = Object.hasOwn(LEGACY, page);
+        const screen = isLegacy ? LEGACY[page] : (TABS.find(t => t[0] === page) || TABS[0])[2];
+        const current = isLegacy ? 'inbox' : page;
+        renderTabs(tabBar, r, current);
         clear(tabs).append(tabBar);
-        const screen = (TABS.find(t => t[0] === lastTab) || TABS[0])[2];
         document.title = `${project.displayName} · Autopilot`;
-        stop = await screen.render({ view: stage, project, key: r.key, rest: r.rest, state, go, refreshState }) || null;
+        let target = stage;
+        if (LAYOUT.has(page)) {
+          target = h('div', { class: 'app-right open' });
+          const body = h('div');
+          const close = h('button', { type: 'button', class: 'drawer-close', onclick: () => target.classList.remove('open') }, 'Back to menu');
+          target.append(close, body);
+          const show = h('button', { type: 'button', class: 'drawer-open', onclick: () => target.classList.add('open') }, 'Show page');
+          stage.append(h('div', { class: 'app-layout' }, leftColumn(r.key, page, show), target));
+          target = body;
+        }
+        stop = await screen.render({ view: target, project, key: r.key, rest: r.rest, state, go, refreshState }) || null;
       }
     } else if (r.name === 'new') {
       stop = await wizard.render({ view: stage, mode: 'new', state, go, refreshState }) || null;
@@ -110,10 +129,23 @@ async function route() {
   view.focus({ preventScroll: true });
 }
 
-function renderTabs(bar, r) {
+// The fixed left column: quick links to the project pages, with the current one marked.
+function leftColumn(key, page, showButton) {
+  const base = `#/p/${encodeURIComponent(key)}/`;
+  const links = [['pipeline', 'Pipeline'], ['tasks', 'Tasks'], ['pool', 'Pool'], ['needs', 'Needs a person'], ['runs', 'Runs']];
+  const list = h('nav', { class: 'app-links', 'aria-label': 'Project pages' });
+  for (const [id, label] of links) {
+    const a = h('a', { href: base + id }, label);
+    if (id === page) a.setAttribute('aria-current', 'page');
+    list.append(a);
+  }
+  return h('div', { class: 'app-left' }, list, showButton);
+}
+
+function renderTabs(bar, r, current) {
   for (const [id, label] of TABS) {
     const link = h('a', { href: `#/p/${encodeURIComponent(r.key)}/${id}` }, label);
-    if (id === lastTab) link.setAttribute('aria-current', 'page');
+    if (id === current) link.setAttribute('aria-current', 'page');
     bar.append(link);
     if (id === 'pipeline') {
       get(`/projects/${encodeURIComponent(r.key)}/runs`).then(d => {
@@ -123,7 +155,7 @@ function renderTabs(bar, r) {
         statusChip.href = `#/p/${encodeURIComponent(r.key)}/${d.status.busy ? 'runs' : 'pipeline'}`;
       }).catch(() => { statusChip.hidden = true; });
     }
-    if (id === 'needs') {
+    if (id === 'inbox') {
       get(`/projects/${encodeURIComponent(r.key)}/needs-human`).then(items => {
         if (items.length) link.append(h('span', { class: 'count' }, String(items.length)));
       }).catch(() => { /* the badge is optional */ });
