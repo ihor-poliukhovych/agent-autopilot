@@ -432,6 +432,12 @@ public sealed class PoolRunner(
             var retriages = 0;
             var firstAttempt = true;
 
+            // Triage comes first: implementing a task that has no triage only wastes an agent run.
+            if (master is not null && _options.Tasks is { } preparing && await PrepareAsync(master, config, preparing).ConfigureAwait(false) is { } unready)
+            {
+                return unready;
+            }
+
             while (true)
             {
                 if (reserve(id, firstAttempt ? "implement" : "retry") is { } budget)
@@ -466,33 +472,15 @@ public sealed class PoolRunner(
 
                     case ImplementOutcome.NotReady when master is not null && _options.Tasks is { } tasks:
                     {
-                        var question = await tasks.QuestionAsync(id, ct).ConfigureAwait(false);
-                        if (question is null)
+                        // The stored triage changed under us (an edit, a person): look at it again once.
+                        if (retriages++ > 0)
                         {
-                            // No triage yet, or the text changed: triage again once, then try again.
-                            if (retriages++ == 0 && reserve(id, "triage") is null && await tasks.RetriageAsync(id, ct).ConfigureAwait(false))
-                            {
-                                continue;
-                            }
-
                             return Parked(result, null, $"The task could not be made ready: {result.Message}");
                         }
 
-                        var info = await tasks.DescribeAsync(id, ct).ConfigureAwait(false);
-                        var verdict = await AnswerAsync(id, info, question, master, config, reserve, decisions, nextDecision, tasks, ct).ConfigureAwait(false);
-                        if (verdict.Park is { } park)
+                        if (await PrepareAsync(master, config, tasks).ConfigureAwait(false) is { } notReady)
                         {
-                            return Parked(result, verdict.Category, park);
-                        }
-
-                        if (reserve(id, "triage") is { } problem)
-                        {
-                            return new Processed(BucketStopped, null, problem, true);
-                        }
-
-                        if (!await tasks.RetriageAsync(id, ct).ConfigureAwait(false))
-                        {
-                            return Parked(result, verdict.Category, "The task is still not ready after the master's answer.");
+                            return notReady;
                         }
 
                         continue;
@@ -552,6 +540,60 @@ public sealed class PoolRunner(
             _options.State?.Park(id, category, reason, _options.Clock.GetUtcNow());
             return new Processed(BucketParked, result, null, false, reason + ((category is not null) ? $" ({category})" : string.Empty));
         }
+
+        // Makes the task ready to implement: reads the stored triage, triages when there is none, lets the pool
+        // master answer a needs-human question and triages again. Null when the task is agent-ready.
+        async Task<Processed?> PrepareAsync(IPoolMaster master, PoolConfig config, IPoolTasks tasks)
+        {
+            var triage = await tasks.TriageStateAsync(id, ct).ConfigureAwait(false);
+            if (triage.State == PoolTriageState.Missing)
+            {
+                if (reserve(id, "triage") is { } problem)
+                {
+                    return new Processed(BucketStopped, null, problem, true);
+                }
+
+                triage = await tasks.RetriageAsync(id, ct).ConfigureAwait(false);
+                if (triage.State == PoolTriageState.Missing)
+                {
+                    return NotReadyPark(null, $"The task could not be triaged: {Excerpt(triage.Detail)}");
+                }
+            }
+
+            if (triage.State == PoolTriageState.AgentReady)
+            {
+                return null;
+            }
+
+            var info = await tasks.DescribeAsync(id, ct).ConfigureAwait(false);
+            AnswerVerdict verdict;
+            try
+            {
+                verdict = await AnswerAsync(id, info, triage.Detail, master, config, reserve, decisions, nextDecision, tasks, ct).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotReadyPark(null, $"Triage marked the task needs-human, and it cannot be answered: {ex.Message}");
+            }
+
+            if (verdict.Park is { } park)
+            {
+                return NotReadyPark(verdict.Category, park);
+            }
+
+            if (reserve(id, "triage") is { } budget)
+            {
+                return new Processed(BucketStopped, null, budget, true);
+            }
+
+            triage = await tasks.RetriageAsync(id, ct).ConfigureAwait(false);
+            return triage.State == PoolTriageState.AgentReady
+                ? null
+                : NotReadyPark(verdict.Category, $"The task is still not ready after the master's answer. Triage says {triage.Label}: {Excerpt(triage.Detail)}");
+        }
+
+        Processed NotReadyPark(string? category, string reason) =>
+            Parked(new ImplementResult(id, ImplementOutcome.NotReady, reason), category, reason);
 
         Processed Pause(string taskId, string reason, PoolConfig config, DateTimeOffset? resetAt = null)
         {

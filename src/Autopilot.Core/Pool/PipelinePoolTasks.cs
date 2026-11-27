@@ -22,6 +22,8 @@ public sealed class PipelinePoolTasks(
     AutopilotConfig config,
     IntegrationService? integration) : IPoolTasks
 {
+    private readonly SemaphoreSlim _triageGate = new(1, 1);
+
     public async Task<PoolTaskInfo?> DescribeAsync(string workItemId, CancellationToken ct)
     {
         var item = await items.GetAsync(workItemId, ct).ConfigureAwait(false);
@@ -34,21 +36,26 @@ public sealed class PipelinePoolTasks(
         return new PoolTaskInfo(item.Title, item.Body, paths.Count > 0 ? paths : config.WritablePaths, PoolTaskHints.DependenciesFrom(item.Labels));
     }
 
-    public async Task<string?> QuestionAsync(string workItemId, CancellationToken ct)
+    public async Task<PoolTriage> TriageStateAsync(string workItemId, CancellationToken ct)
     {
-        if (tasks is null)
-        {
-            return null;
-        }
-
         var item = await items.GetAsync(workItemId, ct).ConfigureAwait(false);
-        var record = await triage.LoadRecordAsync(workItemId, ct).ConfigureAwait(false);
-        if (item is null || record is null || record.TextHash != TriageStore.TextHash(item) || record.Result.Label != TriageLabel.NeedsHuman)
+        if (item is null)
         {
-            return null;
+            return new PoolTriage(PoolTriageState.Missing, $"Work item {workItemId} was not found.");
         }
 
-        return record.Result.Reason;
+        var record = await triage.LoadRecordAsync(workItemId, ct).ConfigureAwait(false);
+        if (record is null)
+        {
+            return new PoolTriage(PoolTriageState.Missing, "The task has not been triaged yet.");
+        }
+
+        if (record.TextHash != TriageStore.TextHash(item))
+        {
+            return new PoolTriage(PoolTriageState.Missing, "The text of the task changed since it was triaged.");
+        }
+
+        return new PoolTriage(record.Result.Label == TriageLabel.AgentReady ? PoolTriageState.AgentReady : PoolTriageState.NeedsHuman, record.Result.Reason);
     }
 
     public Task AnswerAsync(string workItemId, string text, CancellationToken ct)
@@ -63,10 +70,25 @@ public sealed class PipelinePoolTasks(
         return Task.CompletedTask;
     }
 
-    public async Task<bool> RetriageAsync(string workItemId, CancellationToken ct)
+    public async Task<PoolTriage> RetriageAsync(string workItemId, CancellationToken ct)
     {
-        var results = await pipeline.TriageAsync(workItemId, ct).ConfigureAwait(false);
-        return results.Count > 0 && results[0].Triage is { Label: TriageLabel.AgentReady };
+        // The pipeline triages in one shared worktree; two triages at once would remove each other's.
+        await _triageGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var results = await pipeline.TriageAsync(workItemId, ct).ConfigureAwait(false);
+            if (results.Count == 0 || results[0].Triage is null)
+            {
+                return new PoolTriage(PoolTriageState.Missing, (results.Count > 0 ? results[0].Error : null) ?? "The triage gave no result.");
+            }
+        }
+        finally
+        {
+            _triageGate.Release();
+        }
+
+        // Read the stored result back: that is what implement will see.
+        return await TriageStateAsync(workItemId, ct).ConfigureAwait(false);
     }
 
     public async Task PrepareRetryAsync(string workItemId, CancellationToken ct)

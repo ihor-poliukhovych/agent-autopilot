@@ -38,7 +38,7 @@ public sealed class LocalPublisher(string projectRoot, string? dataFolder = null
         var item = request.WorkItem;
         var evidence = request.Evidence;
         var text = new StringBuilder();
-        text.AppendLine($"# {item.Title}");
+        text.AppendLine($"# {request.Title ?? item.Title}");
         text.AppendLine();
         text.AppendLine("**Status: waiting for a person.** This is a draft. Autopilot never merges; review the change and merge it yourself if it is right.");
         text.AppendLine();

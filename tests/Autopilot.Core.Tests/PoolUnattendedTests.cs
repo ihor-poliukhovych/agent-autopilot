@@ -47,7 +47,13 @@ internal sealed class FakeTasks : IPoolTasks
 
     public Dictionary<string, string> Questions { get; } = [];
 
-    public Func<string, bool> Retriage { get; set; } = _ => true;
+    /// <summary>Tasks without a stored triage.</summary>
+    public HashSet<string> Untriaged { get; } = [];
+
+    /// <summary>What the triage agent finds when the pool triages a task.</summary>
+    public Func<string, PoolTriage> Retriage { get; set; } = _ => new PoolTriage(PoolTriageState.AgentReady, "Clear.");
+
+    public List<string> Triaged { get; } = [];
 
     public Func<ImplementResult, IntegrationResult?> Integrate { get; set; } = _ => null;
 
@@ -60,7 +66,16 @@ internal sealed class FakeTasks : IPoolTasks
     public Task<PoolTaskInfo?> DescribeAsync(string id, CancellationToken ct) =>
         Task.FromResult<PoolTaskInfo?>(Infos.TryGetValue(id, out var info) ? info : new PoolTaskInfo("Task " + id, "Body of " + id, ["src/" + id + "/**"], []));
 
-    public Task<string?> QuestionAsync(string id, CancellationToken ct) => Task.FromResult(Questions.TryGetValue(id, out var q) ? q : null);
+    public Task<PoolTriage> TriageStateAsync(string id, CancellationToken ct)
+    {
+        lock (Triaged)
+        {
+            return Task.FromResult(
+                Untriaged.Contains(id) ? new PoolTriage(PoolTriageState.Missing, "The task has not been triaged yet.")
+                : Questions.TryGetValue(id, out var q) ? new PoolTriage(PoolTriageState.NeedsHuman, q)
+                : new PoolTriage(PoolTriageState.AgentReady, "Clear."));
+        }
+    }
 
     public Task AnswerAsync(string id, string text, CancellationToken ct)
     {
@@ -68,7 +83,29 @@ internal sealed class FakeTasks : IPoolTasks
         return Task.CompletedTask;
     }
 
-    public Task<bool> RetriageAsync(string id, CancellationToken ct) => Task.FromResult(Retriage(id));
+    public Task<PoolTriage> RetriageAsync(string id, CancellationToken ct)
+    {
+        var triage = Retriage(id);
+        lock (Triaged)
+        {
+            Triaged.Add(id);
+            if (triage.State != PoolTriageState.Missing)
+            {
+                Untriaged.Remove(id);
+            }
+
+            if (triage.State == PoolTriageState.NeedsHuman)
+            {
+                Questions[id] = triage.Detail;
+            }
+            else
+            {
+                Questions.Remove(id);
+            }
+        }
+
+        return Task.FromResult(triage);
+    }
 
     public Task PrepareRetryAsync(string id, CancellationToken ct)
     {
@@ -185,11 +222,9 @@ public sealed class PoolUnattendedTests : IDisposable
         _master.Answer = _ => new MasterAnswer(true, 2, "Use exponential backoff.", "It is the recommended option and easy to change.", PoolCategories.Other, true);
         var calls = 0;
 
-        var result = await RunAsync(id => Task.FromResult(++calls == 1
-            ? Result(id, ImplementOutcome.NotReady, "Triage marked 1 as needs-human: Which backoff?")
-            : Result(id, ImplementOutcome.Published)));
+        var result = await RunAsync(id => { calls++; return Task.FromResult(Result(id, ImplementOutcome.Published)); });
 
-        Assert.Equal(2, calls);
+        Assert.Equal(1, calls); // the stored needs-human verdict is handled before any implement run
         Assert.Single(result.Done);
         Assert.Empty(result.Parked);
         var written = Assert.Single(_tasks.Answers);
@@ -198,8 +233,108 @@ public sealed class PoolUnattendedTests : IDisposable
         var decision = Assert.Single(_state.Decisions());
         Assert.Equal(DecisionKinds.Answer, decision.Kind);
         Assert.Equal("1", decision.WorkItemId);
-        Assert.Equal(4, result.AgentRuns); // implement, master, triage again, implement again
+        Assert.Equal(3, result.AgentRuns); // master, triage again, implement
         Assert.Contains("Decisions of the pool master (1)", File.ReadAllText(result.ReportPath!), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_untriaged_task_is_triaged_before_it_is_implemented_and_counts_one_run()
+    {
+        Add("1");
+        _tasks.Untriaged.Add("1");
+        var calls = 0;
+
+        var result = await RunAsync(id => { calls++; return Task.FromResult(Result(id, ImplementOutcome.Published)); });
+
+        Assert.Equal(["1"], _tasks.Triaged);
+        Assert.Equal(1, calls);
+        Assert.Single(result.Done);
+        Assert.Empty(_master.Asked);
+        Assert.Equal(2, result.AgentRuns); // triage, implement
+    }
+
+    [Fact]
+    public async Task An_untriaged_task_with_a_question_goes_to_the_master_after_its_triage()
+    {
+        Add("1");
+        _tasks.Untriaged.Add("1");
+        var triages = 0;
+        _tasks.Retriage = _ => ++triages == 1
+            ? new PoolTriage(PoolTriageState.NeedsHuman, "Which backoff? Option 1: fixed. Option 2: exponential (recommended).")
+            : new PoolTriage(PoolTriageState.AgentReady, "Clear now.");
+        _master.Answer = _ => new MasterAnswer(true, 2, "Use exponential backoff.", "Recommended and easy to change.", PoolCategories.Other, true);
+
+        var result = await RunAsync(id => Task.FromResult(Result(id, ImplementOutcome.Published)));
+
+        Assert.Single(result.Done);
+        Assert.Empty(result.Parked);
+        Assert.Equal(["1"], _master.Asked);
+        Assert.Contains("Answer: option 2 (pool master)", Assert.Single(_tasks.Answers).Text, StringComparison.Ordinal);
+        Assert.Equal(4, result.AgentRuns); // triage, master, triage, implement
+    }
+
+    [Fact]
+    public async Task Two_untriaged_tasks_at_once_are_both_triaged_answered_and_implemented()
+    {
+        Add("1", "2");
+        _config = _config with { Concurrency = 2, Budget = new PoolBudgetConfig { MaxAgentRuns = 8 } };
+        _tasks.Infos["1"] = new PoolTaskInfo("One", string.Empty, ["src/a/**"], []);
+        _tasks.Infos["2"] = new PoolTaskInfo("Two", string.Empty, ["src/b/**"], []);
+        _tasks.Untriaged.Add("1");
+        _tasks.Untriaged.Add("2");
+        var seen = new HashSet<string>();
+        _tasks.Retriage = id =>
+        {
+            lock (seen) { seen.Add(id); }
+            return id == "1" && !_tasks.Answers.Any(a => a.Id == "1")
+                ? new PoolTriage(PoolTriageState.NeedsHuman, "Which order? Option 1: by name (recommended).")
+                : new PoolTriage(PoolTriageState.AgentReady, "Clear.");
+        };
+        _master.Answer = _ => new MasterAnswer(true, 1, "By name.", "Recommended.", PoolCategories.Other, true);
+        var peak = new Peak { WaitForTogether = 2 };
+
+        var result = await RunAsync(id => peak.RunAsync(id));
+
+        Assert.Equal(["1", "2"], result.Done.Select(d => d.WorkItemId).Order());
+        Assert.Empty(result.Parked);
+        Assert.Equal(["1"], _master.Asked);
+        Assert.Equal(2, peak.Max);
+        Assert.Equal(6, result.AgentRuns); // task 1: triage, master, triage, implement; task 2: triage, implement
+    }
+
+    [Fact]
+    public async Task A_task_that_is_still_needs_human_after_the_answer_is_parked_with_the_triage_verdict()
+    {
+        Add("1");
+        _tasks.Questions["1"] = "Which order? Option 1: by name.";
+        _tasks.Retriage = _ => new PoolTriage(PoolTriageState.NeedsHuman, "The answer does not say who owns the sorting.");
+        _master.Answer = _ => new MasterAnswer(true, 1, "By name.", "Fine.", PoolCategories.Other, true);
+        var calls = 0;
+
+        var result = await RunAsync(id => { calls++; return Task.FromResult(Result(id, ImplementOutcome.Published)); });
+
+        Assert.Equal(0, calls);
+        var parked = Assert.Single(_state.Parked());
+        Assert.Contains("still not ready after the master's answer", parked.Reason, StringComparison.Ordinal);
+        Assert.Contains("needs-human", parked.Reason, StringComparison.Ordinal);
+        Assert.Contains("who owns the sorting", parked.Reason, StringComparison.Ordinal);
+        Assert.Single(result.Parked);
+    }
+
+    [Fact]
+    public async Task A_triage_that_gives_no_result_is_parked_with_its_error_and_the_pool_goes_on()
+    {
+        Add("1", "2");
+        _tasks.Untriaged.Add("1");
+        _tasks.Retriage = _ => new PoolTriage(PoolTriageState.Missing, "The triage agent failed: timeout");
+
+        var result = await RunAsync(id => Task.FromResult(Result(id, ImplementOutcome.Published)));
+
+        Assert.Equal(["2"], result.Done.Select(d => d.WorkItemId));
+        var parked = Assert.Single(_state.Parked());
+        Assert.Equal("1", parked.WorkItemId);
+        Assert.Contains("could not be triaged", parked.Reason, StringComparison.Ordinal);
+        Assert.Contains("timeout", parked.Reason, StringComparison.Ordinal);
     }
 
     [Fact]

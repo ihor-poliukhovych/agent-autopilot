@@ -21,11 +21,18 @@ public enum RiskLevel
     High,
 }
 
+/// <summary>
+/// What triage decided. For a needs-human item, <paramref name="Options"/> are the answers a person can pick
+/// and <paramref name="Recommended"/> is the 1-based number of the one triage recommends (null when it has
+/// none). Both are null in results stored before they existed; see <c>TriageQuestion</c> for those.
+/// </summary>
 public sealed record TriageResult(
     TriageLabel Label,
     string Reason,
     IReadOnlyList<string> AcceptanceCriteria,
-    RiskLevel Risk);
+    RiskLevel Risk,
+    IReadOnlyList<string>? Options = null,
+    int? Recommended = null);
 
 public interface IWorkItemSource
 {
@@ -103,7 +110,9 @@ public sealed record PublishRequest(
     Gate.GateDecision Decision,
     Evidence Evidence,
     /// <summary>The decision with the facts behind it. Null when only the decision is known.</summary>
-    Local.GateReport? Report = null);
+    Local.GateReport? Report = null,
+    /// <summary>The pull request title (the commit subject). Null keeps the publisher's own wording.</summary>
+    string? Title = null);
 
 public sealed record PublishResult(bool Succeeded, string Location, string? Error);
 

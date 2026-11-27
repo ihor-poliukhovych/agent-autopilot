@@ -121,8 +121,13 @@ public sealed class FakeAgentRunner(Func<AgentRunRequest, int, AgentRunResult> r
 
     public Task<AgentRunResult> RunAsync(AgentRunRequest request, CancellationToken ct)
     {
-        _requests.Add(request);
-        var callsForRole = _requests.Count(r => r.Role == request.Role);
+        int callsForRole;
+        lock (_requests)
+        {
+            _requests.Add(request);
+            callsForRole = _requests.Count(r => r.Role == request.Role);
+        }
+
         return Task.FromResult(respond(request, callsForRole));
     }
 

@@ -177,6 +177,11 @@ public static class ConfigLoader
             problems.Add($"trust is \"{config.Trust}\". Use one of: {string.Join(", ", TrustLevels.All)}.");
         }
 
+        if (!CommitStyles.All.Contains(config.CommitStyle ?? string.Empty, StringComparer.Ordinal))
+        {
+            problems.Add($"commitStyle is \"{config.CommitStyle}\". Use one of: {string.Join(", ", CommitStyles.All)}.");
+        }
+
         ValidatePool(config, problems);
 
         if (config.Gate is null)

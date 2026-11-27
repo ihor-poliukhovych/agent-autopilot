@@ -106,7 +106,9 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         }
 
         // Triage reads the code at the base branch, in a worktree outside the project.
-        var worktree = Path.Combine(options.WorktreeRoot, TriageWorktreeName);
+        // One item gets its own folder, so two triages of different items (a pool with several agents, a person
+        // in the web UI) do not remove each other's worktree.
+        var worktree = Path.Combine(options.WorktreeRoot, workItemId is null ? TriageWorktreeName : $"{TriageWorktreeName}-{ProjectPaths.SafeId(workItemId)}");
         await RemoveWorktreeIfPresentAsync(worktree).ConfigureAwait(false);
         await _git.AddDetachedWorktreeAsync(worktree, baseCommit, ct).ConfigureAwait(false);
         try
@@ -273,7 +275,7 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         }
 
         OutputParser.TryParseSelfReview(implement, out var selfReview, out _);
-        var commit = await _git.CommitAllAsync(worktree, CommitMessage(item, 1), ct).ConfigureAwait(false);
+        var commit = await _git.CommitAllAsync(worktree, CommitMessages.Build(_config.CommitStyle, item, 1), ct).ConfigureAwait(false);
         if (commit is null)
         {
             return await RejectAsync(item, branch, runFolder, ImplementOutcome.Rejected, "The implementer made no changes.").ConfigureAwait(false);
@@ -294,7 +296,7 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
                     selfReview = secondSelfReview;
                 }
 
-                await _git.CommitAllAsync(worktree, CommitMessage(item, 2), ct).ConfigureAwait(false);
+                await _git.CommitAllAsync(worktree, CommitMessages.Build(_config.CommitStyle, item, 2), ct).ConfigureAwait(false);
                 review = await ReviewAsync(item, triage, baseCommit, branch, worktree, context, ct).ConfigureAwait(false);
             }
         }
@@ -319,7 +321,7 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         }
 
         Write($"{id}: gate passed, publishing");
-        var published = await options.Publisher.PublishAsync(new PublishRequest(item, branch, diff, decision, evidence, report), ct).ConfigureAwait(false);
+        var published = await options.Publisher.PublishAsync(new PublishRequest(item, branch, diff, decision, evidence, report, CommitMessages.PullRequestTitle(_config.CommitStyle, item)), ct).ConfigureAwait(false);
         if (!published.Succeeded)
         {
             return new ImplementResult(id, ImplementOutcome.Failed, $"The gate passed but publishing failed: {published.Error}", branch, runFolder, decision);
@@ -541,9 +543,6 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
             await _git.RemoveWorktreeAsync(path, CancellationToken.None).ConfigureAwait(false);
         }
     }
-
-    private static string CommitMessage(WorkItem item, int round) =>
-        round == 1 ? $"{item.Id}: {item.Title}" : $"{item.Id}: address review findings";
 
     private static bool SamePath(string a, string b) => string.Equals(
         Path.GetFullPath(a).TrimEnd('\\', '/'),

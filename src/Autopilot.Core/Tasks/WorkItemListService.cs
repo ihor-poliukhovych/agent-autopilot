@@ -5,7 +5,7 @@ using Autopilot.Core.Runs;
 namespace Autopilot.Core.Tasks;
 
 /// <summary>The stored triage of one item. <see cref="Stale"/> is true when the item's text changed after triage.</summary>
-public sealed record TriageSummary(string Label, string Risk, string Reason, DateTimeOffset TriagedAt, bool Stale);
+public sealed record TriageSummary(string Label, string Risk, string Reason, DateTimeOffset TriagedAt, bool Stale, IReadOnlyList<string>? Options = null, int? Recommended = null);
 
 /// <summary>One open work item with everything a person needs to pick it: triage, last run, pool position.</summary>
 public sealed record WorkItemListEntry(
@@ -54,6 +54,8 @@ public sealed class WorkItemListService(IWorkItemSource source, TriageStore tria
             record.Result.Risk.ToString().ToLowerInvariant(),
             record.Result.Reason,
             record.TriagedAt,
-            !string.Equals(record.TextHash, TriageStore.TextHash(item), StringComparison.Ordinal));
+            !string.Equals(record.TextHash, TriageStore.TextHash(item), StringComparison.Ordinal),
+            record.Result.Options,
+            record.Result.Recommended);
     }
 }
