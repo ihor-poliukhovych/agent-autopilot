@@ -1,6 +1,6 @@
 # Tasks and tracker adapters
 
-Dev Autopilot keeps its own tasks. A project with no tracker uses them directly; a project with
+Autopilot keeps its own tasks. A project with no tracker uses them directly; a project with
 a tracker (Azure DevOps today) imports the tracker's items into the same model and writes the
 agent's results back. One internal model means a new tracker is mostly field mapping.
 
@@ -39,7 +39,7 @@ updates the task instead of creating a duplicate.
 
 ## The tracker interface
 
-`IWorkItemTracker` (in `DevAutopilot.Core.Tasks`) is the whole contract. It has two methods:
+`IWorkItemTracker` (in `Autopilot.Core.Tasks`) is the whole contract. It has two methods:
 
 ```csharp
 public interface IWorkItemTracker

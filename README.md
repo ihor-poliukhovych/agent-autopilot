@@ -1,8 +1,8 @@
-# Dev Autopilot
+# Autopilot
 
 **AI agents from draft work item to reviewed pull request.**
 
-Dev Autopilot runs an AI coding agent over a project's backlog and turns the safe
+Autopilot runs an AI coding agent over a project's backlog and turns the safe
 tasks into draft pull requests, while a person keeps the final say on every merge.
 
 It is a local .NET tool. The agent is Claude Code in headless mode, signed in with a
@@ -24,7 +24,7 @@ For a registered project (`--project <key>`) there is also a task pool and backg
 autopilot list                      # open tasks: triage (stale when the text changed), last run, pool
 autopilot pool add 12 14            # queue tasks; also: remove, list, move, clear
 autopilot pool run --limit 3        # one at a time; stops on infrastructure errors; writes POOL-REPORT.md
-autopilot task add "title"          # tasks inside Dev Autopilot, no tracker needed (docs/TRACKERS.md)
+autopilot task add "title"          # tasks inside Autopilot, no tracker needed (docs/TRACKERS.md)
 autopilot ado import --project shop   # bring Azure DevOps work items in as local tasks (read only; --dry-run first)
 autopilot implement 12 --detach     # run in the background; then: job list | job show <id> --log | job cancel <id>
 autopilot schedule set --at 02:30 --yes   # night run (Task Scheduler on Windows, crontab elsewhere)
@@ -80,7 +80,7 @@ flowchart LR
 ## Limits are enforced, not requested
 
 Every tool call the agent makes goes through a PreToolUse hook written in C#
-(`src/DevAutopilot.Core/Policy/ToolPolicyEvaluator.cs`). It fails closed and denies:
+(`src/Autopilot.Core/Policy/ToolPolicyEvaluator.cs`). It fails closed and denies:
 
 - writes outside the configured source and test folders, and any write to
   `.autopilot/` (the tool's own settings) or to risk paths such as project files,
@@ -163,12 +163,12 @@ Details: [docs/UI.md](docs/UI.md).
 
 | Path | What |
 |---|---|
-| `src/DevAutopilot.Cli` | the `autopilot` dotnet tool |
-| `src/DevAutopilot.Core` | pipeline, merge gate, tool policy, config, local modules, evals |
-| `src/DevAutopilot.ClaudeCode` | the Claude Code runner and the PreToolUse hook |
-| `src/DevAutopilot.AzureDevOps` | work items, triage tags and comments, draft pull requests, doctor checks |
-| `src/DevAutopilot.Web` | the local web UI (`autopilot ui`): minimal API and static pages |
-| `src/DevAutopilot.Diagnostics` | read-only MCP server over JSON Lines logs |
+| `src/Autopilot.Cli` | the `autopilot` dotnet tool |
+| `src/Autopilot.Core` | pipeline, merge gate, tool policy, config, local modules, evals |
+| `src/Autopilot.ClaudeCode` | the Claude Code runner and the PreToolUse hook |
+| `src/Autopilot.AzureDevOps` | work items, triage tags and comments, draft pull requests, doctor checks |
+| `src/Autopilot.Web` | the local web UI (`autopilot ui`): minimal API and static pages |
+| `src/Autopilot.Diagnostics` | read-only MCP server over JSON Lines logs |
 | `tests/` | unit and integration tests for each project |
 | `examples/library-catalogue` | a small .NET API with seeded defects, tasks, telemetry and eval cases |
 | `docs/` | design, gate rules, evals, setup guides, roadmap |

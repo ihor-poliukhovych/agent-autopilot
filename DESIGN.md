@@ -1,10 +1,10 @@
-# Dev Autopilot: design
+# Autopilot: design
 
 Status: draft for review. Nothing here is built yet.
 
 ## 1. What it is
 
-Dev Autopilot is a local command-line tool that runs an AI coding agent over your
+Autopilot is a local command-line tool that runs an AI coding agent over your
 project's backlog. It sorts work items into "an agent can do this" and "a person must
 decide", implements the safe ones in isolated git worktrees, reviews them with a
 second agent, and passes the result through a merge gate written in code. The best
@@ -125,7 +125,7 @@ How the limits are enforced, not just asked for:
 
 **Limits of the sandbox.** The hook controls the agent's tools, not the code the agent
 writes. That code runs during build and test (the agent's own runs and the gate's), with
-the rights of the user who started Dev Autopilot. Run it on a machine, or as an OS
+the rights of the user who started Autopilot. Run it on a machine, or as an OS
 user, without access to secrets you care about. A stronger sandbox (a container or a
 separate OS user) is future work.
 
@@ -187,11 +187,11 @@ They are never written to files.
 ## 9. Repository layout
 
 ```
-src/DevAutopilot.Cli            the `autopilot` dotnet tool: init, doctor, triage, run, review, gate, eval
-src/DevAutopilot.Core           pipeline, roles, gate, config, interfaces
-src/DevAutopilot.ClaudeCode     IAgentRunner over `claude -p`, PreToolUse hook
-src/DevAutopilot.AzureDevOps    work items and draft PRs
-src/DevAutopilot.Diagnostics    read-only MCP server (stdio) over a diagnostics source
+src/Autopilot.Cli            the `autopilot` dotnet tool: init, doctor, triage, run, review, gate, eval
+src/Autopilot.Core           pipeline, roles, gate, config, interfaces
+src/Autopilot.ClaudeCode     IAgentRunner over `claude -p`, PreToolUse hook
+src/Autopilot.AzureDevOps    work items and draft PRs
+src/Autopilot.Diagnostics    read-only MCP server (stdio) over a diagnostics source
 tests/...                    unit tests for every project above
 examples/library-catalogue   .NET 10 minimal API with xUnit tests, seeded tasks,
                              fake telemetry and eval cases, ready to try

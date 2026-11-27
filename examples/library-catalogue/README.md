@@ -1,6 +1,6 @@
 # Example: library catalogue
 
-A small .NET 10 minimal API for a lending library, set up so you can try Dev Autopilot on
+A small .NET 10 minimal API for a lending library, set up so you can try Autopilot on
 a real backlog without touching your own code. It has an in-memory store (no database),
 passing xUnit tests, a backlog of eight seeded work items, fake request telemetry, and eval
 cases with hidden acceptance tests.
@@ -15,7 +15,7 @@ tools/TelemetryGenerator/     the program that writes telemetry.jsonl
 ```
 
 The example has its own `Directory.Build.props` (net10.0, nullable, warnings as errors) and
-does not inherit the settings of the dev-autopilot repository, so it behaves the same when
+does not inherit the settings of the autopilot repository, so it behaves the same when
 copied elsewhere.
 
 ## The API

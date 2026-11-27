@@ -5,7 +5,7 @@ Ideas that are planned but not built. Order may change.
 ## Next (in this order)
 
 0. **Project data outside the repository.** *(Done, see D-012.)* Per-user workspace
-   (`%USERPROFILE%\.dev-autopilot`, `--workspace`, `AUTOPILOT_WORKSPACE`) with a SQLite
+   (`%USERPROFILE%\.autopilot`, `--workspace`, `AUTOPILOT_WORKSPACE`) with a SQLite
    registry and a folder per project; `autopilot project add|list|show|remove|import-local`;
    `--project <key>`. The repository-local `.autopilot/` still works. Left over: `eval` on
    workspace projects, comments and run history in the database.
@@ -46,7 +46,7 @@ Ideas that are planned but not built. Order may change.
    owner review, then public.
 4. Harder eval cases, so the eval set can tell configurations apart.
 
-## Write and manage tasks inside Dev Autopilot
+## Write and manage tasks inside Autopilot
 
 Some teams have no tracker they want to connect, or want to try the autopilot before
 connecting one. They should be able to create a project, write tasks, add comments
@@ -85,7 +85,7 @@ The interface and the sync service exist (see D-014 and docs/TRACKERS.md); the A
 ## Gaps before a full migration
 
 What a team running a larger, project-specific autopilot still needs before it can move
-onto Dev Autopilot completely. Generic capabilities only; order inside a group is not fixed.
+onto Autopilot completely. Generic capabilities only; order inside a group is not fixed.
 
 ### P1: blocks a migration
 

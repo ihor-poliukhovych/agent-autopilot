@@ -1,6 +1,6 @@
 # Azure DevOps
 
-Dev Autopilot can read work items from Azure Boards and publish a passed change as a
+Autopilot can read work items from Azure Boards and publish a passed change as a
 **draft pull request** in Azure Repos. The agent never merges: a branch policy on the
 target branch needs a person's approval, and the agent's own identity has no right to
 get around it. This page sets that up step by step.
@@ -96,7 +96,7 @@ in the settings and store the token under that name.
 
 Install the Azure CLI, sign in as the agent identity (`az login`, or
 `az login --service-principal ...` for a service principal) and set `"auth": "az"`.
-Dev Autopilot then runs
+Autopilot then runs
 `az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv`
 for each command and sends the result as a Bearer token.
 
@@ -104,7 +104,7 @@ for each command and sends the result as a Bearer token.
 
 For a machine that runs unattended, register an application (service principal) in
 Microsoft Entra ID, add it to the Azure DevOps organisation as the agent identity, and set
-`"auth": "service-principal"`. Dev Autopilot asks Entra for a token with the client
+`"auth": "service-principal"`. Autopilot asks Entra for a token with the client
 credentials flow, scope `499b84ac-1321-427f-aa17-267ca6975798/.default`. The settings hold
 only the **names** of three user environment variables, never their values:
 
@@ -152,6 +152,7 @@ The work item source and the publisher read the same settings block. Copy it int
 | `repository` | for the publisher | | Repository name or id |
 | `remote` | no | `origin` | The git remote that points to that repository |
 | `query` | no | see below | WIQL query that lists the items the agent may look at |
+| `queryTag` | no | `autopilot` | Tag the default query selects. Ignored when `query` is set. A project registered before the rename may store `dev-autopilot` here to keep its items |
 | `tagPrefix` | no | `autopilot:` | Prefix of the triage tag |
 | `recordTriage` | no | `remote` | `remote`: triage writes a tag and a comment on the work item. `local`: results stay in `.autopilot/out/triage/` and nothing is written to Azure DevOps (read-only) |
 | `auth` | no | `pat` | `pat` (environment variable), `az` (Azure CLI) or `service-principal` (Entra client credentials, see option C) |
@@ -160,17 +161,17 @@ The work item source and the publisher read the same settings block. Copy it int
 | `stateMap` | no | none | Work item state to move to at a step, for example `agent-ready=Active; needs-human=New; in-progress=Active; draft-pr=Resolved`. A step that is not listed changes no state; items already Closed, Done, Removed or Completed are never moved |
 
 Default query: open items of the project (state not Closed, Done or Removed) that have
-the tag `dev-autopilot`, newest first, at most 50:
+the tag `autopilot`, newest first, at most 50:
 
 ```sql
 SELECT [System.Id] FROM WorkItems
 WHERE [System.TeamProject] = @project
   AND [System.State] NOT IN ('Closed', 'Done', 'Removed')
-  AND [System.Tags] CONTAINS 'dev-autopilot'
+  AND [System.Tags] CONTAINS 'autopilot'
 ORDER BY [System.CreatedDate] DESC
 ```
 
-So a person decides which items the agent may look at by adding the tag `dev-autopilot`.
+So a person decides which items the agent may look at by adding the tag `autopilot`.
 The name is chosen so that it does not start with the triage tag prefix `autopilot:`.
 
 Open task files in `.autopilot/tasks/` are not read while the work items come from Azure
@@ -188,7 +189,7 @@ refused.
   into plain text.
 - **Triage** replaces any tag that starts with `autopilot:` by `autopilot:agent-ready`
   or `autopilot:needs-human` (other tags stay) and adds one comment, marked
-  "Written by Dev Autopilot", with the reason, the acceptance criteria and the risk.
+  "Written by Autopilot", with the reason, the acceptance criteria and the risk.
   With `"recordTriage": "local"` it does neither: the result is only written to
   `.autopilot/out/triage/<id>.md` and `.json`, and the module sends no PATCH and no
   comment. Reading items still uses the query and batch endpoints (both POST requests
@@ -208,7 +209,7 @@ Every write looks at the work item first, so running the same step again changes
 | Triage tag | The item's tags are compared; the patch is sent only if they differ. It is guarded by the revision, and retried once from a fresh read if someone else changed the item meanwhile |
 | State | Only moved when `stateMap` has an entry for the step and the state differs |
 | Assigned to | Compared with the current display name or sign-in name; an empty value clears it |
-| Comments | Each comment ends with a visible line `ref:<kind>:<key>` (kinds `triage`, `needs-human`, `run-summary`, `pull-request`). The key is the run id (or the hash of the text). If a comment with that reference exists, nothing is posted. Every comment starts with "Written by Dev Autopilot" |
+| Comments | Each comment ends with a visible line `ref:<kind>:<key>` (kinds `triage`, `needs-human`, `run-summary`, `pull-request`). The key is the run id (or the hash of the text). If a comment with that reference exists, nothing is posted. Every comment starts with "Written by Autopilot" |
 | Link to the pull request | The item's links are read; an `ArtifactLink` to that pull request is added only if missing |
 | Draft pull request | An open pull request from the same branch into the base branch is reused instead of a second one being created |
 
@@ -230,11 +231,11 @@ The write check asks Azure DevOps to validate an update of one item and saves no
 
 ### Troubleshooting: "Failed to load python executable."
 
-Symptom: `az` works in your shell, but Dev Autopilot reports that the Azure CLI did not return a token
+Symptom: `az` works in your shell, but Autopilot reports that the Azure CLI did not return a token
 and shows "Failed to load python executable." Cause: on Windows, `az.cmd` started by its bare name from
 another process cannot find its own folder and exits with code 1 (a plain .NET `Process.Start("az.cmd")`
-does the same). Dev Autopilot now looks `az.cmd` up on `PATH` and starts it by its full path. If you
-still see it, check that `az` is on `PATH` for the process that runs Dev Autopilot, and that
+does the same). Autopilot now looks `az.cmd` up on `PATH` and starts it by its full path. If you
+still see it, check that `az` is on `PATH` for the process that runs Autopilot, and that
 `PYTHONHOME` and `PYTHONPATH` are not meant for another Python (they are removed for the child anyway).
 When a start fails, the message includes the first line of what the CLI printed.
 
@@ -249,7 +250,7 @@ The module's public services, all behind interfaces and built by `AzureDevOpsMod
 | `IAzureDevOpsPullRequests` | `EnsureDraftAsync`, `UpdateDescriptionAsync` |
 | `IAzureDevOpsConnectionChecker` | `CheckAllAsync`, `CheckSignInAsync`, `CheckQueryAsync`, `CheckWorkItemReadAsync`, `CheckWorkItemWriteAsync`, `CheckGitPermissionsAsync`, `GetBranchPolicySummaryAsync` |
 
-They map onto the tracker-neutral `IWorkItemTracker` (`DevAutopilot.Core.Tasks`, see docs/TRACKERS.md) like
+They map onto the tracker-neutral `IWorkItemTracker` (`Autopilot.Core.Tasks`, see docs/TRACKERS.md) like
 this; the adapter itself is the next step and has not been written:
 
 | `IWorkItemTracker` | Azure DevOps module |
@@ -268,7 +269,7 @@ this; the adapter itself is the next step and has not been written:
 | Triage results | Always OK; says whether `recordTriage` is `remote` (tags and a comment) or `local` (nothing written) |
 | Azure DevOps token | The environment variable is set, or `az` returns a token |
 | Azure DevOps project | The project can be read with the token |
-| Work item query | The query runs; shows how many items match and the tag used (`dev-autopilot` for the default query, or "custom query") |
+| Work item query | The query runs; shows how many items match and the tag used (`autopilot` for the default query, or "custom query") |
 | Azure DevOps repository | The repository can be read |
 | Agent can Contribute / Create branch / Contribute to pull requests | The identity has the right |
 | Agent cannot force push, edit policies, manage permissions, bypass policies when pushing, bypass policies when completing pull requests | The identity does **not** have the right; each one it has is a FAIL with the fix |
