@@ -105,6 +105,24 @@ public sealed class PoolStateStore(Workspace.Workspace workspace, string project
             "SELECT work_item_id, category, reason, parked_at FROM pool_parked WHERE project_key = $k ORDER BY parked_at", ("$k", projectKey));
     }
 
+    /// <summary>
+    /// Deletes parked entries of tasks that are not open any more (closed, done, removed, or from a pool that is
+    /// gone). Returns the ids that were removed.
+    /// </summary>
+    public IReadOnlyList<string> PruneParked(IReadOnlySet<string> openIds)
+    {
+        var removed = new List<string>();
+        foreach (var parked in Parked().Where(p => !openIds.Contains(p.WorkItemId)))
+        {
+            if (Unpark(parked.WorkItemId))
+            {
+                removed.Add(parked.WorkItemId);
+            }
+        }
+
+        return removed;
+    }
+
     // ---------- slots ----------
 
     public void SetSlot(string workItemId, string state, string? detail, DateTimeOffset at)
