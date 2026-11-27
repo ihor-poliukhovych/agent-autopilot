@@ -42,6 +42,9 @@ internal static class Endpoints
             return new { version = WebUi.Version, workspace = o.Workspace.Root, azureDevOps = o.AzureDevOps is not null, projects = projects.Select(Summary) };
         });
 
+        // ----- feedback: builds the prefilled GitHub new-issue address; nothing is sent from here -----
+        api.MapPost("/feedback", (FeedbackBody b) => Feedback.Build(b, WebUi.Version, Feedback.OperatingSystem, Feedback.LocalNames()));
+
         // ----- projects and the wizard -----
         api.MapGet("/projects", (WebUiOptions o) => new ProjectRegistry(o.Workspace).List().Select(Summary));
         api.MapPost("/wizard/defaults", (FolderBody b, SetupService s, CancellationToken ct) => s.DefaultsAsync(b.Folder ?? string.Empty, b.BaseBranch, ct));

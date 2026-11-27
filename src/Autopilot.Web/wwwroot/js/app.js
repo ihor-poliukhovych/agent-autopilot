@@ -8,6 +8,7 @@ import * as runs from './runs.js';
 import * as needs from './needs.js';
 import * as settings from './settings.js';
 import * as wizard from './wizard.js';
+import './feedback.js';
 
 const TABS = [
   ['pipeline', 'Pipeline', pipeline], ['tasks', 'Tasks', tasks], ['pool', 'Pool', pool], ['runs', 'Runs', runs],
