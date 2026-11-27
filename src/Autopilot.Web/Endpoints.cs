@@ -88,11 +88,13 @@ internal static class Endpoints
             t.Answer(p.Get(key), number, b.Text ?? string.Empty);
             return t.DetailAsync(p.Get(key), number, ct);
         });
+        tasks.MapPost("/{number:int}/answer-and-continue", (string key, int number, TextBody b, ProjectScopes p, TaskOperations t, CancellationToken ct) =>
+            t.AnswerAndContinueAsync(p.Get(key), number, b.Text ?? string.Empty, ct));
         project.MapGet("/needs-human", (string key, ProjectScopes p, TaskOperations t, CancellationToken ct) => t.NeedsHumanAsync(p.Get(key), ct));
 
         // ----- pool and the night run -----
         var pool = project.MapGroup("/pool");
-        pool.MapGet("/", (string key, ProjectScopes p, PoolOperations o, CancellationToken ct) => o.ListAsync(p.Get(key), ct));
+        pool.MapGet("/", (string key, bool? fresh, ProjectScopes p, PoolOperations o, CancellationToken ct) => o.ListAsync(p.Get(key), ct, fresh ?? false));
         pool.MapPost("/", (string key, IdBody b, ProjectScopes p, PoolOperations o) => new { added = o.Add(p.Get(key), b.Id ?? string.Empty) });
         pool.MapDelete("/{id}", (string key, string id, ProjectScopes p, PoolOperations o) => new { removed = o.Remove(p.Get(key), id) });
         pool.MapPost("/{id}/move", (string key, string id, MoveBody b, ProjectScopes p, PoolOperations o) => new { moved = o.Move(p.Get(key), id, b.Position) });

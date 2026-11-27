@@ -4,8 +4,10 @@
     "label": { "type": "string", "enum": ["agent-ready", "needs-human"] },
     "reason": { "type": "string" },
     "acceptanceCriteria": { "type": "array", "items": { "type": "string" } },
-    "risk": { "type": "string", "enum": ["low", "medium", "high"] }
+    "risk": { "type": "string", "enum": ["low", "medium", "high"] },
+    "options": { "type": "array", "items": { "type": "string" } },
+    "recommended": { "type": "integer" }
   },
-  "required": ["label", "reason", "acceptanceCriteria", "risk"],
+  "required": ["label", "reason", "acceptanceCriteria", "risk", "options", "recommended"],
   "additionalProperties": false
 }

@@ -21,11 +21,18 @@ public enum RiskLevel
     High,
 }
 
+/// <summary>
+/// What triage decided. For a needs-human item, <paramref name="Options"/> are the answers a person can pick
+/// and <paramref name="Recommended"/> is the 1-based number of the one triage recommends (null when it has
+/// none). Both are null in results stored before they existed; see <c>TriageQuestion</c> for those.
+/// </summary>
 public sealed record TriageResult(
     TriageLabel Label,
     string Reason,
     IReadOnlyList<string> AcceptanceCriteria,
-    RiskLevel Risk);
+    RiskLevel Risk,
+    IReadOnlyList<string>? Options = null,
+    int? Recommended = null);
 
 public interface IWorkItemSource
 {

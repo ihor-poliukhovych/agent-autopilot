@@ -1,5 +1,5 @@
 import { get, post, put, del } from './api.js';
-import { h, clear, toast, badge, field, ask, ago } from './dom.js';
+import { h, clear, put as place, toast, badge, field, ask, ago } from './dom.js';
 
 const base = key => `/projects/${encodeURIComponent(key)}/pool`;
 
@@ -12,12 +12,24 @@ const DAYS = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['
  */
 export async function render({ key, reload }) {
   const holder = h('div', { class: 'stack' });
+  const live = h('div', { class: 'stack' });
   const [status, schedule] = await Promise.all([get(`${base(key)}/status`), get(`${base(key)}/schedule`)]);
-  paint(holder, key, status, schedule, reload);
-  return holder;
+  paint(holder, live, key, status, schedule, reload);
+  // refreshLive redraws only the parts that change while a run is active; the settings the person may be typing in stay.
+  const refreshLive = async () => {
+    const next = await get(`${base(key)}/status`);
+    paintLive(live, key, next, reload);
+    return next;
+  };
+  return { element: holder, refreshLive };
 }
 
-function paint(holder, key, status, schedule, reload) {
+function paintLive(live, key, status, reload) {
+  clear(live);
+  place(live, slotsCard(status), decisionsCard(key, status, reload), parkedCard(key, status, reload));
+}
+
+function paint(holder, live, key, status, schedule, reload) {
   clear(holder);
   const s = status.settings;
   const save = async change => {
@@ -25,38 +37,66 @@ function paint(holder, key, status, schedule, reload) {
     catch (e) { toast(e.message, true); await reload(); }
   };
 
-  holder.append(
+  paintLive(live, key, status, reload);
+  place(holder,
     settingsCard(key, s, status, save, reload),
-    slotsCard(status),
-    decisionsCard(key, status, reload),
-    parkedCard(key, status, reload),
+    live,
     integrationCard(key, status, reload),
     scheduleCard(key, s, schedule, reload));
+}
+
+/** One settings row: the label and its explanation on the left, the control on the right. */
+function setting(id, label, hint, control) {
+  return h('div', { class: 'setting' },
+    h('div', { class: 'what' }, h('label', { for: id }, label), hint ? h('p', { class: 'hint', id: id + '-hint' }, hint) : null),
+    h('div', { class: 'control' }, control));
 }
 
 function settingsCard(key, s, status, save, reload) {
   const value = h('b', {}, String(s.concurrency));
   const slider = h('input', {
-    type: 'range', min: 1, max: s.maxConcurrency, step: 1, value: s.concurrency, 'aria-label': 'Agents at once',
+    id: 'set-concurrency', type: 'range', min: 1, max: s.maxConcurrency, step: 1, value: s.concurrency, 'aria-describedby': 'set-concurrency-hint',
     oninput: () => { value.textContent = slider.value; },
     onchange: () => save({ concurrency: Number(slider.value) }),
   });
-  const unattended = h('input', { type: 'checkbox', checked: s.unattended, onchange: () => save({ unattended: unattended.checked }) });
-  const master = h('input', { type: 'checkbox', checked: s.masterEnabled, onchange: () => save({ masterEnabled: master.checked }) });
-  const integration = h('input', { type: 'checkbox', checked: s.integrationEnabled, onchange: () => save({ integrationEnabled: integration.checked }) });
+  const toggle = (id, on, change) => { const box = h('input', { id, type: 'checkbox', checked: on, role: 'switch', 'aria-describedby': id + '-hint', onchange: () => save(change(box.checked)) }); return box; };
+  const unattended = toggle('set-unattended', s.unattended, v => ({ unattended: v }));
+  const master = toggle('set-master', s.masterEnabled, v => ({ masterEnabled: v }));
+  const integration = toggle('set-integration', s.integrationEnabled, v => ({ integrationEnabled: v }));
+
+  // A number field saves when it loses focus or Enter is pressed, and says so if the value is not allowed.
+  const number = (id, current, min, max, placeholder, allowEmpty, apply) => {
+    const input = h('input', { id, type: 'number', inputmode: 'numeric', min, max, step: 1, placeholder, 'aria-describedby': id + '-hint' });
+    input.value = current ?? '';
+    const commit = () => {
+      const text = input.value.trim();
+      if (String(current ?? '') === text) return;
+      const n = text === '' ? 0 : Number(text);
+      const allowed = text === '' ? allowEmpty : Number.isInteger(n) && n >= min && n <= max;
+      if (!allowed) { toast(`Enter a whole number from ${min} to ${max}.`, true); input.value = current ?? ''; return; }
+      save(apply(n));
+    };
+    input.addEventListener('change', commit);
+    input.addEventListener('keydown', ev => { if (ev.key === 'Enter') commit(); });
+    return input;
+  };
+  const maxRuns = number('set-max-runs', s.maxAgentRuns, 1, 100000, 'no limit', true, n => ({ maxAgentRuns: n }));
+  const stopAt = number('set-stop-at', s.stopAtUsagePercent, 1, 100, '80', false, n => ({ stopAtUsagePercent: n }));
+
   return h('section', { class: 'card stack' },
     h('h2', {}, 'How the pool works'),
     status.pause ? h('div', { class: 'banner' },
       h('p', {}, h('b', {}, 'Paused. '), status.pause.reason, status.pause.retryAt ? ` It can start again after ${new Date(status.pause.retryAt).toLocaleString()}.` : ''),
       h('button', { type: 'button', onclick: async () => { try { await post(`${base(key)}/resume`); await reload(); } catch (e) { toast(e.message, true); } } }, 'Resume now')) : null,
-    h('label', { class: 'field' }, h('span', { class: 'lbl' }, h('span', {}, 'Agents at once: '), value),
-      slider,
-      h('p', { class: 'hint' }, `1 to ${s.maxConcurrency}. A change applies to the next task the pool starts; agents that are working finish first. Tasks that write the same files, or wait for another task, still go one after the other.`)),
-    h('label', { class: 'row' }, unattended, h('span', {}, h('b', {}, 'Run without a person. '),
-      'The pool master answers questions and classifies failures. Questions about ' + s.alwaysAsk.join(', ') + ' are never answered by it: those tasks are parked for you.')),
-    h('label', { class: 'row' }, master, h('span', {}, 'The pool master is on (it only acts when the pool runs without a person).')),
-    h('label', { class: 'row' }, integration, h('span', {}, 'Task PRs go into an integration branch; the pool never merges into the base branch.')),
-    h('p', { class: 'muted small' }, `Budget: ${s.maxAgentRuns ? s.maxAgentRuns + ' agent runs in 24 hours' : 'no limit on agent runs'}; stops at ${s.stopAtUsagePercent}% of the usage limit when that is known. Change it with "autopilot pool settings".`));
+    h('div', { class: 'settings' },
+      setting('set-concurrency', h('span', {}, 'Agents at once: ', value),
+        `1 to ${s.maxConcurrency}. A change applies to the next task the pool starts; agents that are working finish first. Tasks that write the same files, or wait for another task, still go one after the other.`, slider),
+      setting('set-unattended', 'Run without a person',
+        'The pool master answers questions and classifies failures. Questions about ' + s.alwaysAsk.join(', ') + ' are never answered by it: those tasks are parked for you.', unattended),
+      setting('set-master', 'The pool master is on', 'It only acts when the pool runs without a person.', master),
+      setting('set-integration', 'Use an integration branch', 'Task PRs go into an integration branch; the pool never merges into the base branch.', integration),
+      setting('set-max-runs', 'Most agent runs in 24 hours', 'Leave empty for no limit. The pool stops starting tasks when the number is reached.', maxRuns),
+      setting('set-stop-at', 'Stop at this usage of the limit (%)', 'From 1 to 100. The pool pauses when your usage limit reaches this share, when that is known.', stopAt)));
 }
 
 function slotsCard(status) {

@@ -73,6 +73,40 @@ public sealed class PromptAndParserTests
     }
 
     [Fact]
+    public void Triage_reads_the_options_and_the_recommendation()
+    {
+        var run = FakeAgentRunner.Answer(new { label = "needs-human", reason = "Which? (A) one (B) two.", acceptanceCriteria = Array.Empty<string>(), risk = "low", options = new[] { "one", " ", "two" }, recommended = 2 });
+
+        Assert.True(OutputParser.TryParseTriage(run, out var triage, out _));
+        Assert.Equal(["one", "two"], triage.Options);
+        Assert.Equal(2, triage.Recommended);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    public void A_recommendation_that_names_no_option_is_dropped(int recommended)
+    {
+        var run = FakeAgentRunner.Answer(new { label = "needs-human", reason = "Which?", acceptanceCriteria = Array.Empty<string>(), risk = "low", options = new[] { "one", "two" }, recommended });
+
+        Assert.True(OutputParser.TryParseTriage(run, out var triage, out _));
+        Assert.Null(triage.Recommended);
+    }
+
+    [Fact]
+    public void Triage_without_options_still_parses_and_the_prompt_and_schema_ask_for_them()
+    {
+        var run = FakeAgentRunner.Answer(new { label = "needs-human", reason = "Which?", acceptanceCriteria = Array.Empty<string>(), risk = "low" });
+
+        Assert.True(OutputParser.TryParseTriage(run, out var triage, out _));
+        Assert.Empty(triage.Options!);
+        Assert.Null(triage.Recommended);
+        Assert.Contains("`options`", PromptLibrary.SystemPrompt(AgentRole.Triage), StringComparison.Ordinal);
+        using var schema = JsonDocument.Parse(PromptLibrary.OutputSchema(AgentRole.Triage));
+        Assert.True(schema.RootElement.GetProperty("properties").TryGetProperty("recommended", out _));
+    }
+
+    [Fact]
     public void Agent_ready_without_criteria_becomes_needs_human()
     {
         var run = FakeAgentRunner.Answer(new { label = "agent-ready", reason = "Looks easy.", acceptanceCriteria = Array.Empty<string>(), risk = "low" });
