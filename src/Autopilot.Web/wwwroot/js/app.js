@@ -148,7 +148,8 @@ function renderTabs(bar, r, current) {
       }).catch(() => { statusChip.hidden = true; });
     }
     if (id === 'inbox') {
-      get(`/projects/${encodeURIComponent(r.key)}/needs-human`).then(items => {
+      get(`/projects/${encodeURIComponent(r.key)}/inbox`).then(items => {
+        link.querySelector('.count')?.remove();
         if (items.length) link.append(h('span', { class: 'count' }, String(items.length)));
       }).catch(() => { /* the badge is optional */ });
     }

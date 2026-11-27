@@ -92,6 +92,8 @@ internal static class Endpoints
             t.AnswerAndContinueAsync(p.Get(key), number, b.Text ?? string.Empty, ct));
         project.MapGet("/needs-human", (string key, ProjectScopes p, TaskOperations t, CancellationToken ct) => t.NeedsHumanAsync(p.Get(key), ct));
 
+        project.MapGet("/inbox", (string key, ProjectScopes p, TaskOperations t, CancellationToken ct) => t.InboxAsync(p.Get(key), ct));
+
         // ----- pool and the night run -----
         var pool = project.MapGroup("/pool");
         pool.MapGet("/", (string key, bool? fresh, ProjectScopes p, PoolOperations o, CancellationToken ct) => o.ListAsync(p.Get(key), ct, fresh ?? false));
