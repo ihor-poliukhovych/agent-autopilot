@@ -2,13 +2,14 @@ import { get, put } from './api.js';
 import { h, clear, toast, busy, badge, field } from './dom.js';
 import { connectAzureDevOps } from './connect.js';
 import { importPanel } from './importpanel.js';
-import { STEPS, trustField, runChecks } from './setupform.js';
+import { STEPS, trustField, runChecks, gateLimitProblems } from './setupform.js';
 
 const base = key => `/projects/${encodeURIComponent(key)}`;
 
 export async function render({ view, key, refreshState }) {
   const draft = await get(`${base(key)}/setup`);
   const mode = 'edit';
+  const original = { ...draft };
 
   view.append(
     h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Project settings'),
@@ -38,6 +39,11 @@ export async function render({ view, key, refreshState }) {
   save.addEventListener('click', () => busy(save, async () => {
     clear(saveResult);
     try {
+      const limitProblems = gateLimitProblems(draft, original);
+      if (limitProblems.length) {
+        saveResult.append(h('div', { class: 'banner bad' }, h('b', {}, 'Not saved. '), ...limitProblems.map(p => h('div', {}, p))));
+        return;
+      }
       await put(`${base(key)}/setup`, draft);
       await refreshState();
       toast('Saved.');
