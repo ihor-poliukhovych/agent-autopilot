@@ -62,8 +62,16 @@ public sealed class PoolStatusUiTests
     {
         var js = Wwwroot("js/pool.js");
         var css = Wwwroot("app.css");
-        Assert.Contains("app-left pool-settings", js);
-        Assert.Contains("app-right", js);
+        var unattended = Wwwroot("js/poolunattended.js");
+        Assert.Contains("app-left pool-settings stack' }, extra.element, runNow", js);
+        Assert.Contains("app-right open stack' }, statusCard, queue, extra.right", js);
         Assert.Matches(@"\.pool-layout\s*\{[^}]*var\(--left-col\)", css);
+        // Left: settings card, run summary, integration branch, schedule. Right: parked tasks and decisions.
+        Assert.Matches(@"place\(holder,\s*settingsCard\([^)]*\),\s*summary,\s*integrationCard\([^)]*\),\s*scheduleCard", unattended);
+        Assert.Contains("'Run summary'", unattended);
+        Assert.Contains("place(live, parkedCard(key, status, reload), decisionsCard(key, status, reload))", unattended);
+        Assert.Contains("right: live", unattended);
+        // Right: stepper and progress strip with events (status card), then the queue with readiness.
+        Assert.Contains("put(statusCard, h('h2', {}, 'Status'), stepper(status), progressStrip(status?.progress), h('h3', {}, 'Events')", js);
     }
 }

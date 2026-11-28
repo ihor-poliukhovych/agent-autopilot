@@ -3,9 +3,30 @@ import { h, clear, toast, badge, ago, field, emptyState, busy, ask } from './dom
 
 const base = key => `/projects/${encodeURIComponent(key)}`;
 
+/**
+ * Master-detail: the task list is always in the left column, the selected task is on the right.
+ * #/p/key/tasks/ID selects that task; otherwise the first task of the list is shown.
+ */
 export async function render(ctx) {
-  if (ctx.rest[0]) return renderDetail(ctx, ctx.rest[0]);
-  return renderList(ctx);
+  const right = h('div', { class: 'app-right open', 'data-part': 'task-detail' });
+  const left = h('div', { class: 'app-left stack', 'data-part': 'task-list' });
+  const sel = { id: ctx.rest[0] ? String(ctx.rest[0]) : null, auto: !ctx.rest[0], paintList: () => {}, loadDetail: async () => {} };
+  ctx.view.append(h('div', { class: 'app-layout tasks-layout', 'data-page': 'tasks' }, left, right));
+
+  const select = async id => {
+    sel.id = String(id);
+    sel.auto = false;
+    sel.paintList();
+    await sel.loadDetail();
+  };
+  sel.loadDetail = async () => {
+    clear(right);
+    if (!sel.id) { right.append(h('div', { class: 'card' }, emptyState('Pick a task in the list to see its text, triage and comments here.', null, 'Select a task'))); return; }
+    await renderDetail({ ...ctx, view: right }, sel.id, () => sel.reloadList?.());
+  };
+  const stop = await renderList({ ...ctx, view: left }, sel, select);
+  await sel.loadDetail();
+  return stop;
 }
 
 function triageBadges(item) {
@@ -27,9 +48,9 @@ function lastRun(item) {
 const STATES = [['', 'All', 'all'], ['needs-human', 'Needs a person', 'needsHuman'], ['agent-ready', 'Agent-ready', 'agentReady'], ['not-triaged', 'Not triaged', 'notTriaged'], ['stale', 'Stale triage', 'stale']];
 const PAGE_SIZE = 25;
 
-async function renderList(ctx) {
+async function renderList(ctx, sel, select) {
   const { view, key } = ctx;
-  const holder = h('div');
+  const holder = h('div', { class: 'stack' });
   view.append(holder);
   let timer = null;
   const query = { state: '', q: '', page: 1 };
@@ -62,30 +83,37 @@ async function renderList(ctx) {
       holder.append(h('div', { class: 'card' }, emptyState(data.localTasks ? 'Write down one thing you want done. It does not need to be perfect: triage tells you what is missing.' : 'No open work items were found in the tracker.', data.localTasks ? { label: 'Add a task', onclick: () => showAddForm(ctx, holder, load) } : { label: 'Check the task source', href: `#/p/${encodeURIComponent(key)}/settings` }, data.localTasks ? 'No tasks yet' : 'Nothing to show')));
       return data;
     }
-    const rows = data.items.map(item => {
+    if (sel.auto || !sel.id) { sel.id = String(data.items[0].id); sel.auto = false; }
+    const cards = h('div', { class: 'stack', 'data-part': 'task-cards' });
+    sel.paintList = () => {
+      for (const c of cards.children) {
+        const on = c.dataset.id === sel.id;
+        c.classList.toggle('selected', on);
+        if (on) c.setAttribute('aria-current', 'true'); else c.removeAttribute('aria-current');
+      }
+    };
+    for (const item of data.items) {
       const running = data.activeJobs[item.id];
       const triaging = data.triageJobs[item.id];
-      return h('tr', {},
-        h('td', { 'data-label': 'Id' }, item.url ? h('a', { href: item.url, target: '_blank', rel: 'noopener noreferrer' }, item.id) : h('a', { href: `#/p/${encodeURIComponent(key)}/tasks/${encodeURIComponent(item.id)}` }, '#' + item.id)),
-        h('td', { 'data-label': 'Task' },
-          item.url ? item.title : h('a', { href: `#/p/${encodeURIComponent(key)}/tasks/${encodeURIComponent(item.id)}` }, item.title),
-          h('div', { class: 'row', style: 'margin-top:.25rem' }, triageBadges(item)),
-          triageJobBadge(triaging),
-          item.triage ? h('div', { class: 'muted small' }, item.triage.reason) : null),
-        h('td', { 'data-label': 'Last run' }, lastRun(item)),
-        h('td', { 'data-label': 'Pool' }, item.inPool ? badge(`pool #${item.poolPosition}`, 'info') : h('span', { class: 'muted' }, '-')),
-        h('td', { class: 'actions' }, h('div', { class: 'row' },
-          running ? badge('running', 'info') : h('button', { type: 'button', disabled: data.status.busy, onclick: ev => start(ev.currentTarget, ctx, item, load) }, 'Start'),
-          item.inPool ? null : h('button', { type: 'button', onclick: ev => toPool(ev.currentTarget, ctx, item, load) }, 'Add to pool'),
-          item.triage && !item.triage.stale ? null : h('button', { type: 'button', class: 'ghost', title: 'Ask the agent to triage this item', disabled: triaging?.isActive, onclick: ev => triage(ev.currentTarget, ctx, item, load) }, 'Triage'))));
-    });
-    holder.append(h('div', { class: 'card table-wrap' }, h('table', { class: 'stack-sm' },
-      h('thead', {}, h('tr', {}, ['Id', 'Task', 'Last run', 'Pool', ''].map(t => h('th', {}, t)))),
-      h('tbody', {}, rows))));
+      cards.append(h('button', {
+        type: 'button', class: 'card inbox-card task-card', 'data-id': String(item.id),
+        onclick: () => select(item.id),
+      },
+      h('div', { class: 'inbox-head' },
+        h('span', { class: 'inbox-id' }, `#${item.id}`),
+        running ? badge('running', 'info') : null,
+        item.inPool ? badge(`pool #${item.poolPosition}`, 'info') : null),
+      h('div', { class: 'inbox-title' }, item.title),
+      h('div', { class: 'row', style: 'margin-top:.25rem' }, triageBadges(item)),
+      triageJobBadge(triaging)));
+    }
+    holder.append(cards);
+    sel.paintList();
     holder.append(pager(data, query, load));
     return data;
   }
 
+  sel.reloadList = () => load().catch(() => {});
   const data = await load();
   if (data.status.busy || Object.values(data.triageJobs).some(j => j.isActive)) timer = setInterval(() => load().catch(() => {}), 5000);
   return () => { if (timer) clearInterval(timer); };
@@ -212,16 +240,16 @@ function triageSection(key, task, detail, reload) {
       : h('p', { class: 'muted' }, 'Not triaged yet. Triage tells you whether the agent can do this alone or a person must decide first.'));
 }
 
-async function renderDetail(ctx, id) {
+async function renderDetail(ctx, id, changed) {
   const { view, key } = ctx;
-  const holder = h('div');
+  const holder = h('div', { class: 'stack' });
   view.append(holder);
   const number = Number(id);
 
   async function load() {
     let detail;
     try { detail = await get(`${base(key)}/tasks/${number}`); }
-    catch (e) { clear(holder); holder.append(h('div', { class: 'banner bad' }, e.message), h('a', { href: `#/p/${encodeURIComponent(key)}/tasks` }, 'Back to the tasks')); return; }
+    catch (e) { clear(holder); holder.append(h('div', { class: 'banner bad' }, e.message)); return; }
     const t = detail.task;
     const title = h('input', { type: 'text', value: t.title, maxlength: 300 });
     const body = h('textarea', { rows: 8 }); body.value = t.body;
@@ -229,7 +257,6 @@ async function renderDetail(ctx, id) {
     const comment = h('textarea', { rows: 3, placeholder: 'Write a comment' });
     clear(holder);
     holder.append(
-      h('p', {}, h('a', { href: `#/p/${encodeURIComponent(key)}/tasks` }, '← All tasks')),
       h('div', { class: 'page-head' },
         h('div', {}, h('h1', {}, `#${t.number} ${t.title}`),
           h('p', {}, badge(t.state, t.closed ? '' : 'ok'), ' ', `added by ${t.author} ${ago(t.createdAt)}`)),
@@ -254,6 +281,7 @@ async function renderDetail(ctx, id) {
         } }, 'Add comment'))),
       h('section', { class: 'card' }, h('h2', {}, 'History'),
         detail.history.length ? h('ul', { class: 'stack', style: 'padding-left:1.1rem;margin:0' }, detail.history.map(e => h('li', {}, `${e.summary} `, h('span', { class: 'muted small' }, ago(e.createdAt)), e.detail ? h('div', { class: 'muted small prewrap' }, e.detail) : null))) : h('p', { class: 'muted' }, 'Nothing yet.')));
+    if (changed) changed();
   }
   await load();
 }

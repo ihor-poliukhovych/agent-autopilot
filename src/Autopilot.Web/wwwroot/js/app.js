@@ -18,7 +18,6 @@ const TABS = [
 // Old addresses keep working; they sit under the Inbox tab.
 const LEGACY = { runs: runs, run: runs, needs: needs };
 // Pages drawn in the shared two-column layout.
-const LAYOUT = new Set(['tasks', 'pool', 'needs']);
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const switcher = document.getElementById('project-switch');
@@ -96,17 +95,8 @@ async function route() {
         renderTabs(tabBar, r, current);
         clear(tabs).append(tabBar);
         document.title = `${project.displayName} · Autopilot`;
-        let target = stage;
-        if (LAYOUT.has(page)) {
-          target = h('div', { class: 'app-right open' });
-          const body = h('div');
-          const close = h('button', { type: 'button', class: 'drawer-close', onclick: () => target.classList.remove('open') }, 'Back to menu');
-          target.append(close, body);
-          const show = h('button', { type: 'button', class: 'drawer-open', onclick: () => target.classList.add('open') }, 'Show page');
-          stage.append(h('div', { class: 'app-layout' }, leftColumn(r.key, page, show), target));
-          target = body;
-        }
-        stop = await screen.render({ view: target, project, key: r.key, rest: r.rest, state, go, refreshState }) || null;
+        // Each page draws its own columns; the shell reserves none.
+        stop = await screen.render({ view: stage, project, key: r.key, rest: r.rest, state, go, refreshState }) || null;
       }
     } else if (r.name === 'new') {
       stop = await wizard.render({ view: stage, mode: 'new', state, go, refreshState }) || null;
@@ -127,11 +117,6 @@ async function route() {
   clear(tabs).append(tabBar);
   view.replaceChildren(stage);
   view.focus({ preventScroll: true });
-}
-
-// The fixed left column: page content only (the pages fill it) plus the drawer button.
-function leftColumn(key, page, showButton) {
-  return h('div', { class: 'app-left' }, showButton);
 }
 
 function renderTabs(bar, r, current) {

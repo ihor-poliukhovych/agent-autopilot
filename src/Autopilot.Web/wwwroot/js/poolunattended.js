@@ -12,24 +12,28 @@ const DAYS = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['
  */
 export async function render({ key, reload }) {
   const holder = h('div', { class: 'stack' });
+  const summary = h('div', { class: 'stack' });
   const live = h('div', { class: 'stack' });
   const [status, schedule] = await Promise.all([get(`${base(key)}/status`), get(`${base(key)}/schedule`)]);
-  paint(holder, live, key, status, schedule, reload);
+  paint(holder, summary, live, key, status, schedule, reload);
   // refreshLive redraws only the parts that change while a run is active; the settings the person may be typing in stay.
   const refreshLive = async () => {
     const next = await get(`${base(key)}/status`);
-    paintLive(live, key, next, reload);
+    paintLive(summary, live, key, next, reload);
     return next;
   };
-  return { element: holder, refreshLive };
+  // element: the left column (settings, run summary, integration, schedule). right: the wide right area (parked, decisions).
+  return { element: holder, right: live, refreshLive };
 }
 
-function paintLive(live, key, status, reload) {
+function paintLive(summary, live, key, status, reload) {
+  clear(summary);
+  place(summary, slotsCard(status));
   clear(live);
-  place(live, slotsCard(status), decisionsCard(key, status, reload), parkedCard(key, status, reload));
+  place(live, parkedCard(key, status, reload), decisionsCard(key, status, reload));
 }
 
-function paint(holder, live, key, status, schedule, reload) {
+function paint(holder, summary, live, key, status, schedule, reload) {
   clear(holder);
   const s = status.settings;
   const save = async change => {
@@ -37,10 +41,10 @@ function paint(holder, live, key, status, schedule, reload) {
     catch (e) { toast(e.message, true); await reload(); }
   };
 
-  paintLive(live, key, status, reload);
+  paintLive(summary, live, key, status, reload);
   place(holder,
     settingsCard(key, s, status, save, reload),
-    live,
+    summary,
     integrationCard(key, status, reload),
     scheduleCard(key, s, schedule, reload));
 }
@@ -100,10 +104,11 @@ function settingsCard(key, s, status, save, reload) {
 }
 
 function slotsCard(status) {
-  if (!status.slots.length) return null;
-  return h('section', { class: 'card stack' },
-    h('h2', {}, 'Right now'),
-    h('div', { class: 'table-wrap' }, h('table', { class: 'stack-sm' },
+  const p = status.progress;
+  return h('section', { class: 'card stack', 'data-part': 'run-summary' },
+    h('h2', {}, 'Run summary'),
+    p ? h('p', { class: 'muted' }, `${p.done} of ${p.total} done, ${p.parked} parked`) : null,
+    !status.slots.length ? h('p', { class: 'muted' }, 'Nothing is running right now.') : h('div', { class: 'table-wrap' }, h('table', { class: 'stack-sm' },
       h('thead', {}, h('tr', {}, ['Task', 'State', 'Detail', 'Since'].map(t => h('th', {}, t)))),
       h('tbody', {}, status.slots.map(x => h('tr', {},
         h('td', { 'data-label': 'Task' }, `#${x.id} ${x.title}`),

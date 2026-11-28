@@ -84,12 +84,43 @@ public sealed class NavigationLayoutTests
     }
 
     [Fact]
-    public void Pipeline_tasks_pool_and_needs_pages_are_drawn_in_the_shared_layout()
+    public void Shell_reserves_no_empty_left_column_and_pages_draw_their_own_layout()
     {
         var js = Wwwroot("js/app.js");
-        Assert.Contains("const LAYOUT = new Set(['tasks', 'pool', 'needs'])", js);
-        Assert.DoesNotContain("'pipeline', 'tasks', 'pool'", js);
-        Assert.Contains("class: 'app-layout'", js);
+        Assert.DoesNotContain("LAYOUT", js);
+        Assert.DoesNotContain("class: 'app-layout'", js);
+        Assert.DoesNotContain("class: 'app-left'", js);
+        Assert.Contains("view: stage", js);
+        Assert.Contains("class: 'app-layout pool-layout'", Wwwroot("js/pool.js"));
+        Assert.Contains("class: 'app-layout tasks-layout'", Wwwroot("js/tasks.js"));
+    }
+
+    [Fact]
+    public void Tasks_tab_keeps_the_list_left_and_shows_the_selected_task_right()
+    {
+        var js = Wwwroot("js/tasks.js");
+        var css = Wwwroot("app.css");
+        Assert.Contains("h('div', { class: 'app-layout tasks-layout', 'data-page': 'tasks' }, left, right)", js);
+        Assert.Contains("class: 'app-left stack', 'data-part': 'task-list'", js);
+        Assert.Contains("class: 'app-right open', 'data-part': 'task-detail'", js);
+        Assert.Contains("renderList({ ...ctx, view: left }", js);
+        Assert.Contains("renderDetail({ ...ctx, view: right }", js);
+        Assert.Contains("onclick: () => select(item.id)", js);
+        Assert.Contains("sel.id = String(data.items[0].id)", js);
+        Assert.DoesNotContain("All tasks", js);
+        Assert.Matches(@"\.tasks-layout\s*\{[^}]*var\(--left-col\)\s+minmax\(0,\s*1fr\)", css);
+    }
+
+    [Fact]
+    public void Pool_and_tasks_collapse_to_one_column_without_overflow_at_800px_and_fill_two_at_1400px()
+    {
+        var css = Wwwroot("app.css");
+        Assert.Matches(@"@media \(max-width: 900px\)\s*\{[^@]*\.pool-layout,\s*\.tasks-layout\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)", css);
+        Assert.Matches(@"\.pool-layout \.app-right,\s*\.tasks-layout \.app-right\s*\{[^}]*position: static[^}]*transform: none", css);
+        Assert.Contains("overflow-x: hidden", css);
+        // Above 900px the left column is a fixed width and the right one takes all the rest, so no gap is left.
+        Assert.Matches(@"\.tasks-layout\s*\{[^}]*var\(--left-col\)\s+minmax\(0,\s*1fr\)", css);
+        Assert.Matches(@"\.pool-layout\s*\{[^}]*var\(--left-col\)\s+minmax\(0,\s*1fr\)", css);
     }
 
     [Fact]
@@ -116,7 +147,7 @@ public sealed class NavigationLayoutTests
     {
         var js = Wwwroot("js/app.js");
         var css = Wwwroot("app.css");
-        Assert.Contains("function leftColumn(", js);
+        Assert.DoesNotContain("function leftColumn(", js);
         Assert.DoesNotContain("app-links", js);
         Assert.DoesNotContain("app-links", css);
         Assert.DoesNotContain(":empty", css);
@@ -125,10 +156,7 @@ public sealed class NavigationLayoutTests
     [Fact]
     public void Drawer_can_be_opened_and_closed_on_phone_width()
     {
-        var js = Wwwroot("js/app.js");
         var css = Wwwroot("app.css");
-        Assert.Contains("target.classList.add('open')", js);
-        Assert.Contains("target.classList.remove('open')", js);
         Assert.Matches(@"\.app-right\.open\s*\{\s*transform:\s*none", css);
         Assert.Matches(@"\.drawer-open,\s*\.drawer-close\s*\{\s*display:\s*none", css);
     }
