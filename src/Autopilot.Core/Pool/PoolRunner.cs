@@ -78,6 +78,9 @@ public sealed class PoolRunOptions
 
     /// <summary>The id of this process (a test gives its own). Null uses the real one.</summary>
     public Func<int>? CurrentPid { get; init; }
+
+    /// <summary>Where the run's events are appended (one run id per <c>RunAsync</c> call). Null records nothing.</summary>
+    public PoolRunEventStore? Events { get; init; }
 }
 
 /// <summary>
@@ -126,6 +129,21 @@ public sealed class PoolRunner(
         var state = _options.State;
         var unattended = _options.Unattended ?? _options.Config().Unattended;
         using var held = runLock.Acquire(projectKey, "pool run");
+        var runId = Guid.NewGuid().ToString("N");
+        var eventLock = new object();
+        void Record(PoolRunEvent runEvent, string? taskId = null, string? detail = null)
+        {
+            if (_options.Events is { } events)
+            {
+                lock (eventLock)
+                {
+                    events.Append(runId, runEvent, clock.GetUtcNow(), taskId, detail);
+                }
+            }
+        }
+
+        Record(PoolRunEvent.Enqueue);
+        Record(PoolRunEvent.Start);
         var queue = pool.List().Select(e => e.WorkItemId).ToList();
         var done = new List<ImplementResult>();
         var rejected = new List<ImplementResult>();
@@ -154,6 +172,8 @@ public sealed class PoolRunner(
             if (pause.Reason.StartsWith(BudgetPausePrefix, StringComparison.Ordinal))
             {
                 state.Resume();
+                Record(PoolRunEvent.PauseBudget, null, pause.Reason);
+                Record(PoolRunEvent.Resume);
             }
             else if (pause.RetryAt is { } retry && retry > clock.GetUtcNow())
             {
@@ -162,6 +182,8 @@ public sealed class PoolRunner(
             else
             {
                 state.Resume();
+                Record(PoolRunEvent.PauseInfrastructure, null, pause.Reason);
+                Record(PoolRunEvent.Resume);
             }
         }
 
@@ -230,6 +252,7 @@ public sealed class PoolRunner(
             {
                 var when = resetsAt is { } at ? $", resets at {TimeZoneInfo.ConvertTime(at, clock.LocalTimeZone):yyyy-MM-dd HH:mm}" : string.Empty;
                 state?.Pause($"{BudgetPausePrefix}{when}. {reason}", resetsAt, clock.GetUtcNow());
+                Record(PoolRunEvent.PauseBudget, null, reason);
             }
 
             return reason;
@@ -243,6 +266,8 @@ public sealed class PoolRunner(
         var tried = 0;
         var lastWait = new Dictionary<string, string>(StringComparer.Ordinal);
 
+        try
+        {
         while (!ct.IsCancellationRequested)
         {
             // Fill the free slots, in queue order, with tasks that may start now.
@@ -286,6 +311,7 @@ public sealed class PoolRunner(
                         {
                             var why = wait["dependency failed:".Length..].Trim();
                             parked.Add(Park(id, null, $"It depends on a task that did not finish ({why})."));
+                            Record(PoolRunEvent.TaskParked, id, "dependency failed");
                             pending.RemoveAt(i);
                             state?.ClearSlot(id);
                             pool.Remove(id);
@@ -309,7 +335,8 @@ public sealed class PoolRunner(
                     lastWait.Remove(id);
                     var started = clock.GetUtcNow();
                     state?.SetSlot(id, "running", $"slot {running.Count + 1}", started);
-                    running[Work(id, unattended, Reserve, decisions, bugs, cleanedUp, () => Interlocked.Increment(ref decisionsMade), ct)] = (id, started);
+                    Record(PoolRunEvent.SlotGranted, id, $"slot {running.Count + 1}");
+                    running[Work(id, unattended, Reserve, decisions, bugs, cleanedUp, () => Interlocked.Increment(ref decisionsMade), Record, ct)] = (id, started);
                 }
             }
 
@@ -321,6 +348,7 @@ public sealed class PoolRunner(
                     foreach (var id in pending.ToList())
                     {
                         parked.Add(Park(id, null, "It waits for tasks that can never finish first (a dependency cycle)."));
+                        Record(PoolRunEvent.TaskParked, id, "dependency cycle");
                         state?.ClearSlot(id);
                         pool.Remove(id);
                     }
@@ -365,6 +393,7 @@ public sealed class PoolRunner(
                     {
                         case BucketDone:
                             done.Add(outcome.Result!);
+                            Record(PoolRunEvent.TaskMerged, doneId);
                             break;
                         case BucketNeedsHuman:
                             needsHuman.Add(outcome.Result!);
@@ -372,6 +401,7 @@ public sealed class PoolRunner(
                             break;
                         case BucketParked:
                             parked.Add(new ParkedTask(doneId, null, outcome.Message ?? outcome.Result!.Message, clock.GetUtcNow()));
+                            Record(PoolRunEvent.TaskParked, doneId, outcome.Message ?? outcome.Result!.Message);
                             failedIds.Add(doneId);
                             break;
                         default:
@@ -383,9 +413,17 @@ public sealed class PoolRunner(
                     break;
             }
         }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Whatever went wrong, the report is still written and the exit code follows the result.
+            stopped ??= $"The pool stopped on an unexpected error: {ex.GetType().Name}: {ex.Message}";
+        }
 
         ct.ThrowIfCancellationRequested();
         state?.ClearSlots();
+        Record(PoolRunEvent.WorkFinished);
+        Record(PoolRunEvent.RunFinished, null, stopped);
         foreach (var id in pending)
         {
             notReached.Add(stopped is not null
@@ -411,8 +449,17 @@ public sealed class PoolRunner(
         {
             if (!infos.TryGetValue(id, out var info))
             {
-                info = (_options.Tasks is { } tasks ? await tasks.DescribeAsync(id, ct).ConfigureAwait(false) : null)
-                    ?? new PoolTaskInfo(id, string.Empty, ["**"], []);
+                PoolTaskInfo? described = null;
+                try
+                {
+                    described = _options.Tasks is { } tasks ? await tasks.DescribeAsync(id, ct).ConfigureAwait(false) : null;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // A task that cannot be read is tried alone; its own run records what is wrong.
+                }
+
+                info = described ?? new PoolTaskInfo(id, string.Empty, ["**"], []);
                 infos[id] = info;
             }
 
@@ -466,10 +513,10 @@ public sealed class PoolRunner(
         }
     }
 
-    private Task<Processed> Work(string id, bool unattended, Func<string?, string, string?> reserve, List<PoolDecision> decisions, List<string> bugs, List<string> cleanedUp, Func<int> nextDecision, CancellationToken ct) =>
-        Task.Run(() => WorkAsync(id, unattended, reserve, decisions, bugs, cleanedUp, nextDecision, ct), CancellationToken.None);
+    private Task<Processed> Work(string id, bool unattended, Func<string?, string, string?> reserve, List<PoolDecision> decisions, List<string> bugs, List<string> cleanedUp, Func<int> nextDecision, Action<PoolRunEvent, string?, string?> record, CancellationToken ct) =>
+        Task.Run(() => WorkAsync(id, unattended, reserve, decisions, bugs, cleanedUp, nextDecision, record, ct), CancellationToken.None);
 
-    private async Task<Processed> WorkAsync(string id, bool unattended, Func<string?, string, string?> reserve, List<PoolDecision> decisions, List<string> bugs, List<string> cleanedUp, Func<int> nextDecision, CancellationToken ct)
+    private async Task<Processed> WorkAsync(string id, bool unattended, Func<string?, string, string?> reserve, List<PoolDecision> decisions, List<string> bugs, List<string> cleanedUp, Func<int> nextDecision, Action<PoolRunEvent, string?, string?> record, CancellationToken ct)
     {
         IDisposable? taskLock = null;
         try
@@ -606,6 +653,15 @@ public sealed class PoolRunner(
                 }
             }
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A locked worktree ("being used by another process") or any other error of one task never ends the pool:
+            // the task is parked as interrupted and the pool goes on with the next one.
+            var reason = ex is IOException
+                ? $"Interrupted: a file or folder of the task is in use by another process ({ex.Message}). It can be tried again."
+                : $"Interrupted by an unexpected error ({ex.GetType().Name}): {ex.Message}";
+            return Parked(new ImplementResult(id, ImplementOutcome.Failed, reason), null, reason);
+        }
         finally
         {
             taskLock?.Dispose();
@@ -624,6 +680,11 @@ public sealed class PoolRunner(
             var triage = await tasks.TriageStateAsync(id, ct).ConfigureAwait(false);
             if (triage.State == PoolTriageState.Missing)
             {
+                if (TriageHolderPark() is { } busy)
+                {
+                    return busy;
+                }
+
                 if (reserve(id, "triage") is { } problem)
                 {
                     return new Processed(BucketStopped, null, problem, true);
@@ -662,6 +723,13 @@ public sealed class PoolRunner(
                 return NotReadyPark(verdict.Category, park);
             }
 
+            if (TriageHolderPark() is { } held)
+            {
+                // Someone else triages it now: use what is stored, if it is good.
+                triage = await tasks.TriageStateAsync(id, ct).ConfigureAwait(false);
+                return triage.State == PoolTriageState.AgentReady ? null : held;
+            }
+
             if (reserve(id, "triage") is { } budget)
             {
                 return new Processed(BucketStopped, null, budget, true);
@@ -673,6 +741,13 @@ public sealed class PoolRunner(
                 : NotReadyPark(verdict.Category, $"The task is still not ready after the master's answer. Triage says {triage.Label}: {Excerpt(triage.Detail)}");
         }
 
+        // When a live process (the web UI) holds the triage lock of this task, the pool does not triage it: it parks
+        // the task as waiting and names the holder. Null when nobody triages it.
+        Processed? TriageHolderPark() =>
+            _options.TaskLock?.TriageHolder(projectKey, id) is { } holder
+                ? NotReadyPark(null, $"Waiting: the triage of this task is running in {holder.Owner} (process {holder.Pid}) and no stored result exists yet. Run the pool again when it has finished.")
+                : null;
+
         Processed NotReadyPark(string? category, string reason) =>
             Parked(new ImplementResult(id, ImplementOutcome.NotReady, reason), category, reason);
 
@@ -683,6 +758,7 @@ public sealed class PoolRunner(
             if (unattended)
             {
                 _options.State?.Pause(reason, retryAt, now);
+                record(reason.StartsWith(BudgetPausePrefix, StringComparison.Ordinal) ? PoolRunEvent.PauseBudget : PoolRunEvent.PauseInfrastructure, null, reason);
             }
 
             var message = unattended ? $"Stopped at {taskId}: {reason} The pool is paused; it can start again at {retryAt.ToLocalTime():HH:mm}." : $"Stopped at {taskId}: {reason}";

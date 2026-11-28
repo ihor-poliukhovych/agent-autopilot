@@ -41,6 +41,12 @@ public sealed record AutopilotPipelineOptions
     /// implementer runs get it as the <c>diagnostics</c> server plus its four tools; the reviewer never does.
     /// </summary>
     public McpServerSpec? DiagnosticsServer { get; init; }
+
+    /// <summary>
+    /// Takes the per-task triage lock (the id of the work item is the argument) and returns the handle that releases it.
+    /// Throws <see cref="Pool.TaskLockHeldException"/> when a live process already triages that task. Null means no lock.
+    /// </summary>
+    public Func<string, IDisposable>? AcquireTriageLock { get; init; }
 }
 
 /// <summary>
@@ -91,18 +97,59 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
             return results;
         }
 
+        // One triage per task at a time, across processes (the web UI and the pool): the second one is refused.
+        var taskLocks = new List<IDisposable>();
+        try
+        {
+            if (options.AcquireTriageLock is { } acquire)
+            {
+                var free = new List<WorkItem>();
+                foreach (var item in items)
+                {
+                    try
+                    {
+                        taskLocks.Add(acquire(item.Id));
+                        free.Add(item);
+                    }
+                    catch (Pool.TaskLockHeldException ex)
+                    {
+                        results.Add(new TriageItemResult(item.Id, item.Title, null, $"Not triaged: {ex.Message}"));
+                    }
+                }
+
+                items = free;
+                if (items.Count == 0)
+                {
+                    return results;
+                }
+            }
+
+            await TriageLockedAsync(workItemId, items, results, ct).ConfigureAwait(false);
+            return results;
+        }
+        finally
+        {
+            foreach (var taskLock in taskLocks)
+            {
+                taskLock.Dispose();
+            }
+        }
+    }
+
+    private async Task TriageLockedAsync(string? workItemId, IReadOnlyList<WorkItem> items, List<TriageItemResult> results, CancellationToken ct)
+    {
         var baseCommit = await ResolveBaseAsync(ct).ConfigureAwait(false);
         if (baseCommit is null)
         {
             results.AddRange(items.Select(i => new TriageItemResult(i.Id, i.Title, null, BaseMissingMessage)));
-            return results;
+            return;
         }
 
         var context = await LoadContextAsync(baseCommit, ct).ConfigureAwait(false);
         if (context.Missing.Count > 0)
         {
             results.AddRange(items.Select(i => new TriageItemResult(i.Id, i.Title, null, ContextMissingMessage(context))));
-            return results;
+            return;
         }
 
         // Triage reads the code at the base branch, in a worktree outside the project.
@@ -122,8 +169,6 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
         {
             await RemoveWorktreeIfPresentAsync(worktree).ConfigureAwait(false);
         }
-
-        return results;
     }
 
     public async Task<ImplementResult> ImplementAsync(string workItemId, CancellationToken ct)

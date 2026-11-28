@@ -232,12 +232,25 @@ public static class PipelineCommands
         return option;
     }
 
+    /// <summary>The per-task triage lock shared with the pool. A folder that is not a registered project has no workspace, so no lock.</summary>
+    internal static Func<string, IDisposable>? TriageLockFor(ProjectTarget target, CliContext context)
+    {
+        if (target.Project is not { } project || target.Workspace is not { } workspace)
+        {
+            return null;
+        }
+
+        var locks = new TaskRunLock(workspace, context.IsProcessAlive);
+        return id => locks.AcquireTriage(project.Key, id, "triage");
+    }
+
     internal static async Task<int> WithPipelineAsync(ProjectTarget target, string? source, CliContext context, CancellationToken ct, Func<AutopilotPipeline, Task<int>> body)
     {
         AutopilotPipeline pipeline;
         try
         {
-            pipeline = await ProjectServices.CreatePipelineAsync(target.RepoRoot, context, ct, source, target.DataFolder, target.LocalTasks).ConfigureAwait(false);
+            pipeline = await ProjectServices.CreatePipelineAsync(target.RepoRoot, context, ct, source, target.DataFolder, target.LocalTasks,
+                acquireTriageLock: TriageLockFor(target, context)).ConfigureAwait(false);
         }
         catch (ProjectSetupException ex)
         {

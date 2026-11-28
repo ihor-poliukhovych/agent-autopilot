@@ -68,8 +68,17 @@ internal sealed class FakeTasks : IPoolTasks
 
     public List<string> LeftoversAsked { get; } = [];
 
+    /// <summary>An error the source throws when the pool touches this task (a locked worktree, for example).</summary>
+    public Dictionary<string, Exception> Faults { get; } = [];
+
     public Task<string?> ReleaseLeftoversAsync(string id, CancellationToken ct)
     {
+        if (Faults.TryGetValue(id, out var fault))
+        {
+            throw fault;
+        }
+
+
         lock (LeftoversAsked) { LeftoversAsked.Add(id); }
         return Task.FromResult(Leftovers.TryGetValue(id, out var said) ? said : null);
     }
