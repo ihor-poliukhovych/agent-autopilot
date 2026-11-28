@@ -45,9 +45,11 @@ export async function render({ view, key }) {
       h('div', { class: 'inbox-head' },
         h('span', { class: 'inbox-id' }, `#${item.id}`),
         item.kind === 'parked' ? badge('parked', 'warn') : badge('question', 'info'),
+        item.kind === 'question' && item.parkReason ? badge('parked', 'warn') : null,
         h('span', { class: 'inbox-age muted small' }, ago(item.createdAt))),
       h('div', { class: 'inbox-title' }, item.title),
-      h('p', { class: 'inbox-summary muted small' }, item.kind === 'parked' ? (item.parkReason || '') : (item.question?.question || ''))));
+      h('p', { class: 'inbox-summary muted small' }, item.kind === 'parked' ? (item.parkReason || '') : (item.question?.question || '')),
+      item.kind === 'question' && item.parkReason ? h('p', { class: 'inbox-summary muted small' }, `Parked: ${item.parkReason}`) : null));
     }
   }
 
@@ -68,6 +70,11 @@ export async function render({ view, key }) {
       return;
     }
     // A question: the needs-a-person card with its option buttons, free-text field and Save and continue.
+    if (selected.parkReason) {
+      detail.append(h('section', { class: 'card stack', 'data-part': 'inbox-parked-note' },
+        h('div', { class: 'row between' }, h('strong', {}, 'This task is also parked'), badge('parked', 'warn')),
+        h('p', { class: 'prewrap' }, selected.parkReason)));
+    }
     const holder = h('div');
     detail.append(holder);
     const id = selected.id;
