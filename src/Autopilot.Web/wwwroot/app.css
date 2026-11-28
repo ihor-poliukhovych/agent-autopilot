@@ -65,7 +65,7 @@ pre { background: var(--code-bg); border: 1px solid var(--border); border-radius
 .chip.warn { background: var(--warn-soft); color: var(--warn); }
 .chip.ok { background: var(--ok-soft); color: var(--ok); }
 @keyframes pulse { 50% { opacity: .25; } }
-.tabs { display: flex; gap: var(--s1); padding: 0 var(--s4); background: var(--surface); border-bottom: 1px solid var(--border); overflow-x: auto; }
+.tabs { display: flex; gap: var(--s1); padding: 0 var(--s4); background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .tabs a { padding: .7rem .85rem; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; font-weight: 550; }
 .tabs a:hover { color: var(--text); }
 .tabs a[aria-current="page"] { color: var(--text); border-bottom-color: var(--accent); }
@@ -146,7 +146,7 @@ th, td { text-align: left; padding: .6rem .6rem; border-bottom: 1px solid var(--
 th { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 650; }
 tr:last-child td { border-bottom: 0; }
 td.actions { white-space: nowrap; text-align: right; }
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow: visible; }
 
 /* badges and states */
 .badge { display: inline-flex; align-items: center; gap: .3rem; padding: .05rem .55rem; border-radius: var(--radius-pill); font-size: var(--fs-xs); font-weight: 650; background: var(--surface-2); color: var(--muted); white-space: nowrap; }
@@ -291,12 +291,12 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
 .inbox-card .inbox-age { margin-left: auto; }
 .inbox-card .inbox-title { margin: .25rem 0 0; font-weight: 600; text-align: left; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .inbox-card .inbox-summary { margin: .25rem 0 0; text-align: left; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.app-right > [data-part="inbox-detail"] { position: sticky; top: var(--s4); max-height: calc(100vh - 2rem); overflow-y: auto; }
+.app-right > [data-part="inbox-detail"].is-sticky { position: sticky; top: var(--s4); }
 @media (max-width: 760px) {
   .app-layout { grid-template-columns: minmax(0, 1fr); }
   /* On phone width the right column stacks under the left one; nothing opens a drawer, so a fixed overlay would hide the whole page. */
   .app-right { position: static; width: auto; transform: none; padding: 0; overflow: visible; background: none; }
-  .app-right > [data-part="inbox-detail"] { position: static; max-height: none; }
+  .app-right > .is-sticky { position: static; }
 }
 @media (max-width: 640px) {
   main { padding: var(--s4) .75rem 4rem; }
@@ -314,11 +314,12 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
 }
 
 /* Pipeline cards: id, dashed badge and age; wrapped title; a strip of dots joined by a line, action button on the right. */
-.pipeline-filters { display: flex; flex-direction: row; flex-wrap: nowrap; gap: var(--s2); margin-bottom: var(--s3, .75rem); overflow-x: auto; }
-.pipeline-filters .pf { display: inline-flex; flex-direction: row; align-items: center; gap: .3rem; flex: 0 0 auto; padding: .1rem .5rem; border: 1px solid var(--border); border-radius: 999px; font-size: var(--fs-sm); }
+.pipeline-filters { display: flex; flex-direction: row; flex-wrap: wrap; gap: var(--s2); margin-bottom: var(--s3, .75rem); }
+.pipeline-filters .pf { display: inline-flex; flex-direction: row; align-items: center; gap: .3rem; flex: 0 1 auto; max-width: 100%; padding: .1rem .5rem; border: 1px solid var(--border); border-radius: 999px; font-size: var(--fs-sm); }
 .pipeline-filters .pf select { border: 0; background: transparent; padding: 0; max-width: 7rem; }
-[data-page="pipeline"] .app-left { overflow-y: auto; max-height: calc(100vh - 8rem); }
-[data-part="pipeline-list"] { overflow-y: auto; max-height: calc(100vh - 12rem); }
+/* One page scroll: the filters span both columns, the list and the detail panel grow with the document. */
+.pipeline-page > .pipeline-filters { width: 100%; }
+.app-right > .is-sticky { position: sticky; top: var(--s4); }
 .pcard { display: block; cursor: pointer; text-align: left; border-left: 3px solid transparent; }
 .pcard.selected { border-left-color: var(--accent); background: var(--accent-soft); }
 .pcard-head { display: flex; align-items: center; gap: .5rem; }
@@ -362,10 +363,6 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
 .timing { padding: var(--s2) var(--s4); color: var(--muted, #888); font-size: .75rem; text-align: right; }
 .timing [data-slow="true"] { color: var(--bad, #b3261e); font-weight: 600; }
 
-/* Phone width: the pipeline list scrolls with the page, not in its own box. */
-@media (max-width: 760px) {
-  [data-page="pipeline"] .app-left, [data-part="pipeline-list"] { max-height: none; overflow-y: visible; }
-}
 
 /* ===== Pool page ===== */
 .pool-right { display: grid; gap: var(--s4); align-content: start; }
