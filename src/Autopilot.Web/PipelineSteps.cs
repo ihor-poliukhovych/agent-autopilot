@@ -28,7 +28,13 @@ public sealed record PipelineInput(
 public sealed record PipelineDot(string Step, string State);
 
 /// <summary>What the Pipeline card needs: the dots, the outside-autopilot flag, the release and the action-due flag.</summary>
-public sealed record PipelineCard(IReadOnlyList<PipelineDot> Dots, bool OutsideAutopilot, string? Release, bool ActionDue, string? ActionLabel, IReadOnlyList<string> Labels, IReadOnlyList<PipelineStage>? Stages = null);
+public sealed record PipelineCard(IReadOnlyList<PipelineDot> Dots, bool OutsideAutopilot, string? Release, bool ActionDue, string? ActionLabel, IReadOnlyList<string> Labels, IReadOnlyList<PipelineStage>? Stages = null, PipelineDetail? Detail = null);
+
+/// <summary>One field of the detail meta line: its text and an optional link.</summary>
+public sealed record PipelineMetaPart(string Text, string? Href = null);
+
+/// <summary>The meta line, Result and Note of the detail panel. Result and Note are a dash when there is no data.</summary>
+public sealed record PipelineDetail(IReadOnlyList<PipelineMetaPart> Meta, string Result, string Note);
 
 /// <summary>One sub-step of a stage with its state (<c>pending</c> when the app has no data for it).</summary>
 public sealed record PipelineSubStep(string Name, string State);
@@ -66,7 +72,7 @@ public static class PipelineSteps
     public const string VerifiedProd = "verified:prod";
 
     /// <summary>The card of one list entry; <paramref name="jobActive"/> says whether an implement job is running for it.</summary>
-    public static PipelineCard CardOf(WorkItemListEntry item, bool jobActive)
+    public static PipelineCard CardOf(WorkItemListEntry item, bool jobActive, int eventCount = 0)
     {
         var run = item.LastRun;
         var input = new PipelineInput(
@@ -74,7 +80,31 @@ public static class PipelineSteps
             run?.HumanDecision?.ToString().ToLowerInvariant(), jobActive, item.InPool);
         var dots = Dots(input);
         var (due, label) = ActionDue(dots);
-        return new PipelineCard(dots, IsOutsideAutopilot(input), ReleaseOf(item.Labels), due, label, item.Labels ?? [], Stages(dots));
+        return new PipelineCard(dots, IsOutsideAutopilot(input), ReleaseOf(item.Labels), due, label, item.Labels ?? [], Stages(dots), DetailOf(item, eventCount));
+    }
+
+    /// <summary>
+    /// The meta line, Result and Note from data the app has. A field with no data is left out. The tracker name and a
+    /// pull request link are not in the list data, so the link is the task's own URL.
+    /// </summary>
+    public static PipelineDetail DetailOf(WorkItemListEntry item, int eventCount)
+    {
+        var run = item.LastRun;
+        var meta = new List<PipelineMetaPart>();
+        if (!string.IsNullOrWhiteSpace(item.State)) meta.Add(new PipelineMetaPart(item.State!));
+        if (!string.IsNullOrWhiteSpace(item.AssignedTo)) meta.Add(new PipelineMetaPart(item.AssignedTo!));
+        if (!string.IsNullOrWhiteSpace(item.Url)) meta.Add(new PipelineMetaPart("Open task", item.Url));
+        if (eventCount > 0) meta.Add(new PipelineMetaPart($"{eventCount} event{(eventCount == 1 ? "" : "s")}"));
+        if (run is not null) meta.Add(new PipelineMetaPart($"last activity {run.FinishedAt.UtcDateTime:yyyy-MM-dd HH:mm} UTC"));
+
+        var result = run is null ? "" : string.Join(" · ", new[]
+        {
+            run.Outcome,
+            string.IsNullOrEmpty(run.GateVerdict) ? null : $"gate {run.GateVerdict}",
+            run.HumanDecision is { } d ? $"person {d.ToString().ToLowerInvariant()}" : null,
+        }.Where(x => !string.IsNullOrEmpty(x)));
+        var note = !string.IsNullOrWhiteSpace(item.Triage?.Reason) ? item.Triage!.Reason : run?.Message ?? "";
+        return new PipelineDetail(meta, result.Length > 0 ? result : "–", string.IsNullOrWhiteSpace(note) ? "–" : note);
     }
 
     /// <summary>

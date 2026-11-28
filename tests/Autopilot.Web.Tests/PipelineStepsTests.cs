@@ -144,5 +144,40 @@ public sealed class PipelineStepsTests
         Assert.Equal("2.0", card.Release);
         Assert.False(card.ActionDue);
         Assert.Equal(7, card.Dots.Count);
+        Assert.NotNull(card.Stages);
+        Assert.Equal(card.Dots.Select(d => d.State), card.Stages!.Select(s => s.State));
+        Assert.Equal([0, 3, 7, 7, 3, 3, 0], card.Stages!.Select(s => s.SubSteps.Count));
+        Assert.NotNull(card.Detail);
+    }
+
+    [Fact]
+    public void Detail_with_no_data_has_an_empty_meta_line_and_dashes()
+    {
+        var detail = PipelineSteps.DetailOf(new WorkItemListEntry("7", "T", null, null, null, null, null, false, null), 0);
+        Assert.Empty(detail.Meta);
+        Assert.Equal("–", detail.Result);
+        Assert.Equal("–", detail.Note);
+    }
+
+    [Fact]
+    public void Detail_meta_lists_state_assignee_link_events_and_last_activity_and_skips_the_rest()
+    {
+        var run = new RunRecord(1, "p", "7", null, DateTimeOffset.Parse("2026-01-02T10:00:00Z"), DateTimeOffset.Parse("2026-01-02T10:05:00Z"),
+            "succeeded", "passed", false, true, HumanDecision.Merged, null, null, "all good");
+        var triage = new TriageSummary("agent-ready", "low", "Small and clear", DateTimeOffset.UtcNow, false);
+        var detail = PipelineSteps.DetailOf(new WorkItemListEntry("7", "T", "http://x/7", "Active", null, triage, run, false, null), 2);
+        Assert.Equal(["Active", "Open task", "2 events", "last activity 2026-01-02 10:05 UTC"], detail.Meta.Select(m => m.Text));
+        Assert.Equal("http://x/7", detail.Meta[1].Href);
+        Assert.Equal("succeeded · gate passed · person merged", detail.Result);
+        Assert.Equal("Small and clear", detail.Note);
+    }
+
+    [Fact]
+    public void Detail_note_falls_back_to_the_run_message()
+    {
+        var run = new RunRecord(1, "p", "7", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "failed", null, false, false, null, null, null, "build broke");
+        var detail = PipelineSteps.DetailOf(new WorkItemListEntry("7", "T", null, null, null, null, run, false, null), 1);
+        Assert.Equal("build broke", detail.Note);
+        Assert.Contains("1 event", detail.Meta.Select(m => m.Text));
     }
 }

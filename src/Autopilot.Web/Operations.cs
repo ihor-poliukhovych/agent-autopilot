@@ -105,8 +105,9 @@ public sealed class TaskOperations(WebUiOptions options)
         var pages = Math.Max(1, (matching.Count + pageSize - 1) / pageSize);
         var page = Math.Clamp(query.Page, 1, pages);
         var items = matching.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+        var eventCounts = scope.Runs.List().GroupBy(r => r.WorkItemId, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
         return new TaskListView(items, scope.LocalTasks is not null, scope.LegacyTaskFiles, active, Status(scope), matching.Count, page, pageSize, counts, triageJobs,
-            items.ToDictionary(i => i.Id, i => PipelineSteps.CardOf(i, active.ContainsKey(i.Id)), StringComparer.Ordinal));
+            items.ToDictionary(i => i.Id, i => PipelineSteps.CardOf(i, active.ContainsKey(i.Id), eventCounts.GetValueOrDefault(i.Id)), StringComparer.Ordinal));
     }
 
     public static RunStatus Status(ProjectScope scope) =>
