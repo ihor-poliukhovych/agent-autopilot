@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Autopilot.Core;
 using Autopilot.Core.Analysis;
 using Autopilot.Core.Config;
+using Autopilot.Core.Runs;
 using Autopilot.Core.Tasks;
 using Autopilot.Core.Workspace;
 
@@ -162,6 +163,7 @@ public sealed partial class SetupService(WebUiOptions options)
     {
         var problems = new List<string>(SecretProblems(draft));
         var current = ConfigLoader.Load(scope.Project.RepositoryFolder, scope.DataFolder);
+        problems.AddRange(GateLimitProblems(draft, current.Gate));
         var config = draft.ApplyTo(current);
         problems.AddRange(ConfigLoader.Validate(config));
         if (draft.TaskSource is not (ProjectRegistry.LocalSource or ProjectRegistry.AzureDevOpsSource))
@@ -174,11 +176,80 @@ public sealed partial class SetupService(WebUiOptions options)
             throw new SetupRefusedException(problems);
         }
 
+        var changes = GateLimitChanges(current.Gate, config.Gate);
+
         new ProjectRegistry(options.Workspace).Update(scope.Project.Key, new ProjectUpdate(
             DisplayName: NameOf(draft), BaseBranch: config.BaseBranch, TaskSource: draft.TaskSource));
         ConfigLoader.Save(config, scope.Project.RepositoryFolder, scope.DataFolder);
+        var history = new SettingsChangeStore(options.Workspace, scope.Project.Key);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var (field, oldValue, newValue) in changes)
+        {
+            history.Append(field, oldValue.ToString(System.Globalization.CultureInfo.InvariantCulture), newValue.ToString(System.Globalization.CultureInfo.InvariantCulture), now);
+        }
+
         options.ListCache.Invalidate(scope.Project.Key);
         return Load(new ProjectScope(options, new ProjectRegistry(options.Workspace).Get(scope.Project.Key)!));
+    }
+
+    /// <summary>Allowed range of each gate limit when it is saved: files 1 to 200, lines 10 to 5000, whole numbers.</summary>
+    public static readonly IReadOnlyList<(string Field, int Min, int Max)> GateLimitRanges =
+    [
+        ("gate.maxFilesChanged", 1, 200),
+        ("gate.maxSourceLinesChanged", 10, 5000),
+        ("gate.maxTestLinesChanged", 10, 5000),
+    ];
+
+    /// <summary>
+    /// Range and whole-number problems of the gate limits the person changed. A value equal to the one in the
+    /// current config is left alone, so an old config with an out-of-range limit still saves.
+    /// </summary>
+    public static IReadOnlyList<string> GateLimitProblems(ProjectDraft draft, GateConfig current)
+    {
+        var problems = new List<string>();
+        var values = new[] { draft.MaxFilesChanged, draft.MaxSourceLinesChanged, draft.MaxTestLinesChanged };
+        var olds = new[] { current.MaxFilesChanged, current.MaxSourceLinesChanged, current.MaxTestLinesChanged };
+        for (var i = 0; i < GateLimitRanges.Count; i++)
+        {
+            var (field, min, max) = GateLimitRanges[i];
+            var value = values[i];
+            if (value == olds[i])
+            {
+                continue;
+            }
+
+            if (double.IsNaN(value) || double.IsInfinity(value) || value != Math.Floor(value))
+            {
+                problems.Add($"{field} must be a whole number.");
+            }
+            else if (value < min || value > max)
+            {
+                problems.Add($"{field} must be between {min} and {max}.");
+            }
+        }
+
+        return problems;
+    }
+
+    private static List<(string Field, int Old, int New)> GateLimitChanges(GateConfig before, GateConfig after)
+    {
+        var changes = new List<(string, int, int)>();
+        if (before.MaxFilesChanged != after.MaxFilesChanged)
+        {
+            changes.Add(("gate.maxFilesChanged", before.MaxFilesChanged, after.MaxFilesChanged));
+        }
+
+        if (before.MaxSourceLinesChanged != after.MaxSourceLinesChanged)
+        {
+            changes.Add(("gate.maxSourceLinesChanged", before.MaxSourceLinesChanged, after.MaxSourceLinesChanged));
+        }
+
+        if (before.MaxTestLinesChanged != after.MaxTestLinesChanged)
+        {
+            changes.Add(("gate.maxTestLinesChanged", before.MaxTestLinesChanged, after.MaxTestLinesChanged));
+        }
+
+        return changes;
     }
 
     /// <summary>Problems that must be fixed before any check runs, in plain words.</summary>

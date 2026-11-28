@@ -127,6 +127,22 @@ function stepper(stages) {
           h('span', { class: 'sr-only' }, ` (${x.state || 'pending'})`)))) : null)));
 }
 
+/** The log by stage: a heading with the stage name and time range, then monospace lines. Null when there is no data. */
+export function logBlock(log) {
+  const groups = (log || []).filter(g => g.lines && g.lines.length);
+  if (!groups.length) return null;
+  return h('section', { class: 'pdetail-log', 'data-part': 'log', 'aria-label': 'Log' }, groups.map(g => {
+    const range = [g.from, g.to].filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join(' – ');
+    return h('div', { class: 'log-group', 'data-stage': g.stage },
+      h('h3', { class: 'log-heading' }, g.stage, range ? h('span', { class: 'muted small' }, ` ${range}`) : null),
+      g.lines.map(l => {
+        const parts = [l.time, l.actor, l.step, l.state, l.message].filter(Boolean).map(x => h('span', {}, x));
+        if (l.href) parts.push(h('a', { href: l.href, target: '_blank', rel: 'noopener' }, 'link'));
+        return h('div', { class: 'log-line mono small' }, parts.flatMap((p, i) => i ? [' ', p] : [p]));
+      }));
+  }));
+}
+
 /** The meta line, Result and Note come from the server (PipelineSteps.DetailOf), which leaves out fields with no data. */
 function detailPanel(key, item, c, tabState, repaint) {
   const d = c.detail || { meta: [], result: '–', note: '–' };
@@ -144,7 +160,8 @@ function detailPanel(key, item, c, tabState, repaint) {
     tabState.tab === 'diff'
       ? h('p', { class: 'muted', 'data-part': 'diff-placeholder' }, 'System diff comes later.')
       : h('div', {}, stepper(stages),
-        h('dl', { class: 'pdetail-rows' }, h('dt', {}, 'Result'), h('dd', { 'data-row': 'result' }, result), h('dt', {}, 'Note'), h('dd', { 'data-row': 'note' }, note))));
+        h('dl', { class: 'pdetail-rows' }, h('dt', {}, 'Result'), h('dd', { 'data-row': 'result' }, result), h('dt', {}, 'Note'), h('dd', { 'data-row': 'note' }, note)),
+        logBlock(d.log)));
 }
 
 export async function render({ view, key, rest, go }) {

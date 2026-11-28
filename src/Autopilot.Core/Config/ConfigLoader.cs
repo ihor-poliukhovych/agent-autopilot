@@ -182,6 +182,10 @@ public static class ConfigLoader
             problems.Add($"commitStyle is \"{config.CommitStyle}\". Use one of: {string.Join(", ", CommitStyles.All)}.");
         }
 
+        problems.AddRange(Autopilot.Core.Git.NamingTemplates.Validate("branchTemplate", config.BranchTemplate, requireId: true));
+        problems.AddRange(Autopilot.Core.Git.NamingTemplates.Validate("commitTemplate", config.CommitTemplate, requireId: false));
+        problems.AddRange(Autopilot.Core.Git.NamingTemplates.Validate("prTitleTemplate", config.PrTitleTemplate, requireId: false));
+
         ValidatePool(config, problems);
 
         if (config.Gate is null)

@@ -8,6 +8,8 @@ public sealed record TextBody(string? Text);
 
 public sealed record IdBody(string? Id);
 
+public sealed record ParentBody(int? ParentId);
+
 public sealed record MoveBody(int Position);
 
 public sealed record LimitBody(int? Limit);
@@ -70,6 +72,9 @@ internal static class Endpoints
             t.ListAsync(p.Get(key), ct, new TaskQuery(state, q, page ?? 1, pageSize)));
         tasks.MapPost("/", (string key, TaskBody b, ProjectScopes p, TaskOperations t) =>
             t.Add(p.Get(key), b.Title ?? string.Empty, b.Body, b.Labels));
+        tasks.MapGet("/tree", (string key, ProjectScopes p, TaskOperations t, CancellationToken ct) => t.TreeAsync(p.Get(key), ct));
+        tasks.MapPost("/{number:int}/parent", (string key, int number, ParentBody b, ProjectScopes p, TaskOperations t) =>
+            t.SetParent(p.Get(key), number, b.ParentId));
         tasks.MapGet("/{number:int}", (string key, int number, ProjectScopes p, TaskOperations t, CancellationToken ct) => t.DetailAsync(p.Get(key), number, ct));
         tasks.MapPut("/{number:int}", (string key, int number, TaskBody b, ProjectScopes p, TaskOperations t, CancellationToken ct) =>
         {

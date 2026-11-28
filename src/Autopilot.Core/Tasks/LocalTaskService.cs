@@ -24,6 +24,28 @@ public sealed record LocalTask(
     public string State => Closed ? LocalTaskService.ClosedState : LocalTaskService.OpenState;
 }
 
+/// <summary>The kinds of a task group, stored as a label "kind:&lt;name&gt;".</summary>
+public static class TaskKinds
+{
+    public const string Prefix = "kind:";
+
+    public static readonly IReadOnlyList<string> All = ["epic", "feature", "sprint", "release"];
+
+    /// <summary>The kind in a label list, or null when there is no valid kind label.</summary>
+    public static string? FromLabels(IEnumerable<string> labels) =>
+        labels.Where(l => l.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
+            .Select(l => l[Prefix.Length..].Trim().ToLowerInvariant())
+            .FirstOrDefault(All.Contains);
+}
+
+/// <summary>A task with its children. A task with at least one child is a group.</summary>
+public sealed record TaskNode(LocalTask Task, IReadOnlyList<TaskNode> Children)
+{
+    public bool IsGroup => Children.Count > 0;
+
+    public string? Kind => TaskKinds.FromLabels(Task.Labels);
+}
+
 public sealed record TaskComment(long Id, int TaskNumber, string Author, string Body, DateTimeOffset CreatedAt, bool Synced);
 
 /// <summary>One entry in a task's history: a change by a person or a result of the agent.</summary>
@@ -121,6 +143,71 @@ public sealed class LocalTaskService(Workspace.Workspace workspace, string proje
 
         return Create(RequireTitle(title), body ?? string.Empty, NormalizeLabels(labels), author ?? DefaultAuthor(), null, null, false,
             HistoryKind.Created, $"Task created as part of #{parentNumber}.", parentNumber);
+    }
+
+    /// <summary>
+    /// Sets or clears (null) the parent of a task and returns the updated task. An unknown task or parent, the task
+    /// itself, or a descendant of the task (a cycle) is rejected and nothing changes.
+    /// </summary>
+    public LocalTask SetParent(int number, int? parentNumber)
+    {
+        using var connection = workspace.Open();
+        using var transaction = connection.BeginTransaction();
+        var task = RequireTask(connection, number);
+        if (parentNumber is { } parent)
+        {
+            RequireTask(connection, parent);
+            if (parent == number)
+            {
+                throw new WorkspaceException($"Task {number} cannot be its own parent.");
+            }
+
+            // Walk up from the new parent; reaching the task means the parent is a descendant of it.
+            var seen = new HashSet<int>();
+            for (int? at = parent; at is { } current && seen.Add(current); at = GetCore(connection, current)?.ParentNumber)
+            {
+                if (current == number)
+                {
+                    throw new WorkspaceException($"Task {parent} is a descendant of task {number}; it cannot be its parent.");
+                }
+            }
+        }
+
+        if (task.ParentNumber != parentNumber)
+        {
+            var now = DateTimeOffset.UtcNow;
+            Db.Execute(connection, "UPDATE tasks SET parent_number = $p, updated_at = $t WHERE project_key = $k AND number = $n",
+                ("$p", parentNumber), ("$t", Db.Stamp(now)), ("$k", projectKey), ("$n", number));
+            AddHistory(connection, number, HistoryKind.Updated, parentNumber is null ? "Parent cleared." : $"Parent set to #{parentNumber}.", null, now);
+        }
+
+        transaction.Commit();
+        return GetCore(connection, number)!;
+    }
+
+    /// <summary>All tasks of the project as a tree: tasks without a parent are roots, children are ordered by number.</summary>
+    public IReadOnlyList<TaskNode> Tree()
+    {
+        using var connection = workspace.Open();
+        var all = Db.Query(connection, ReadTask, $"{Select} WHERE project_key = $k ORDER BY number", ("$k", projectKey));
+        var numbers = all.Select(t => t.Number).ToHashSet();
+        var byParent = all.Where(t => t.ParentNumber is { } p && numbers.Contains(p)).ToLookup(t => t.ParentNumber!.Value);
+        TaskNode Build(LocalTask task) => new(task, byParent[task.Number].Select(Build).ToList());
+        return all.Where(t => t.ParentNumber is not { } p || !numbers.Contains(p)).Select(Build).ToList();
+    }
+
+    /// <summary>Sets the kind label ("kind:epic" and so on) and removes any other "kind:" label.</summary>
+    public IReadOnlyList<string> SetKind(int number, string kind)
+    {
+        var name = kind?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (!TaskKinds.All.Contains(name))
+        {
+            throw new WorkspaceException($"A task kind must be one of: {string.Join(", ", TaskKinds.All)}.");
+        }
+
+        var task = Get(number) ?? throw new WorkspaceException($"There is no task {number} in project {projectKey}.");
+        var old = task.Labels.Where(l => l.StartsWith(TaskKinds.Prefix, StringComparison.OrdinalIgnoreCase)).ToList();
+        return ChangeLabels(number, [TaskKinds.Prefix + name], old.Where(l => !string.Equals(l, TaskKinds.Prefix + name, StringComparison.OrdinalIgnoreCase)));
     }
 
     public LocalTask? Get(int number)

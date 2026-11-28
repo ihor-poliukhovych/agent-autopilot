@@ -41,9 +41,10 @@ public sealed record ProjectDraft
     public RoleDraft Triage { get; init; } = new(null, 20);
     public RoleDraft Implementer { get; init; } = new(null, 60);
     public RoleDraft Reviewer { get; init; } = new(null, 30);
-    public int MaxFilesChanged { get; init; } = 6;
-    public int MaxSourceLinesChanged { get; init; } = 150;
-    public int MaxTestLinesChanged { get; init; } = 300;
+    // Doubles, so a non-whole number reaches the save check and is named, instead of failing to parse.
+    public double MaxFilesChanged { get; init; } = 6;
+    public double MaxSourceLinesChanged { get; init; } = 150;
+    public double MaxTestLinesChanged { get; init; } = 300;
     public bool RequireTestChange { get; init; } = true;
     public string Trust { get; init; } = TrustLevels.Ask;
 
@@ -89,6 +90,9 @@ public sealed record ProjectDraft
             Trust = config.Trust,
         };
     }
+
+    private static int ToLimit(double value) =>
+        double.IsNaN(value) ? 0 : (int)Math.Clamp(Math.Round(value), int.MinValue, int.MaxValue);
 
     /// <summary>Applies the draft onto <paramref name="current"/>; settings the draft does not cover are kept.</summary>
     public AutopilotConfig ApplyTo(AutopilotConfig current)
@@ -143,9 +147,9 @@ public sealed record ProjectDraft
             Trust = Trust,
             Gate = current.Gate with
             {
-                MaxFilesChanged = MaxFilesChanged,
-                MaxSourceLinesChanged = MaxSourceLinesChanged,
-                MaxTestLinesChanged = MaxTestLinesChanged,
+                MaxFilesChanged = ToLimit(MaxFilesChanged),
+                MaxSourceLinesChanged = ToLimit(MaxSourceLinesChanged),
+                MaxTestLinesChanged = ToLimit(MaxTestLinesChanged),
                 RequireTestChange = RequireTestChange,
             },
             Roles = new RolesConfig
