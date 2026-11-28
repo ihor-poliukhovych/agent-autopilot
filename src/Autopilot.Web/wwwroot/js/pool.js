@@ -73,10 +73,10 @@ export async function render({ view, key }) {
           h('td', { 'data-label': 'Task' }, `#${p.id} ${p.title}`),
           h('td', { 'data-label': 'Readiness', class: 'readiness' }, readiness(p.id) || '–'),
           h('td', { 'data-label': 'Triage' }, p.triage ? [badge(p.triage, p.triage === 'agent-ready' ? 'ok' : 'warn'), p.stale ? badge('stale', 'warn') : null] : badge('not triaged')),
-          h('td', { class: 'actions' }, h('div', { class: 'row' },
-            h('button', { type: 'button', 'aria-label': 'Move up', disabled: index === 0, onclick: () => move(key, p, items[index - 1].position, refresh) }, '↑'),
-            h('button', { type: 'button', 'aria-label': 'Move down', disabled: index === items.length - 1, onclick: () => move(key, p, items[index + 1].position, refresh) }, '↓'),
-            h('button', { type: 'button', class: 'danger', onclick: async () => { try { await del(`${base(key)}/pool/${encodeURIComponent(p.id)}`); await refresh(); } catch (e) { toast(e.message, true); } } }, 'Remove')))))))));
+          h('td', { class: 'actions' }, h('div', { class: 'row icon-group' },
+            h('button', { type: 'button', class: 'icon-btn', title: 'Move up', 'aria-label': 'Move up', disabled: index === 0, onclick: () => move(key, p, items[index - 1].position, refresh) }, '↑'),
+            h('button', { type: 'button', class: 'icon-btn', title: 'Move down', 'aria-label': 'Move down', disabled: index === items.length - 1, onclick: () => move(key, p, items[index + 1].position, refresh) }, '↓'),
+            h('button', { type: 'button', class: 'icon-btn danger', title: 'Remove', 'aria-label': 'Remove', onclick: async () => { try { await del(`${base(key)}/pool/${encodeURIComponent(p.id)}`); await refresh(); } catch (e) { toast(e.message, true); } } }, '✕')))))))));
   }
 
   /** Reads the real queue and the live parts of the page again. The settings fields are left alone. */

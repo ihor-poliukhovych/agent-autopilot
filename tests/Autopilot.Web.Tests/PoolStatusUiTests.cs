@@ -15,6 +15,23 @@ public sealed class PoolStatusUiTests
     }
 
     [Fact]
+    public void Queue_row_actions_are_one_compact_icon_group_and_44px_only_at_touch_widths()
+    {
+        var js = Wwwroot("js/pool.js");
+        var css = Wwwroot("app.css");
+        Assert.Contains("class: 'row icon-group'", js);
+        Assert.Contains("'aria-label': 'Move up', disabled: index === 0", js);
+        Assert.Contains("'aria-label': 'Move down', disabled: index === items.length - 1", js);
+        Assert.Contains("'aria-label': 'Remove'", js);
+        Assert.Matches(@"\.row\.icon-group\s*\{[^}]*flex-wrap:\s*nowrap", css);
+        Assert.Matches(@"(?m)^button\.icon-btn\s*\{[^}]*min-height:\s*30px", css);
+        Assert.Matches(@"@media \(pointer: coarse\), \(max-width: 640px\) \{ button\.icon-btn \{[^}]*min-height: 44px", css);
+        // The global control sizing is unchanged.
+        Assert.Matches(@"(?m)^button, \.btn \{[^}]*min-height: 44px", css);
+        Assert.Matches(@"(?m)^input, select, textarea \{[^}]*min-height: 44px", css);
+    }
+
+    [Fact]
     public void Stepper_lists_the_six_stages_in_order()
     {
         var js = Wwwroot("js/pool.js");
