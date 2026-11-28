@@ -84,7 +84,8 @@ internal static class PoolUnattendedCommands
         try
         {
             pipeline = await ProjectServices.CreatePipelineAsync(target.RepoRoot, context, ct, null, target.DataFolder, target.LocalTasks,
-                c => branch is null ? c : c with { BaseBranch = branch }).ConfigureAwait(false);
+                c => branch is null ? c : c with { BaseBranch = branch },
+                PipelineCommands.TriageLockFor(target, context)).ConfigureAwait(false);
         }
         catch (ProjectSetupException ex)
         {

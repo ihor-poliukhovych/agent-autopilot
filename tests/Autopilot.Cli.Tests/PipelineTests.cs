@@ -83,6 +83,64 @@ public sealed class PipelineTests
             : new GateDecision(GateOutcome.Rejected, [new GateFinding("evidence.review", "The reviewer did not approve.")]);
 
     [Fact]
+    public async Task Two_concurrent_triages_of_one_task_never_share_a_worktree_the_second_is_refused_and_the_first_completes()
+    {
+        using var repo = await CreateProjectAsync();
+        var workspaceFolder = Path.Combine(Path.GetTempPath(), "autopilot-tests", Guid.NewGuid().ToString("N")[..12]);
+        try
+        {
+            var locks = new Autopilot.Core.Pool.TaskRunLock(new Autopilot.Core.Workspace.Workspace(workspaceFolder));
+            using var started = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            var triageRuns = 0;
+            var runner = new FakeAgentRunner((request, _) =>
+            {
+                Interlocked.Increment(ref triageRuns);
+                started.Set();
+                Assert.True(release.Wait(TimeSpan.FromSeconds(30)));
+                return FakeAgentRunner.Answer(new { label = "agent-ready", reason = "Clear.", acceptanceCriteria = new[] { "x" }, risk = "low" });
+            });
+            var pipeline = new AutopilotPipeline(new AutopilotPipelineOptions
+            {
+                ProjectRoot = repo.Root,
+                Config = Config,
+                WorkItems = new LocalWorkItemSource(repo.Root),
+                Runner = runner,
+                Publisher = new LocalPublisher(repo.Root),
+                Git = repo.Git,
+                Facts = new FakeFactsCollector(),
+                WorktreeRoot = repo.WorktreeRoot,
+                AcquireTriageLock = id => locks.AcquireTriage("demo", id, "triage"),
+            });
+
+            var first = Task.Run(() => pipeline.TriageAsync("001", CancellationToken.None));
+            Assert.True(started.Wait(TimeSpan.FromSeconds(30)));
+
+            var second = await pipeline.TriageAsync("001", CancellationToken.None);
+
+            var refused = Assert.Single(second);
+            Assert.False(refused.Succeeded);
+            Assert.Contains("already being worked on", refused.Error, StringComparison.Ordinal);
+            Assert.Equal(1, triageRuns);
+            Assert.NotNull(locks.TriageHolder("demo", "001"));
+
+            release.Set();
+            var firstResult = Assert.Single(await first);
+            Assert.True(firstResult.Succeeded);
+            Assert.Null(locks.TriageHolder("demo", "001"));
+
+            // The lock is released: a later triage runs again.
+            var third = Assert.Single(await pipeline.TriageAsync("001", CancellationToken.None));
+            Assert.True(third.Succeeded);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(workspaceFolder, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public async Task Full_run_with_one_review_round_publishes_a_draft()
     {
         using var repo = await CreateProjectAsync();

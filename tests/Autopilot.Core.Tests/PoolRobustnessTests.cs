@@ -83,6 +83,77 @@ public sealed class PoolRobustnessTests : IDisposable
         Assert.True(condition(), "The condition did not become true in time.");
     }
 
+    // ---------- 259: the UI's triage lock, and a pool that never crashes ----------
+
+    [Fact]
+    public async Task A_task_whose_triage_lock_a_live_process_holds_is_not_triaged_by_the_pool_and_is_parked_naming_the_holder()
+    {
+        Add("1", "2");
+        _tasks.Untriaged.Add("1");
+        var ui = new TaskRunLock(_workspace, _ => true, () => 99, _clock);
+        using var uiLock = ui.AcquireTriage("demo", "1", "web UI triage");
+
+        var result = await RunAsync(id => Task.FromResult(Result(id, ImplementOutcome.Published)), alive: _ => true);
+
+        Assert.DoesNotContain("1", _tasks.Triaged);
+        var parked = Assert.Single(result.Parked);
+        Assert.Equal("1", parked.WorkItemId);
+        Assert.Contains("web UI triage", parked.Reason, StringComparison.Ordinal);
+        Assert.Contains("99", parked.Reason, StringComparison.Ordinal);
+        Assert.Equal(["2"], result.Done.Select(d => d.WorkItemId));
+    }
+
+    [Fact]
+    public async Task A_task_the_UI_is_triaging_that_already_has_a_stored_result_is_implemented_from_that_result()
+    {
+        Add("1");
+        var ui = new TaskRunLock(_workspace, _ => true, () => 99, _clock);
+        using var uiLock = ui.AcquireTriage("demo", "1", "web UI triage");
+
+        var result = await RunAsync(id => Task.FromResult(Result(id, ImplementOutcome.Published)), alive: _ => true);
+
+        Assert.Empty(_tasks.Triaged);
+        Assert.Empty(result.Parked);
+        Assert.Equal("1", Assert.Single(result.Done).WorkItemId);
+    }
+
+    [Fact]
+    public async Task A_locked_worktree_error_parks_that_task_and_the_pool_goes_on_and_writes_its_report()
+    {
+        Add("1", "2", "3");
+        _tasks.Faults["2"] = new IOException("The process cannot access the file 'C:\\wt\\@triage-2' because it is being used by another process.");
+
+        var result = await RunAsync(id => Task.FromResult(Result(id, ImplementOutcome.Published)));
+
+        Assert.Equal(["1", "3"], result.Done.Select(d => d.WorkItemId).Order());
+        var parked = Assert.Single(result.Parked);
+        Assert.Equal("2", parked.WorkItemId);
+        Assert.Contains("another process", parked.Reason, StringComparison.Ordinal);
+        Assert.True(File.Exists(result.ReportPath));
+        Assert.Contains("2:", await File.ReadAllTextAsync(result.ReportPath!), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_unexpected_exception_in_the_pool_loop_still_writes_the_report()
+    {
+        Add("1");
+        var runner = new PoolRunner(_pool, new RunStore(_workspace, "demo"), new ProjectRunLock(_workspace, _ => false, () => _pid, _clock), "demo",
+            (id, _) => Task.FromResult(Result(id, ImplementOutcome.Published)),
+            new PoolRunOptions
+            {
+                Config = () => throw new InvalidOperationException("config exploded"),
+                Unattended = false,
+                Clock = _clock,
+                CurrentPid = () => _pid,
+            });
+
+        var result = await runner.RunAsync(null, Path.Combine(_temp, "report"), CancellationToken.None);
+
+        Assert.Contains("config exploded", result.StoppedBecause, StringComparison.Ordinal);
+        Assert.False(result.Succeeded);
+        Assert.True(File.Exists(result.ReportPath));
+    }
+
     // ---------- 229: the topic comes from triage and the master, a narrow safety net stays ----------
 
     [Fact]

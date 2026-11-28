@@ -243,6 +243,8 @@ public sealed class PoolRunner(
         var tried = 0;
         var lastWait = new Dictionary<string, string>(StringComparer.Ordinal);
 
+        try
+        {
         while (!ct.IsCancellationRequested)
         {
             // Fill the free slots, in queue order, with tasks that may start now.
@@ -383,6 +385,12 @@ public sealed class PoolRunner(
                     break;
             }
         }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Whatever went wrong, the report is still written and the exit code follows the result.
+            stopped ??= $"The pool stopped on an unexpected error: {ex.GetType().Name}: {ex.Message}";
+        }
 
         ct.ThrowIfCancellationRequested();
         state?.ClearSlots();
@@ -411,8 +419,17 @@ public sealed class PoolRunner(
         {
             if (!infos.TryGetValue(id, out var info))
             {
-                info = (_options.Tasks is { } tasks ? await tasks.DescribeAsync(id, ct).ConfigureAwait(false) : null)
-                    ?? new PoolTaskInfo(id, string.Empty, ["**"], []);
+                PoolTaskInfo? described = null;
+                try
+                {
+                    described = _options.Tasks is { } tasks ? await tasks.DescribeAsync(id, ct).ConfigureAwait(false) : null;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // A task that cannot be read is tried alone; its own run records what is wrong.
+                }
+
+                info = described ?? new PoolTaskInfo(id, string.Empty, ["**"], []);
                 infos[id] = info;
             }
 
@@ -606,6 +623,15 @@ public sealed class PoolRunner(
                 }
             }
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A locked worktree ("being used by another process") or any other error of one task never ends the pool:
+            // the task is parked as interrupted and the pool goes on with the next one.
+            var reason = ex is IOException
+                ? $"Interrupted: a file or folder of the task is in use by another process ({ex.Message}). It can be tried again."
+                : $"Interrupted by an unexpected error ({ex.GetType().Name}): {ex.Message}";
+            return Parked(new ImplementResult(id, ImplementOutcome.Failed, reason), null, reason);
+        }
         finally
         {
             taskLock?.Dispose();
@@ -624,6 +650,11 @@ public sealed class PoolRunner(
             var triage = await tasks.TriageStateAsync(id, ct).ConfigureAwait(false);
             if (triage.State == PoolTriageState.Missing)
             {
+                if (TriageHolderPark() is { } busy)
+                {
+                    return busy;
+                }
+
                 if (reserve(id, "triage") is { } problem)
                 {
                     return new Processed(BucketStopped, null, problem, true);
@@ -662,6 +693,13 @@ public sealed class PoolRunner(
                 return NotReadyPark(verdict.Category, park);
             }
 
+            if (TriageHolderPark() is { } held)
+            {
+                // Someone else triages it now: use what is stored, if it is good.
+                triage = await tasks.TriageStateAsync(id, ct).ConfigureAwait(false);
+                return triage.State == PoolTriageState.AgentReady ? null : held;
+            }
+
             if (reserve(id, "triage") is { } budget)
             {
                 return new Processed(BucketStopped, null, budget, true);
@@ -672,6 +710,13 @@ public sealed class PoolRunner(
                 ? null
                 : NotReadyPark(verdict.Category, $"The task is still not ready after the master's answer. Triage says {triage.Label}: {Excerpt(triage.Detail)}");
         }
+
+        // When a live process (the web UI) holds the triage lock of this task, the pool does not triage it: it parks
+        // the task as waiting and names the holder. Null when nobody triages it.
+        Processed? TriageHolderPark() =>
+            _options.TaskLock?.TriageHolder(projectKey, id) is { } holder
+                ? NotReadyPark(null, $"Waiting: the triage of this task is running in {holder.Owner} (process {holder.Pid}) and no stored result exists yet. Run the pool again when it has finished.")
+                : null;
 
         Processed NotReadyPark(string? category, string reason) =>
             Parked(new ImplementResult(id, ImplementOutcome.NotReady, reason), category, reason);
