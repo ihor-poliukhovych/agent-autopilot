@@ -242,12 +242,18 @@ public sealed class TaskOperations(WebUiOptions options)
     {
         var items = await scope.CreateList().ListAsync(ct).ConfigureAwait(false);
         var titles = items.ToDictionary(i => i.Id, i => i.Title, StringComparer.Ordinal);
-        var questions = items
-            .Where(i => i.Triage is { Label: "needs-human" })
-            .Select(i => new InboxItem(InboxKinds.Question, i.Id, i.Title, i.Triage!.TriagedAt, null, Needs(scope, i)));
         var store = new PoolStateStore(scope.Workspace, scope.Project.Key);
         store.PruneParked(titles.Keys.ToHashSet(StringComparer.Ordinal));
-        var parked = store.Parked()
+        var parkedEntries = store.Parked();
+        var reasons = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var p in parkedEntries) reasons[p.WorkItemId] = p.Reason;
+        var questions = items
+            .Where(i => i.Triage is { Label: "needs-human" })
+            .Select(i => new InboxItem(InboxKinds.Question, i.Id, i.Title, i.Triage!.TriagedAt, reasons.GetValueOrDefault(i.Id), Needs(scope, i)))
+            .ToList();
+        var questionIds = questions.Select(q => q.Id).ToHashSet(StringComparer.Ordinal);
+        var parked = parkedEntries
+            .Where(p => !questionIds.Contains(p.WorkItemId))
             .Select(p => new InboxItem(InboxKinds.Parked, p.WorkItemId, titles.GetValueOrDefault(p.WorkItemId, p.WorkItemId), p.ParkedAt, p.Reason, null));
         return [.. questions.Concat(parked).OrderBy(i => i.CreatedAt)];
     }
