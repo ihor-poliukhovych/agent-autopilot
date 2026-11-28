@@ -45,8 +45,20 @@ export function ask({ title, body, confirm = 'Confirm', danger = false, cancel =
         h('button', { type: 'button', onclick: () => done(false) }, cancel),
         h('button', { type: 'button', class: danger ? 'danger' : 'primary', onclick: () => done(true) }, confirm)));
     dialog.addEventListener('cancel', () => resolve(false), { once: true });
+    dialog.onkeydown = ev => trapTab(dialog, ev);
     dialog.showModal();
   });
+}
+
+/** Keeps Tab and Shift+Tab inside the dialog: from the last control back to the first, and the other way round. */
+function trapTab(dialog, ev) {
+  if (ev.key !== 'Tab') return;
+  const items = [...dialog.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter(el => !el.disabled && !el.hidden);
+  if (!items.length) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (ev.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) { ev.preventDefault(); last.focus(); }
+  else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
 }
 
 export function ago(iso) {
