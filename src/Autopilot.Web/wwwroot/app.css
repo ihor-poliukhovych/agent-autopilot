@@ -304,11 +304,9 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
 .app-right > [data-part="inbox-detail"] { position: sticky; top: var(--s4); max-height: calc(100vh - 2rem); overflow-y: auto; }
 @media (max-width: 760px) {
   .app-layout { grid-template-columns: minmax(0, 1fr); }
-  /* On phone width the right column becomes a drawer that slides over the page. */
-  .app-right { position: fixed; inset: 0 0 0 auto; width: min(100vw, 480px); overflow-y: auto; background: var(--bg); padding: var(--s4); z-index: 15; transform: translateX(100%); transition: transform .2s; }
-  .app-right.open { transform: none; }
-  .drawer-open, .drawer-close { display: inline-block; margin-top: var(--s3, .75rem); }
-  .drawer-close { margin: 0 0 var(--s3, .75rem); }
+  /* On phone width the right column stacks under the left one; nothing opens a drawer, so a fixed overlay would hide the whole page. */
+  .app-right { position: static; width: auto; transform: none; padding: 0; overflow: visible; background: none; }
+  .app-right > [data-part="inbox-detail"] { position: static; max-height: none; }
 }
 @media (max-width: 640px) {
   main { padding: var(--s4) .75rem 4rem; }
@@ -373,3 +371,8 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
 
 .timing { padding: var(--s2) var(--s4); color: var(--muted, #888); font-size: .75rem; text-align: right; }
 .timing [data-slow="true"] { color: var(--bad, #b3261e); font-weight: 600; }
+
+/* Phone width: the pipeline list scrolls with the page, not in its own box. */
+@media (max-width: 760px) {
+  [data-page="pipeline"] .app-left, [data-part="pipeline-list"] { max-height: none; overflow-y: visible; }
+}

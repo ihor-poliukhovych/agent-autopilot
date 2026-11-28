@@ -67,6 +67,7 @@ switcher.addEventListener('change', () => {
 });
 
 let generation = 0;
+let shownPage = '';
 
 async function route() {
   const mine = ++generation;
@@ -117,6 +118,10 @@ async function route() {
   clear(tabs).append(tabBar);
   view.replaceChildren(stage);
   view.focus({ preventScroll: true });
+  // A different tab or project starts at the top; picking an item inside a page keeps the scroll.
+  const pageId = r.name === 'project' ? `${r.key}/${lastTab}` : r.name;
+  if (pageId !== shownPage) window.scrollTo({ top: 0 });
+  shownPage = pageId;
 }
 
 function renderTabs(bar, r, current) {

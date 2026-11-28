@@ -80,7 +80,7 @@ public sealed class NavigationLayoutTests
         var css = Wwwroot("app.css");
         Assert.Matches(@"--left-col:\s*420px", css);
         Assert.Matches(@"\.app-layout\s*\{[^}]*grid-template-columns:\s*var\(--left-col\)\s+minmax\(0,\s*1fr\)", css);
-        Assert.Matches(@"@media \(max-width: 760px\)\s*\{[^@]*\.app-right[^@]*position: fixed", css);
+        Assert.Matches(@"@media \(max-width: 760px\)\s*\{[^@]*\.app-right\s*\{[^}]*position: static", css);
     }
 
     [Fact]
@@ -154,10 +154,10 @@ public sealed class NavigationLayoutTests
     }
 
     [Fact]
-    public void Drawer_can_be_opened_and_closed_on_phone_width()
+    public void Phone_width_never_covers_the_page_with_a_drawer()
     {
         var css = Wwwroot("app.css");
-        Assert.Matches(@"\.app-right\.open\s*\{\s*transform:\s*none", css);
+        Assert.DoesNotMatch(@"\.app-right[^{]*\{[^}]*position: fixed", css);
         Assert.Matches(@"\.drawer-open,\s*\.drawer-close\s*\{\s*display:\s*none", css);
     }
 
