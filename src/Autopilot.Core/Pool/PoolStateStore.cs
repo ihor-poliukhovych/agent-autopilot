@@ -82,6 +82,31 @@ public sealed class PoolStateStore(Workspace.Workspace workspace, string project
     private static PoolDecision ReadDecision(SqliteDataReader r) =>
         new(r.GetInt64(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4), r.GetString(5), Db.StringOrNull(r, 6), Db.ParseStamp(r.GetString(7)), Db.ParseStampOrNull(r, 8));
 
+    // ---------- notes for the next attempt ----------
+
+    /// <summary>Keeps a note for the next attempt at a task whose text lives in a tracker.</summary>
+    public void AddNote(string workItemId, string note, DateTimeOffset at)
+    {
+        using var connection = workspace.Open();
+        Db.Execute(connection, "INSERT INTO pool_task_notes (project_key, work_item_id, note, created_at) VALUES ($k, $i, $n, $t)",
+            ("$k", projectKey), ("$i", workItemId), ("$n", note), ("$t", Db.Stamp(at)));
+    }
+
+    /// <summary>The notes kept for a task, oldest first.</summary>
+    public IReadOnlyList<string> Notes(string workItemId)
+    {
+        using var connection = workspace.Open();
+        return Db.Query(connection, r => r.GetString(0),
+            "SELECT note FROM pool_task_notes WHERE project_key = $k AND work_item_id = $i ORDER BY id", ("$k", projectKey), ("$i", workItemId));
+    }
+
+    /// <summary>Forgets the notes of a task, for example once its draft is published.</summary>
+    public void ClearNotes(string workItemId)
+    {
+        using var connection = workspace.Open();
+        Db.Execute(connection, "DELETE FROM pool_task_notes WHERE project_key = $k AND work_item_id = $i", ("$k", projectKey), ("$i", workItemId));
+    }
+
     // ---------- parked ----------
 
     public void Park(string workItemId, string? category, string reason, DateTimeOffset at)

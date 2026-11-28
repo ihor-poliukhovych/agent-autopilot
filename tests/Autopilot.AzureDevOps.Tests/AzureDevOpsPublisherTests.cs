@@ -45,6 +45,22 @@ public class AzureDevOpsPublisherTests
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Patch || r.Uri.AbsolutePath.Contains("/reviewers", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task Publishes_under_the_name_the_pusher_chose_and_keeps_the_title()
+    {
+        var handler = Handler();
+        var pusher = new RecordingPusher { Resolved = "autopilot/42-attempt-1" };
+
+        var result = await Publisher(handler, pusher).PublishAsync(Ado.Request(), default);
+
+        Assert.True(result.Succeeded, result.Error);
+        Assert.Equal("autopilot/42-attempt-1", result.BranchName);
+        Assert.Equal("autopilot/42-attempt-1", Assert.Single(pusher.Pushes).Branch);
+        var body = JsonDocument.Parse(handler.Requests.Single(r => r.Method == HttpMethod.Post).Body).RootElement;
+        Assert.Equal("refs/heads/autopilot/42-attempt-1", body.GetProperty("sourceRefName").GetString());
+        Assert.Equal("[autopilot] Return 404 for unknown products", body.GetProperty("title").GetString());
+    }
+
     [Theory]
     [InlineData("main")]
     [InlineData("feature/x")]
