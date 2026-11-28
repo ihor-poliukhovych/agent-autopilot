@@ -221,14 +221,81 @@ public sealed class PipelineStepsTests
     }
 
     [Fact]
+    public void Detail_json_carries_the_log_under_the_key_log()
+    {
+        var run = new RunRecord(1, "p", "7", null, T0, T0.AddMinutes(5), "succeeded", "passed", false, true, HumanDecision.Merged, T0.AddHours(1), null, null);
+        var json = System.Text.Json.JsonSerializer.Serialize(PipelineSteps.DetailOf(Entry(run), 0), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var log = doc.RootElement.GetProperty("log");
+        Assert.Equal("Implement", log[0].GetProperty("stage").GetString());
+        Assert.Equal("succeeded", log[0].GetProperty("lines")[0].GetProperty("state").GetString());
+        Assert.Equal("Merge", log[1].GetProperty("stage").GetString());
+        Assert.True(log[0].TryGetProperty("from", out _));
+        Assert.True(log[0].TryGetProperty("to", out _));
+    }
+
+    [Fact]
     public void Log_block_renders_only_with_data()
     {
-        var js = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "Autopilot.Web", "wwwroot", "js", "pipeline.js"));
-        Assert.Contains("export function logBlock(log)", js);
-        Assert.Contains("if (!groups.length) return null;", js);
-        Assert.Contains("h('h3', { class: 'log-heading' }, g.stage", js);
-        Assert.Contains("log-line mono small", js);
-        Assert.Contains("logBlock(d.log)", js);
+        var dir = AppContext.BaseDirectory;
+        while (dir is not null && !File.Exists(Path.Combine(dir, "src", "Autopilot.Web", "wwwroot", "js", "pipeline.js")))
+            dir = Path.GetDirectoryName(dir);
+        Assert.NotNull(dir);
+        var pipeline = new Uri(Path.Combine(dir!, "src", "Autopilot.Web", "wwwroot", "js", "pipeline.js")).AbsoluteUri;
+        var script = """
+            class Node { }
+            class El extends Node {
+              constructor(tag) { super(); this.tag = tag; this.kids = []; this.attrs = {}; this.className = ''; this.style = {}; }
+              setAttribute(k, v) { this.attrs[k] = v; }
+              addEventListener() { }
+              append(...c) { this.kids.push(...c); }
+              replaceChildren() { this.kids = []; }
+              text() { return this.kids.map(k => typeof k === 'string' ? k : k.text()).join(''); }
+            }
+            globalThis.Node = Node;
+            globalThis.document = { createElement: t => new El(t), createTextNode: s => String(s), getElementById: () => null };
+            const { logBlock } = await import(process.argv[2]);
+            const data = [
+              { stage: 'Implement', from: 'A', to: 'B', lines: [{ time: 'A', actor: 'agent', step: 'Implement', state: 'succeeded', message: 'ok' }] },
+              { stage: 'Merge', from: 'C', to: 'C', lines: [] },
+            ];
+            const full = logBlock(data);
+            const out = {
+              empty: logBlock([]) === null, nul: logBlock(null) === null, undef: logBlock(undefined) === null,
+              onlyEmptyGroups: logBlock([{ stage: 'Merge', lines: [] }]) === null,
+              present: full !== null && full.attrs['data-part'] === 'log',
+              groups: full.kids.length,
+              heading: full.kids[0].kids[0].text(),
+              line: full.kids[0].kids[1].text(),
+              lineClass: full.kids[0].kids[1].className,
+            };
+            console.log(JSON.stringify(out));
+            """;
+        var file = Path.Combine(Path.GetTempPath(), $"logblock-{Guid.NewGuid():N}.mjs");
+        File.WriteAllText(file, script);
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("node") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, StandardOutputEncoding = System.Text.Encoding.UTF8 };
+            psi.ArgumentList.Add(file);
+            psi.ArgumentList.Add(pipeline);
+            using var p = System.Diagnostics.Process.Start(psi)!;
+            var stdout = p.StandardOutput.ReadToEnd();
+            var stderr = p.StandardError.ReadToEnd();
+            p.WaitForExit();
+            Assert.True(p.ExitCode == 0, stderr);
+            using var doc = System.Text.Json.JsonDocument.Parse(stdout);
+            var r = doc.RootElement;
+            Assert.True(r.GetProperty("empty").GetBoolean());
+            Assert.True(r.GetProperty("nul").GetBoolean());
+            Assert.True(r.GetProperty("undef").GetBoolean());
+            Assert.True(r.GetProperty("onlyEmptyGroups").GetBoolean());
+            Assert.True(r.GetProperty("present").GetBoolean());
+            Assert.Equal(1, r.GetProperty("groups").GetInt32());
+            Assert.Equal("Implement A – B", r.GetProperty("heading").GetString());
+            Assert.Equal("A agent Implement succeeded ok", r.GetProperty("line").GetString());
+            Assert.Contains("mono", r.GetProperty("lineClass").GetString());
+        }
+        finally { File.Delete(file); }
     }
 
     [Fact]
