@@ -518,8 +518,7 @@ input.pool-switch:checked::after { left: 19px; background: var(--accent-text); }
   .pool-actions > .btn, .pool-actions > button.primary { flex: 1; }
 }
 @media (max-width: 640px) {
-  .pool-step { font-size: 0; }
-  .pool-step.current { font-size: var(--fs-sm); }
+  .pool-step:not(.current) .pool-step-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .pool-q { grid-template-columns: auto minmax(0, 1fr) 44px; grid-template-areas: "id title kebab" ". pill kebab"; gap: 0 10px; padding: 6px 4px 6px 14px; height: auto; min-height: 44px; }
   .pool-q-id { grid-area: id; }
   .pool-q-title { grid-area: title; }

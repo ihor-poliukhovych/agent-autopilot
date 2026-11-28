@@ -114,6 +114,7 @@ export async function render({ view, key }) {
   let showAllRows = false;
   let showAllEvents = false;
   let focusAfter = null;
+  let drawn = null;
 
   const redraw = () => { heroView(); queueView(); eventsView(); };
 
@@ -225,6 +226,10 @@ export async function render({ view, key }) {
   async function refresh(loud = false) {
     try {
       const [next, nextStatus] = await Promise.all([get(`${base(key)}/pool${loud ? '?fresh=true' : ''}`), get(`${base(key)}/pool/status`), extra?.refreshLive()]);
+      // Draw again only when something changed: a redraw drops the focus from the button a person tabbed to.
+      const signature = JSON.stringify([next, nextStatus]);
+      if (signature === drawn) return;
+      drawn = signature;
       items = next;
       status = nextStatus;
       if (menuOpen) afterMenu = redraw; // never pull an open menu away from under the pointer
@@ -274,6 +279,7 @@ export async function render({ view, key }) {
 
   async function load() {
     [items, status] = await Promise.all([get(`${base(key)}/pool`), get(`${base(key)}/pool/status`)]);
+    drawn = JSON.stringify([items, status]);
     extra = await unattended.render({ key, reload: load });
     clear(holder);
     redraw();
