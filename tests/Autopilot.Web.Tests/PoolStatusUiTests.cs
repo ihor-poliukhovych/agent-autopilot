@@ -24,11 +24,37 @@ public sealed class PoolStatusUiTests
         Assert.Contains("'aria-label': 'Move down', disabled: index === items.length - 1", js);
         Assert.Contains("'aria-label': 'Remove'", js);
         Assert.Matches(@"\.row\.icon-group\s*\{[^}]*flex-wrap:\s*nowrap", css);
-        Assert.Matches(@"(?m)^button\.icon-btn\s*\{[^}]*min-height:\s*30px", css);
-        Assert.Matches(@"@media \(pointer: coarse\), \(max-width: 640px\) \{ button\.icon-btn \{[^}]*min-height: 44px", css);
+        // Wide widths: a top-level (not inside @media) rule gives the row buttons 30px, and nothing outside a media query asks for 44px on them.
+        Assert.Matches(@"(?m)^\.icon-group button\.row-btn\s*\{[^}]*min-height:\s*30px", css);
+        var outsideMedia = string.Join("\n", css.Split('\n').Where(l => !l.TrimStart().StartsWith("@media", StringComparison.Ordinal)));
+        foreach (var line in outsideMedia.Split('\n').Where(l => l.Contains("row-btn", StringComparison.Ordinal)))
+            Assert.DoesNotContain("44px", line);
+        // Touch widths: the 44px minimum is inside the coarse-pointer / narrow media query.
+        Assert.Matches(@"@media \(pointer: coarse\), \(max-width: 640px\) \{ \.icon-group button\.row-btn \{[^}]*min-height: 44px", css);
         // The global control sizing is unchanged.
         Assert.Matches(@"(?m)^button, \.btn \{[^}]*min-height: 44px", css);
         Assert.Matches(@"(?m)^input, select, textarea \{[^}]*min-height: 44px", css);
+        Assert.Contains(".icon-btn { padding: .4rem; min-height: 36px; width: 36px; justify-content: center; }", css);
+        // The row buttons do not use the global .icon-btn class (the theme toggle still does), so no rule conflicts.
+        Assert.DoesNotContain("icon-btn", js);
+        Assert.DoesNotMatch(@"button\.icon-btn", css);
+        Assert.Contains("class=\"icon-btn\"", Wwwroot("index.html"));
+    }
+
+    [Fact]
+    public void Queue_renders_the_rows_in_the_order_the_pool_api_returns_after_a_reload()
+    {
+        var js = Wwwroot("js/pool.js");
+        // The first load and every refresh read GET /pool; Refresh asks for the tracker list again.
+        Assert.Contains("[items, status] = await Promise.all([get(`${base(key)}/pool`)", js);
+        Assert.Contains("'?fresh=true'", js);
+        // The rows are drawn straight from that list: no sorting or reordering on the page.
+        var queueCard = js[js.IndexOf("function queueCard", StringComparison.Ordinal)..];
+        queueCard = queueCard[..queueCard.IndexOf("async function refresh", StringComparison.Ordinal)];
+        Assert.Contains("items.map((p, index)", queueCard);
+        Assert.DoesNotContain("sort(", queueCard);
+        Assert.DoesNotContain("reverse(", queueCard);
+        Assert.DoesNotContain("localStorage", js);
     }
 
     [Fact]
