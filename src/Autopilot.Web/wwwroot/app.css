@@ -303,8 +303,11 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
 }
 
 /* Pipeline cards: id, dashed badge and age; wrapped title; a strip of dots joined by a line, action button on the right. */
-.pipeline-filters { flex-wrap: wrap; gap: var(--s2); margin-bottom: var(--s3, .75rem); }
-.pipeline-filters .pf { display: flex; flex-direction: column; gap: .15rem; min-width: 7rem; flex: 1 1 7rem; }
+.pipeline-filters { display: flex; flex-direction: row; flex-wrap: nowrap; gap: var(--s2); margin-bottom: var(--s3, .75rem); overflow-x: auto; }
+.pipeline-filters .pf { display: inline-flex; flex-direction: row; align-items: center; gap: .3rem; flex: 0 0 auto; padding: .1rem .5rem; border: 1px solid var(--border); border-radius: 999px; font-size: var(--fs-sm); }
+.pipeline-filters .pf select { border: 0; background: transparent; padding: 0; max-width: 7rem; }
+[data-page="pipeline"] .app-left { overflow-y: auto; max-height: calc(100vh - 8rem); }
+[data-part="pipeline-list"] { overflow-y: auto; max-height: calc(100vh - 12rem); }
 .pcard { display: block; cursor: pointer; text-align: left; border-left: 3px solid transparent; }
 .pcard.selected { border-left-color: var(--accent); background: var(--accent-soft); }
 .pcard-head { display: flex; align-items: center; gap: .5rem; }

@@ -53,8 +53,13 @@ public static class UiCommand
                 RequestLog = verbose ? line => context.Out.WriteLine(line) : null,
             };
             var openBrowser = !parse.GetValue(noOpen);
-            await WebUi.RunAsync(options, started =>
+            var pidPath = UiPidFile.PathFor(workspace.Root);
+            var ownPid = Environment.ProcessId;
+            try
             {
+                await WebUi.RunAsync(options, started =>
+            {
+                UiPidFile.Write(pidPath, ownPid, UiPidFile.CurrentVersion());
                 context.Out.WriteLine($"Autopilot UI is running at {started.Address}");
                 if (started.SignInAddress is { } link)
                 {
@@ -74,9 +79,16 @@ public static class UiCommand
                     }
                 }
             }, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                UiPidFile.Delete(pidPath, ownPid);
+            }
+
             return ExitCodes.Ok;
         });
 
+        command.Subcommands.Add(CreateRestart(projectOption, context));
         command.Subcommands.Add(CreateInstall(projectOption, context));
         command.Subcommands.Add(CreateUninstall(projectOption, context));
         command.Subcommands.Add(CreateStatus(projectOption, context));
@@ -89,6 +101,54 @@ public static class UiCommand
     {
         var folders = context.UserFolders ?? (Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
         return UiAutostart.Plan(context.AutostartSystem ?? UiAutostart.Current(), folders.Home, folders.AppData, ProgramLocation.Current(context), workspace.Root);
+    }
+
+    private static Command CreateRestart(ProjectOptions projectOption, CliContext context)
+    {
+        var command = new Command("restart", "Stop the running UI (found by its pid file), wait until it has exited, and start it again.");
+        command.SetAction(async (parse, ct) =>
+        {
+            var workspace = projectOption.OpenWorkspace(parse);
+            var pidPath = UiPidFile.PathFor(workspace.Root);
+            var alive = context.IsProcessAlive ?? Autopilot.Core.Pool.ProjectRunLock.IsAlive;
+            var running = UiPidFile.ReadRunning(pidPath, context.IsProcessAlive);
+            if (running is null)
+            {
+                UiPidFile.Delete(pidPath);
+                context.Out.WriteLine("No UI was running. Starting it.");
+            }
+            else
+            {
+                context.Out.WriteLine($"Stopping the UI (pid {running.Pid}).");
+                (context.ProcessKiller ?? new Autopilot.Core.Jobs.ProcessTreeKiller()).Kill(running.Pid);
+                var deadline = DateTime.UtcNow + (context.UiStopTimeout ?? TimeSpan.FromSeconds(30));
+                while (alive(running.Pid))
+                {
+                    if (DateTime.UtcNow >= deadline)
+                    {
+                        await context.Error.WriteLineAsync($"The UI (pid {running.Pid}) did not stop in time. Close it yourself, then run 'autopilot ui restart' again.").ConfigureAwait(false);
+                        return ExitCodes.Failure;
+                    }
+
+                    await Task.Delay(50, ct).ConfigureAwait(false);
+                }
+
+                // A killed process cannot delete its own pid file.
+                UiPidFile.Delete(pidPath, running.Pid);
+                if (File.Exists(pidPath) && UiPidFile.Read(pidPath)?.Pid == running.Pid)
+                {
+                    await context.Error.WriteLineAsync($"The pid file {pidPath} could not be removed.").ConfigureAwait(false);
+                    return ExitCodes.Failure;
+                }
+            }
+
+            var (file, arguments) = ProgramLocation.Current(context);
+            var launcher = context.JobLauncher ?? new Autopilot.Core.Jobs.DetachedProcessLauncher();
+            var pid = launcher.Launch(file, [.. arguments, "ui", "--no-open", "--workspace", workspace.Root], workspace.Root);
+            context.Out.WriteLine($"Started the UI (pid {pid}).");
+            return ExitCodes.Ok;
+        });
+        return command;
     }
 
     private static Command CreateInstall(ProjectOptions projectOption, CliContext context)
@@ -156,6 +216,10 @@ public static class UiCommand
             context.Out.WriteLine(port is null
                 ? "Address: not chosen yet. It is picked once from 5100-5999 the first time you run 'autopilot ui'."
                 : $"Address: http://localhost:{port}/ ({(inUse ? "something is listening there now" : "not running now")})");
+            var running = UiPidFile.ReadRunning(UiPidFile.PathFor(workspace.Root), context.IsProcessAlive);
+            context.Out.WriteLine(running is null
+                ? "Running: no (not running)"
+                : $"Running: yes, version {running.Version ?? "unknown"}, pid {running.Pid}");
             context.Out.WriteLine($"Starts at sign-in: {(File.Exists(plan.FilePath) ? "yes" : "no")} ({plan.FilePath})");
             context.Out.WriteLine($"Key required: {(settings.GetBool(WorkspaceSettings.UiRequireKey) ? "yes (autopilot ui link prints the sign-in link)" : "no")}");
             context.Out.WriteLine($"Workspace: {workspace.Root}");
