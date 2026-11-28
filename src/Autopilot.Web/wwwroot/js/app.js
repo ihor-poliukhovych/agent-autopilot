@@ -18,7 +18,7 @@ const TABS = [
 // Old addresses keep working; they sit under the Inbox tab.
 const LEGACY = { runs: runs, run: runs, needs: needs };
 // Pages drawn in the shared two-column layout.
-const LAYOUT = new Set(['pipeline', 'tasks', 'pool', 'needs']);
+const LAYOUT = new Set(['tasks', 'pool', 'needs']);
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const switcher = document.getElementById('project-switch');

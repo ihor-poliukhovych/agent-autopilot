@@ -92,7 +92,7 @@ function filtersBar(tasks, filters, repaint) {
     if (values.includes(filters[name])) el.value = filters[name]; else filters[name] = '';
     return h('label', { class: 'pf' }, h('span', { class: 'muted small' }, label), el);
   };
-  return h('div', { class: 'pipeline-filters row', role: 'group', 'aria-label': 'Filters' },
+  return h('div', { class: 'pipeline-filters', role: 'group', 'aria-label': 'Filters' },
     select('state', 'State', uniq(tasks.items.map(i => i.state))),
     select('assignee', 'Assignee', uniq(tasks.items.map(i => i.assignedTo))),
     select('release', 'Release', uniq(cards.map(([, c]) => c.release))),
@@ -147,14 +147,6 @@ function detailPanel(key, item, c, tabState, repaint) {
         h('dl', { class: 'pdetail-rows' }, h('dt', {}, 'Result'), h('dd', { 'data-row': 'result' }, result), h('dt', {}, 'Note'), h('dd', { 'data-row': 'note' }, note))));
 }
 
-function waitingPanel(key, items) {
-  if (!items.length) return null;
-  return h('section', { class: 'card waiting', 'aria-label': 'Waiting for a person' },
-    h('div', { class: 'row between' }, h('h2', {}, `Waiting for a person (${items.length})`), h('a', { class: 'btn sm', href: link(key, 'needs') }, 'Answer questions')),
-    h('ul', {}, items.slice(0, 5).map(i => h('li', {},
-      h('b', {}, `#${i.id}`), h('span', {}, i.title), h('span', { class: 'why' }, i.why)))));
-}
-
 export async function render({ view, key, rest, go }) {
   if (rest[0] === 'job' && rest[1]) return renderJob({ view, key, go }, rest[1]);
   const holder = h('div', {}, loading());
@@ -165,13 +157,12 @@ export async function render({ view, key, rest, go }) {
   const tabState = { tab: 'progress' };
 
   async function load() {
-    const [tasks, runs, needs] = await Promise.all([
-      get(`${base(key)}/tasks`), get(`${base(key)}/runs`), get(`${base(key)}/needs-human`).catch(() => [])]);
+    const [tasks, runs] = await Promise.all([get(`${base(key)}/tasks`), get(`${base(key)}/runs`)]);
     clear(holder);
     holder.append(h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Pipeline'),
       h('p', {}, 'Every open task, from backlog to a draft a person merges.')),
     h('div', { class: 'row' },
-      h('a', { href: link(key, 'needs') }, 'Needs a person'),
+      h('a', { href: link(key, 'inbox') }, 'Inbox'),
       h('a', { href: link(key, 'runs') }, 'Runs'),
       h('button', { type: 'button', onclick: () => load().catch(e => toast(e.message, true)) }, 'Refresh'),
       null)));
@@ -184,24 +175,13 @@ export async function render({ view, key, rest, go }) {
       return;
     }
 
-    const waiting = [];
-    for (const item of tasks.items) {
-      const jobId = tasks.activeJobs[item.id];
-      const job = jobId ? (runs.jobs.find(j => j.job.id === jobId) || {}).job || { id: jobId, status: 'running' } : null;
-      const stage = stageOf(item, job);
-      const needsInfo = needs.find(n => n.id === item.id);
-      if (needsInfo) waiting.push({ id: item.id, title: item.title, why: needsInfo.question });
-      else if (stage === 'pr') waiting.push({ id: item.id, title: item.title, why: 'Draft is ready: review it, merge or reject, and record your decision.' });
-      else if (stage === 'gate') waiting.push({ id: item.id, title: item.title, why: 'The gate rejected this run: read why, then retry or reject.' });
-    }
-    const fun = funnel(runs.stats, runs.runs);
     const list = h('div', { class: 'stack', 'data-part': 'pipeline-list' });
     const detail = h('div', { class: 'stack', 'data-part': 'pipeline-detail' });
     const paintDetail = () => {
       clear(detail);
       const sel = selected && tasks.items.find(i => i.id === selected);
       if (sel) detail.append(detailPanel(key, sel, cardOf(tasks, sel), tabState, paintDetail));
-      else detail.append(waitingPanel(key, waiting), fun);
+      else detail.append(h('p', { class: 'muted pipeline-hint', 'data-part': 'pipeline-hint' }, 'Select a task'));
     };
     const paintList = () => {
       clear(list);
