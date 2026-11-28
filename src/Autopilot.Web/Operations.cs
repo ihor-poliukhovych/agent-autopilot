@@ -341,11 +341,18 @@ public sealed record PoolStatusView(
 
     /// <summary>The tasks waiting in the pool, each with one readiness word.</summary>
     public IReadOnlyList<PoolQueueTaskView> Queue { get; init; } = [];
+
+    /// <summary>Agent runs the pool started in the last 24 hours, the number the daily limit counts.</summary>
+    public int AgentRunsToday { get; init; }
 }
 
 public sealed record PoolRunProgressView(int Done, int Total, int Parked);
 
-public sealed record PoolTimelineEntryView(DateTimeOffset Time, string Event, string? Detail);
+public sealed record PoolTimelineEntryView(DateTimeOffset Time, string Event, string? Detail)
+{
+    /// <summary>The task the event is about, when it is about one.</summary>
+    public string? TaskId { get; init; }
+}
 
 /// <summary>Readiness is one of: ready, needs an answer, not triaged, waits for &lt;id&gt;, parked.</summary>
 public sealed record PoolQueueTaskView(string Id, string Title, string Readiness);
@@ -507,8 +514,9 @@ public sealed class PoolOperations(WebUiOptions options)
             Status = snapshot.State.Status.ToString(),
             SubStatus = snapshot.State.Sub.ToString(),
             Progress = new PoolRunProgressView(snapshot.Progress.Done, snapshot.Progress.Total, snapshot.Progress.Parked),
-            Timeline = [.. runEvents.Select(e => new PoolTimelineEntryView(e.At, e.Event.ToString(), e.Detail))],
+            Timeline = [.. runEvents.Select(e => new PoolTimelineEntryView(e.At, e.Event.ToString(), e.Detail) { TaskId = e.TaskId })],
             Queue = queue,
+            AgentRunsToday = state.AgentRunsInLastDay(DateTimeOffset.UtcNow),
         };
     }
 

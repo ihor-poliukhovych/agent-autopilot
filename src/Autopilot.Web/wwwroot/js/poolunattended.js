@@ -1,39 +1,37 @@
 import { get, post, put, del } from './api.js';
 import { h, clear, put as place, toast, badge, field, ask, ago } from './dom.js';
+import { overrides } from './poolstatus.js';
 
 const base = key => `/projects/${encodeURIComponent(key)}/pool`;
 
 const DAYS = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']];
 
 /**
- * The part of the Pool page for unattended runs: the concurrency slider, the unattended switch, who works on
- * what and why a task waits, the pool master's decisions, parked tasks, the integration branch, and the
- * scheduled run. `reload` redraws the whole page after a change.
+ * The part of the Pool page for unattended runs: the settings panel (agents at once, the unattended switch, the
+ * budget, the integration branch, the scheduled run) and, on the right, the final PR, parked tasks and the pool
+ * master's decisions. `reload` redraws the whole page after a change.
  */
 export async function render({ key, reload }) {
   const holder = h('div', { class: 'stack' });
-  const summary = h('div', { class: 'stack' });
-  const live = h('div', { class: 'stack' });
+  const live = h('div', { class: 'stack pool-live' });
   const [status, schedule] = await Promise.all([get(`${base(key)}/status`), get(`${base(key)}/schedule`)]);
-  paint(holder, summary, live, key, status, schedule, reload);
+  paint(holder, live, key, status, schedule, reload);
   // refreshLive redraws only the parts that change while a run is active; the settings the person may be typing in stay.
   const refreshLive = async () => {
     const next = await get(`${base(key)}/status`);
-    paintLive(summary, live, key, next, reload);
+    paintLive(live, key, next, reload);
     return next;
   };
-  // element: the left column (settings, run summary, integration, schedule). right: the wide right area (parked, decisions).
+  // element: the left column (the settings panel). right: the wide right area (final PR, parked, decisions).
   return { element: holder, right: live, refreshLive };
 }
 
-function paintLive(summary, live, key, status, reload) {
-  clear(summary);
-  place(summary, slotsCard(status));
+function paintLive(live, key, status, reload) {
   clear(live);
-  place(live, parkedCard(key, status, reload), decisionsCard(key, status, reload));
+  place(live, finalPrCard(key, status, reload), parkedCard(key, status, reload), decisionsCard(key, status, reload));
 }
 
-function paint(holder, summary, live, key, status, schedule, reload) {
+function paint(holder, live, key, status, schedule, reload) {
   clear(holder);
   const s = status.settings;
   const save = async change => {
@@ -41,36 +39,42 @@ function paint(holder, summary, live, key, status, schedule, reload) {
     catch (e) { toast(e.message, true); await reload(); }
   };
 
-  paintLive(summary, live, key, status, reload);
-  place(holder,
-    settingsCard(key, s, status, save, reload),
-    summary,
-    integrationCard(key, status, reload),
-    scheduleCard(key, s, schedule, reload));
+  paintLive(live, key, status, reload);
+  place(holder, settingsPanel(key, s, status, schedule, save, reload));
 }
 
-/** One settings row: the label and its explanation on the left, the control on the right. */
-function setting(id, label, hint, control) {
-  return h('div', { class: 'setting' },
-    h('div', { class: 'what' }, h('label', { for: id }, label), hint ? h('p', { class: 'hint', id: id + '-hint' }, hint) : null),
+/** One settings row: the label (and a short hint) on the left, the control on the right. */
+function setting(id, label, hint, control, overridden = false) {
+  return h('div', { class: 'pool-set' },
+    h('div', { class: 'what' },
+      h('label', { for: id, id: id + '-label' },
+        overridden ? h('span', { class: 'pool-ov', role: 'img', 'aria-label': 'Changed from the project default' }) : null, label),
+      hint ? h('p', { class: 'hint', id: id + '-hint' }, hint) : null),
     h('div', { class: 'control' }, control));
 }
 
-function settingsCard(key, s, status, save, reload) {
-  const value = h('b', {}, String(s.concurrency));
-  const slider = h('input', {
-    id: 'set-concurrency', type: 'range', min: 1, max: s.maxConcurrency, step: 1, value: s.concurrency, 'aria-describedby': 'set-concurrency-hint',
-    oninput: () => { value.textContent = slider.value; },
-    onchange: () => save({ concurrency: Number(slider.value) }),
-  });
-  const toggle = (id, on, change) => { const box = h('input', { id, type: 'checkbox', checked: on, role: 'switch', 'aria-describedby': id + '-hint', onchange: () => save(change(box.checked)) }); return box; };
-  const unattended = toggle('set-unattended', s.unattended, v => ({ unattended: v }));
-  const master = toggle('set-master', s.masterEnabled, v => ({ masterEnabled: v }));
-  const integration = toggle('set-integration', s.integrationEnabled, v => ({ integrationEnabled: v }));
+/** The settings panel: single-line rows. On a phone it is a closed details element under the queue. */
+function settingsPanel(key, s, status, schedule, save, reload) {
+  // A value counts as changed only where the API sends the project default next to it.
+  const changed = overrides(s);
+  const defaults = s.defaults ?? {};
+  const isChanged = name => Object.hasOwn(changed, name);
+  const defaultHint = (name, unit = '') => (isChanged(name) ? `Project default: ${defaults[name]}${unit}` : null);
+  const changedCount = Object.keys(changed).length;
+
+  const seg = h('div', { class: 'pool-seg', role: 'radiogroup', id: 'set-concurrency', 'aria-labelledby': 'set-concurrency-label', 'aria-describedby': 'set-concurrency-hint' },
+    Array.from({ length: s.maxConcurrency }, (_, i) => i + 1).map(n => h('label', { class: 'pool-seg-item' },
+      h('input', { type: 'radio', name: 'set-concurrency', value: n, checked: n === s.concurrency, 'aria-label': `${n} at once`, onchange: () => save({ concurrency: n }) }),
+      h('span', { 'aria-hidden': 'true' }, String(n)))));
+
+  const toggle = (id, on, change) => {
+    const box = h('input', { id, type: 'checkbox', checked: on, role: 'switch', class: 'pool-switch', 'aria-describedby': id + '-hint', onchange: () => save(change(box.checked)) });
+    return h('span', { class: 'pool-switch-hit' }, box);
+  };
 
   // A number field saves when it loses focus or Enter is pressed, and says so if the value is not allowed.
   const number = (id, current, min, max, placeholder, allowEmpty, apply) => {
-    const input = h('input', { id, type: 'number', inputmode: 'numeric', min, max, step: 1, placeholder, 'aria-describedby': id + '-hint' });
+    const input = h('input', { id, type: 'number', inputmode: 'numeric', min, max, step: 1, placeholder, class: 'pool-num', 'aria-describedby': id + '-hint' });
     input.value = current ?? '';
     const commit = () => {
       const text = input.value.trim();
@@ -84,38 +88,33 @@ function settingsCard(key, s, status, save, reload) {
     input.addEventListener('keydown', ev => { if (ev.key === 'Enter') commit(); });
     return input;
   };
-  const maxRuns = number('set-max-runs', s.maxAgentRuns, 1, 100000, 'no limit', true, n => ({ maxAgentRuns: n }));
+  const maxRuns = number('set-max-runs', s.maxAgentRuns, 1, 100000, 'none', true, n => ({ maxAgentRuns: n }));
   const stopAt = number('set-stop-at', s.stopAtUsagePercent, 1, 100, '80', false, n => ({ stopAtUsagePercent: n }));
 
-  return h('section', { class: 'card stack' },
-    h('h2', {}, 'How the pool works'),
-    status.pause ? h('div', { class: 'banner' },
-      h('p', {}, h('b', {}, 'Paused. '), status.pause.reason, status.pause.retryAt ? ` It can start again after ${new Date(status.pause.retryAt).toLocaleString()}.` : ''),
-      h('button', { type: 'button', onclick: async () => { try { await post(`${base(key)}/resume`); await reload(); } catch (e) { toast(e.message, true); } } }, 'Resume now')) : null,
-    h('div', { class: 'settings' },
-      setting('set-concurrency', h('span', {}, 'Agents at once: ', value),
-        `1 to ${s.maxConcurrency}. A change applies to the next task the pool starts; agents that are working finish first. Tasks that write the same files, or wait for another task, still go one after the other.`, slider),
-      setting('set-unattended', 'Run without a person',
-        'The pool master answers questions and classifies failures. Questions about ' + s.alwaysAsk.join(', ') + ' are never answered by it: those tasks are parked for you.', unattended),
-      setting('set-master', 'The pool master is on', 'It only acts when the pool runs without a person.', master),
-      setting('set-integration', 'Use an integration branch', 'Task PRs go into an integration branch; the pool never merges into the base branch.', integration),
-      setting('set-max-runs', 'Most agent runs in 24 hours', 'Leave empty for no limit. The pool stops starting tasks when the number is reached.', maxRuns),
-      setting('set-stop-at', 'Stop at this usage of the limit (%)', 'From 1 to 100. The pool pauses when your usage limit reaches this share, when that is known.', stopAt)));
-}
+  const i = status.integration;
+  const integrationHint = !i.enabled
+    ? `Off: each task PR goes straight to ${i.baseBranch}.`
+    : i.branch ? [h('code', {}, i.branch), ` collects the tasks. One final draft PR into ${i.baseBranch}.`]
+      : `Task PRs go to a new branch from ${i.baseBranch}. One final draft PR, merged by a person.`;
 
-function slotsCard(status) {
-  const p = status.progress;
-  return h('section', { class: 'card stack', 'data-part': 'run-summary' },
-    h('h2', {}, 'Run summary'),
-    p ? h('p', { class: 'muted' }, `${p.done} of ${p.total} done, ${p.parked} parked`) : null,
-    !status.slots.length ? h('p', { class: 'muted' }, 'Nothing is running right now.') : h('div', { class: 'table-wrap' }, h('table', { class: 'stack-sm' },
-      h('thead', {}, h('tr', {}, ['Task', 'State', 'Detail', 'Since'].map(t => h('th', {}, t)))),
-      h('tbody', {}, status.slots.map(x => h('tr', {},
-        h('td', { 'data-label': 'Task' }, `#${x.id} ${x.title}`),
-        h('td', { 'data-label': 'State' }, badge(x.state === 'running' ? 'working' : 'waiting', x.state === 'running' ? 'ok' : 'warn')),
-        h('td', { 'data-label': 'Detail' }, x.detail || ''),
-        h('td', { 'data-label': 'Since' }, ago(x.since)))))))
-  );
+  const sched = scheduleBlock(key, s, schedule, reload);
+  return h('details', { class: 'card pool-panel', open: true, 'data-part': 'pool-settings' },
+    h('summary', { class: 'pool-panel-head' },
+      h('span', { class: 'pool-panel-title' },
+        h('h2', {}, 'Pool settings'),
+        h('span', { class: 'hint' }, changedCount ? `${changedCount} changed from the project defaults` : 'A change applies to the next task. Working agents finish first.')),
+      changedCount ? h('span', { class: 'pool-pill' }, h('span', { class: 'pool-ov' }), `${changedCount} changed`) : null,
+      h('span', { class: 'pool-chev', 'aria-hidden': 'true' })),
+    h('div', { class: 'pool-sets' },
+      setting('set-concurrency', 'Agents at once', defaultHint('concurrency') ?? `Up to ${s.maxConcurrency}`, seg, isChanged('concurrency')),
+      setting('set-unattended', 'Run without a person', defaultHint('unattended') ?? `Questions about ${s.alwaysAsk.join(', ')} always wait for you.`, toggle('set-unattended', s.unattended, v => ({ unattended: v })), isChanged('unattended')),
+      setting('set-master', 'Pool master', 'Answers questions when running without a person.', toggle('set-master', s.masterEnabled, v => ({ masterEnabled: v }))),
+      setting('set-max-runs', 'Most agent runs per day', defaultHint('maxAgentRuns') ?? 'Empty means no limit.', maxRuns, isChanged('maxAgentRuns')),
+      setting('set-stop-at', 'Stop at usage limit', defaultHint('stopAtUsagePercent', '%') ?? 'Pauses at this share of the limit.',
+        h('span', { class: 'pool-with-unit' }, stopAt, h('span', { class: 'muted', 'aria-hidden': 'true' }, '%')), isChanged('stopAtUsagePercent')),
+      setting('set-integration', 'Integration branch', integrationHint, toggle('set-integration', s.integrationEnabled, v => ({ integrationEnabled: v }))),
+      sched.row),
+    sched.form);
 }
 
 function decisionsCard(key, status, reload) {
@@ -153,29 +152,26 @@ function parkedCard(key, status, reload) {
         } }, 'Back to the pool'))))))));
 }
 
-function integrationCard(key, status, reload) {
+/** Shown once the integration branch has merged tasks or a final PR: what it holds and the button to open the final PR. */
+function finalPrCard(key, status, reload) {
   const i = status.integration;
-  if (!i.enabled) {
-    return h('section', { class: 'card stack' }, h('h2', {}, 'Integration branch'),
-      h('p', { class: 'muted' }, `Switched off: each task PR goes straight to ${i.baseBranch}. A person merges every one.`));
-  }
-  return h('section', { class: 'card stack' },
+  if (!i.enabled || !i.branch || (!i.merges.length && !i.finalPrUrl)) return null;
+  return h('section', { class: 'card stack', 'data-part': 'final-pr' },
     h('h2', {}, 'Integration branch'),
-    i.branch
-      ? h('p', {}, h('code', {}, i.branch), ` collects the finished tasks, each merged after build and tests passed. You merge one final PR into ${i.baseBranch}.`)
-      : h('p', { class: 'muted' }, `No branch yet. The next pool run creates one from ${i.baseBranch}.`),
+    h('p', {}, h('code', {}, i.branch), ` collects the finished tasks, each merged after build and tests passed. You merge one final PR into ${i.baseBranch}.`),
     i.merges.length ? h('ul', {}, i.merges.map(m => h('li', {}, `#${m.workItemId} (${m.taskBranch}) ${ago(m.mergedAt)}`))) : null,
     i.finalPrUrl ? h('p', {}, 'Final PR (draft): ', h('a', { href: i.finalPrUrl, target: '_blank', rel: 'noopener noreferrer' }, i.finalPrUrl)) : null,
-    i.branch && i.merges.length && !i.finalPrUrl ? h('button', { type: 'button', onclick: async () => {
+    !i.finalPrUrl ? h('div', { class: 'row' }, h('button', { type: 'button', onclick: async () => {
       const ok = await ask({ title: 'Open the final PR?', confirm: 'Open as draft', body: [
         h('p', {}, `Pushes ${i.branch} and opens a draft PR into ${i.baseBranch} with the gh program.`),
         h('p', { class: 'muted small' }, 'It stays a draft. You mark it ready and merge it yourself.')] });
       if (!ok) return;
       try { const r = await post(`${base(key)}/integration/pr`); toast('Draft PR opened: ' + r.url); await reload(); } catch (e) { toast(e.message, true); }
-    } }, 'Open the final PR (draft)…') : null);
+    } }, 'Open the final PR (draft)…')) : null);
 }
 
-function scheduleCard(key, s, schedule, reload) {
+/** The schedule row (state and a button) and the form it opens below the rows. */
+function scheduleBlock(key, s, schedule, reload) {
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
   const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
@@ -202,8 +198,7 @@ function scheduleCard(key, s, schedule, reload) {
     };
   };
 
-  return h('section', { class: 'card stack' },
-    h('h2', {}, 'Scheduled run'),
+  const form = h('div', { class: 'pool-sched stack', id: 'pool-schedule-form', hidden: true },
     scheduleSummary(key, schedule, reload),
     h('div', { class: 'row' }, field('Date', date), field(`Time (${zone})`, time), field('Repeat', repeat)),
     dayRow,
@@ -225,6 +220,16 @@ function scheduleCard(key, s, schedule, reload) {
         await reload();
       } catch (e) { toast(e.message, true); }
     } }, 'Review and schedule…'));
+
+  const open = h('button', { type: 'button', class: 'sm', 'aria-expanded': 'false', 'aria-controls': 'pool-schedule-form',
+    onclick: () => { form.hidden = !form.hidden; open.setAttribute('aria-expanded', String(!form.hidden)); } }, schedule.set ? 'Change…' : 'Set…');
+  const state = schedule.set
+    ? `Runs ${schedule.plan.when}${schedule.next ? `. Next: ${new Date(schedule.next).toLocaleString()}` : ''}`
+    : 'Not scheduled';
+  const row = h('div', { class: 'pool-set' },
+    h('div', { class: 'what' }, h('label', { id: 'set-schedule-label' }, 'Schedule'), h('p', { class: 'hint', id: 'set-schedule-hint' }, state)),
+    h('div', { class: 'control' }, open));
+  return { row, form };
 }
 
 function scheduleSummary(key, s, reload) {

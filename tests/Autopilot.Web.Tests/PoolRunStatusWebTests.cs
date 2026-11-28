@@ -104,4 +104,24 @@ public sealed class PoolRunStatusWebTests
         Assert.Equal("parked", words["5"]);
         Assert.Equal("ready", words["6"]);
     }
+
+    [Fact]
+    public async Task Timeline_entries_name_their_task_and_the_status_counts_agent_runs_of_the_day()
+    {
+        await using var ui = await WithProjectAsync();
+        var events = new PoolRunEventStore(ui.Workspace);
+        var t = DateTimeOffset.UtcNow.AddMinutes(-10);
+        events.Append("new", PoolRunEvent.Enqueue, t);
+        events.Append("new", PoolRunEvent.TaskMerged, t.AddMinutes(1), "7", "merged");
+        var state = new PoolStateStore(ui.Workspace, "demo");
+        state.CountAgentRun("7", "implement", DateTimeOffset.UtcNow.AddMinutes(-5));
+        state.CountAgentRun("7", "master", DateTimeOffset.UtcNow.AddHours(-30));
+
+        var (_, body) = await ui.GetAsync(StatusUrl);
+
+        var timeline = body.GetProperty("timeline").EnumerateArray().ToList();
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, timeline[0].GetProperty("taskId").ValueKind);
+        Assert.Equal("7", timeline[1].GetProperty("taskId").GetString());
+        Assert.Equal(1, body.GetProperty("agentRunsToday").GetInt32());
+    }
 }
