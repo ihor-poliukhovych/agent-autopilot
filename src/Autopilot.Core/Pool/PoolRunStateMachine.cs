@@ -92,6 +92,12 @@ public enum PoolRunEvent
     Fail,
     Cancel,
     Retry,
+
+    // Bookkeeping events (appended at the end so stored events keep reading). They are not in the transition
+    // table: they change the progress of a run, never its state.
+    TaskMerged,
+    TaskParked,
+    RunFinished,
 }
 
 /// <summary>The result of a transition: allowed with the new state, or refused with a reason.</summary>
