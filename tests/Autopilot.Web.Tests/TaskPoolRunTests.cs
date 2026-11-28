@@ -116,6 +116,31 @@ public sealed class TaskPoolRunTests
     }
 
     [Fact]
+    public async Task The_pool_list_shows_an_order_changed_outside_the_page_on_the_next_read()
+    {
+        await using var ui = await WithProjectAsync();
+        foreach (var title in new[] { "A", "B", "C" })
+        {
+            await ui.PostAsync(Tasks(), new { title });
+        }
+
+        foreach (var id in new[] { "1", "2", "3" })
+        {
+            await ui.PostAsync("/api/projects/demo/pool", new { id });
+        }
+
+        var (_, before) = await ui.GetAsync("/api/projects/demo/pool");
+        Assert.Equal(["1", "2", "3"], before.EnumerateArray().Select(p => p.GetProperty("id").GetString()!).ToArray());
+
+        // Same call the CLI makes.
+        new PoolService(ui.Workspace, "demo").Move("3", 1);
+
+        var (_, after) = await ui.GetAsync("/api/projects/demo/pool");
+        Assert.Equal(["3", "1", "2"], after.EnumerateArray().Select(p => p.GetProperty("id").GetString()!).ToArray());
+        Assert.Equal([1, 2, 3], after.EnumerateArray().Select(p => p.GetProperty("position").GetInt32()).ToArray());
+    }
+
+    [Fact]
     public async Task The_pool_is_ordered_changed_and_run_now_starts_pool_run_in_the_background()
     {
         await using var ui = await WithProjectAsync();
