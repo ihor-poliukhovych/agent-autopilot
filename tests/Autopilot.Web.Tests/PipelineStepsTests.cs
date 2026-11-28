@@ -115,6 +115,27 @@ public sealed class PipelineStepsTests
     }
 
     [Fact]
+    public void Stages_list_seven_nodes_with_the_sub_steps_of_each()
+    {
+        var stages = PipelineSteps.Stages(PipelineSteps.Dots(new PipelineInput(TriageLabel: "agent-ready", InPool: true)));
+        Assert.Equal(["Start", "Qualify", "Implement", "Merge", "Verify dev", "Verify prod", "Done"], stages.Select(s => s.Step).ToArray());
+        Assert.Equal([0, 3, 7, 7, 3, 3, 0], stages.Select(s => s.SubSteps.Count).ToArray());
+        Assert.Equal(["Read Task", "Decide", "Comment Task"], stages[1].SubSteps.Select(x => x.Name).ToArray());
+        Assert.Equal("Publish Pull Request", stages[2].SubSteps[6].Name);
+        Assert.Equal(["Wait for deployment", "Test", "Comment Task"], stages[5].SubSteps.Select(x => x.Name).ToArray());
+        Assert.Equal(["done", "done", "current", "pending", "pending", "pending", "pending"], stages.Select(s => s.State).ToArray());
+    }
+
+    [Fact]
+    public void Stages_with_no_data_are_all_pending()
+    {
+        var stages = PipelineSteps.Stages([]);
+        Assert.Equal(7, stages.Count);
+        Assert.All(stages, s => Assert.Equal("pending", s.State));
+        Assert.All(stages.SelectMany(s => s.SubSteps), x => Assert.Equal("pending", x.State));
+    }
+
+    [Fact]
     public void Card_of_an_entry_carries_dots_flag_release_and_action()
     {
         var entry = new WorkItemListEntry("7", "T", null, "Active", null, null, null, false, null, ["release:2.0"]);

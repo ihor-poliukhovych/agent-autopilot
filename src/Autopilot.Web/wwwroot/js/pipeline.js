@@ -116,6 +116,54 @@ function pipelineCard(key, item, c, isSelected, onSelect) {
       c.actionDue ? h('a', { class: 'btn sm primary', href: target, onclick: ev => ev.stopPropagation() }, c.actionLabel || 'Open') : null));
 }
 
+/** Meta line fields for the detail panel; a field with no data is left out. */
+export function metaParts(item, runs) {
+  const mine = (runs || []).filter(r => String(r.workItemId) === String(item.id));
+  const last = mine.reduce((m, r) => (!m || new Date(r.finishedAt) > new Date(m) ? r.finishedAt : m), null);
+  const parts = [
+    item.tracker, item.state, item.assignedTo, item.prUrl ? ['PR', item.prUrl] : null,
+    mine.length ? `${mine.length} event${mine.length === 1 ? '' : 's'}` : null,
+    last ? `last activity ${ago(last)}` : null,
+  ];
+  return parts.filter(Boolean);
+}
+
+/** Result and Note texts from data the app has: the last run outcome and the triage reason; '–' when none. */
+export function resultAndNote(item) {
+  const r = item.lastRun;
+  const result = r ? [r.outcome, r.gateVerdict ? `gate ${r.gateVerdict}` : null, r.humanDecision ? `person ${r.humanDecision}` : null].filter(Boolean).join(' · ') : '';
+  const note = (item.triage && item.triage.reason) || (r && r.message) || '';
+  return { result: result || '–', note: note || '–' };
+}
+
+function stepper(stages) {
+  return h('ol', { class: 'stepper', 'aria-label': 'Pipeline stages' }, stages.map(s =>
+    h('li', { class: `stage ${s.state}`, 'data-stage': s.step },
+      h('span', { class: 'node', title: `${s.step}: ${s.state}` }, h('span', { class: 'sr-only' }, `${s.step}: ${s.state}`)),
+      h('div', { class: 'stage-name' }, s.step),
+      (s.subSteps || []).length ? h('ul', { class: 'substeps' }, s.subSteps.map(x =>
+        h('li', { class: `sub ${x.state || 'pending'}` }, h('span', { class: 'sdot', 'aria-hidden': 'true' }), h('span', {}, x.name),
+          h('span', { class: 'sr-only' }, ` (${x.state || 'pending'})`)))) : null)));
+}
+
+function detailPanel(key, item, c, runs, tabState, repaint) {
+  const meta = metaParts(item, runs).map(p => Array.isArray(p) ? h('a', { href: p[1], target: '_blank', rel: 'noopener' }, p[0]) : p);
+  const joined = meta.flatMap((m, i) => i ? [' · ', m] : [m]);
+  const { result, note } = resultAndNote(item);
+  const tab = (id, label) => h('button', { type: 'button', role: 'tab', class: tabState.tab === id ? 'active' : '', 'aria-selected': String(tabState.tab === id), 'data-tab': id,
+    onclick: () => { tabState.tab = id; repaint(); } }, label);
+  const stages = c.stages && c.stages.length ? c.stages : (c.dots || []).map(d => ({ step: d.step, state: d.state, subSteps: [] }));
+  return h('section', { class: 'card pdetail', 'aria-label': `Task ${item.id}` },
+    h('div', { class: 'pdetail-id' }, `#${item.id}`),
+    h('h2', { class: 'pdetail-title' }, item.title),
+    joined.length ? h('div', { class: 'pdetail-meta mono small muted' }, joined) : null,
+    h('div', { class: 'tabs', role: 'tablist' }, tab('progress', 'Progress'), tab('diff', 'System diff')),
+    tabState.tab === 'diff'
+      ? h('p', { class: 'muted', 'data-part': 'diff-placeholder' }, 'System diff comes later.')
+      : h('div', {}, stepper(stages),
+        h('dl', { class: 'pdetail-rows' }, h('dt', {}, 'Result'), h('dd', { 'data-row': 'result' }, result), h('dt', {}, 'Note'), h('dd', { 'data-row': 'note' }, note))));
+}
+
 function waitingPanel(key, items) {
   if (!items.length) return null;
   return h('section', { class: 'card waiting', 'aria-label': 'Waiting for a person' },
@@ -131,6 +179,7 @@ export async function render({ view, key, rest, go }) {
   let timer = null;
   const filters = { state: '', assignee: '', release: '', label: '' };
   let selected = null;
+  const tabState = { tab: 'progress' };
 
   async function load() {
     const [tasks, runs, needs] = await Promise.all([
@@ -165,7 +214,14 @@ export async function render({ view, key, rest, go }) {
     const fun = funnel(runs.stats, runs.runs);
     const list = h('div', { class: 'stack', 'data-part': 'pipeline-list' });
     const detail = h('div', { class: 'stack', 'data-part': 'pipeline-detail' });
+    const paintDetail = () => {
+      clear(detail);
+      const sel = selected && tasks.items.find(i => i.id === selected);
+      if (sel) detail.append(detailPanel(key, sel, cardOf(tasks, sel), runs.runs, tabState, paintDetail));
+      else detail.append(waitingPanel(key, waiting), fun);
+    };
     const paintList = () => {
+      paintDetail();
       clear(list);
       const shown = tasks.items.filter(i => matches(i, cardOf(tasks, i), filters));
       if (!shown.length) list.append(emptyState('No work item matches these filters.', null, 'Nothing to show'));
@@ -175,7 +231,6 @@ export async function render({ view, key, rest, go }) {
     };
     const filterBar = filtersBar(tasks, filters, paintList);
     paintList();
-    detail.append(waitingPanel(key, waiting), fun);
     holder.append(h('div', { class: 'app-layout', 'data-page': 'pipeline' },
       h('div', { class: 'app-left' }, filterBar, list), h('div', { class: 'app-right open' }, detail)));
     return runs;

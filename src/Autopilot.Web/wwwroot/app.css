@@ -320,5 +320,30 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
 .pcard .dot.current { background: var(--run, #2563eb); border-color: var(--run, #2563eb); }
 .pcard .dot.problem { background: var(--bad); border-color: var(--bad); }
 
+/* Pipeline detail panel: big id and title, mono meta line, tabs, wide stepper with sub-steps, Result and Note rows. */
+.pdetail-id { font-size: 1.6rem; font-weight: 700; }
+.pdetail-title { margin: .1rem 0 .4rem; overflow-wrap: anywhere; }
+.pdetail-meta { margin-bottom: var(--s3, .75rem); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.pdetail .tabs { display: flex; gap: .25rem; border-bottom: 1px solid var(--border); margin-bottom: var(--s3, .75rem); }
+.pdetail .tabs button { border: 0; background: none; padding: .4rem .8rem; cursor: pointer; border-bottom: 2px solid transparent; }
+.pdetail .tabs button.active { border-bottom-color: var(--accent); font-weight: 600; }
+.stepper { display: flex; list-style: none; margin: 0 0 var(--s3, .75rem); padding: 0; position: relative; justify-content: space-between; gap: .25rem; }
+.stepper::before { content: ""; position: absolute; left: 4%; right: 4%; top: 12px; height: 2px; background: var(--border); }
+.stepper .stage { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.stepper .node { width: 24px; height: 24px; border-radius: 50%; border: 3px solid var(--muted); background: var(--surface, #fff); box-sizing: border-box; z-index: 1; }
+.stepper .stage.done .node { background: var(--ok); border-color: var(--ok); }
+.stepper .stage.current .node { background: var(--run, #2563eb); border-color: var(--run, #2563eb); }
+.stepper .stage.problem .node { background: var(--bad); border-color: var(--bad); }
+.stage-name { font-weight: 600; font-size: .85rem; margin: .3rem 0; }
+.substeps { list-style: none; margin: 0; padding: 0; font-size: .75rem; text-align: left; }
+.substeps .sub { display: flex; align-items: center; gap: .3rem; padding: .1rem 0; }
+.substeps .sdot { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--muted); box-sizing: border-box; }
+.substeps .sub.done .sdot { background: var(--ok); border-color: var(--ok); }
+.substeps .sub.current .sdot { background: var(--run, #2563eb); border-color: var(--run, #2563eb); }
+.substeps .sub.problem .sdot { background: var(--bad); border-color: var(--bad); }
+.pdetail-rows { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 0; }
+.pdetail-rows dt { font-weight: 600; }
+.pdetail-rows dd { margin: 0; overflow-wrap: anywhere; }
+
 .timing { padding: var(--s2) var(--s4); color: var(--muted, #888); font-size: .75rem; text-align: right; }
 .timing [data-slow="true"] { color: var(--bad, #b3261e); font-weight: 600; }
