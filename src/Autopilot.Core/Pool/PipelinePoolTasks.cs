@@ -10,8 +10,8 @@ namespace Autopilot.Core.Pool;
 /// <summary>
 /// The real <see cref="IPoolTasks"/>: reads tasks from the project's work item source, triages through the
 /// pipeline, writes answers and bug tasks into the workspace tasks, and merges into the integration branch.
-/// Answers and bug tasks need workspace tasks; for a project whose tasks live in a tracker the pool master
-/// cannot write them, so such tasks are parked instead.
+/// Answers go into the text of a workspace task; for a task that lives in a tracker (the pool cannot edit it)
+/// they are kept as notes in the workspace and added to the task text when the pipeline reads it. Bug tasks need workspace tasks.
 /// </summary>
 public sealed class PipelinePoolTasks(
     AutopilotPipeline pipeline,
@@ -20,7 +20,9 @@ public sealed class PipelinePoolTasks(
     LocalTaskService? tasks,
     GitClient git,
     AutopilotConfig config,
-    IntegrationService? integration) : IPoolTasks
+    IntegrationService? integration,
+    PoolStateStore? state = null,
+    TimeProvider? clock = null) : IPoolTasks
 {
     private readonly SemaphoreSlim _triageGate = new(1, 1);
 
@@ -81,6 +83,13 @@ public sealed class PipelinePoolTasks(
 
     public Task AnswerAsync(string workItemId, string text, CancellationToken ct)
     {
+        // A tracker's ids can look like workspace task numbers, so the source decides, not the number.
+        if (state is not null && items is not LocalTaskWorkItemSource)
+        {
+            state.AddNote(workItemId, text, (clock ?? TimeProvider.System).GetUtcNow());
+            return Task.CompletedTask;
+        }
+
         if (tasks is null || !LocalTaskService.TryParseNumber(workItemId, out var number) || tasks.Get(number) is not { } task)
         {
             throw new InvalidOperationException($"Task {workItemId} is not a workspace task, so the pool cannot write into it.");

@@ -80,12 +80,14 @@ internal static class PoolUnattendedCommands
             return ExitCodes.Failure;
         }
 
+        var state = new PoolStateStore(workspace, project.Key);
         Autopilot.Core.Pipeline.AutopilotPipeline pipeline;
         try
         {
             pipeline = await ProjectServices.CreatePipelineAsync(target.RepoRoot, context, ct, null, target.DataFolder, target.LocalTasks,
                 c => branch is null ? c : c with { BaseBranch = branch },
-                PipelineCommands.TriageLockFor(target, context)).ConfigureAwait(false);
+                PipelineCommands.TriageLockFor(target, context),
+                w => w is LocalTaskWorkItemSource ? w : new PoolNotesWorkItemSource(w, state)).ConfigureAwait(false);
         }
         catch (ProjectSetupException ex)
         {
@@ -97,7 +99,6 @@ internal static class PoolUnattendedCommands
         var items = target.LocalTasks is { } local
             ? new LocalTaskWorkItemSource(local, triage)
             : ProjectServices.CreateModules(target.RepoRoot, config, target.DataFolder, target.LocalTasks).WorkItems;
-        var state = new PoolStateStore(workspace, project.Key);
         var settings = new ProjectSettingsService(target.RepoRoot, target.DataFolder);
         var current = config;
         PoolConfig ReadPool()
@@ -124,7 +125,7 @@ internal static class PoolUnattendedCommands
                 Config = ReadPool,
                 Unattended = unattended ? true : null,
                 Master = master,
-                Tasks = new PipelinePoolTasks(pipeline, items, triage, target.LocalTasks, git, config, integration),
+                Tasks = new PipelinePoolTasks(pipeline, items, triage, target.LocalTasks, git, config, integration, state, clock),
                 State = state,
                 TaskLock = new TaskRunLock(workspace, context.IsProcessAlive),
                 IsProcessAlive = context.IsProcessAlive,

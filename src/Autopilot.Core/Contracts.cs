@@ -119,7 +119,8 @@ public sealed record PublishRequest(
     /// <summary>The pull request title (the commit subject). Null keeps the publisher's own wording.</summary>
     string? Title = null);
 
-public sealed record PublishResult(bool Succeeded, string Location, string? Error);
+/// <summary>The result of publishing. <paramref name="BranchName"/> is the branch published, when the publisher had to use another name than the request (null: the requested one).</summary>
+public sealed record PublishResult(bool Succeeded, string Location, string? Error, string? BranchName = null);
 
 public interface IPublisher
 {

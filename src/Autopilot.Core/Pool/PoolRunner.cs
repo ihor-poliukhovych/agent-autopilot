@@ -583,6 +583,7 @@ public sealed class PoolRunner(
                 switch (result.Outcome)
                 {
                     case ImplementOutcome.Published:
+                        _options.State?.ClearNotes(id);
                         return await IntegrateAsync(result, ct).ConfigureAwait(false);
 
                     case ImplementOutcome.NotReady when master is not null && _options.Tasks is { } tasks:

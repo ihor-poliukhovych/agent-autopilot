@@ -82,6 +82,12 @@ public sealed class RecordingPusher : IGitPusher
 
     public Exception? Throw { get; set; }
 
+    /// <summary>The name the pusher publishes under instead of the requested one (a branch that was already on the remote).</summary>
+    public string? Resolved { get; set; }
+
+    public Task<string> ResolveBranchAsync(string repositoryPath, string remote, string branch, string branchPrefix, AzureDevOpsCredential credential, CancellationToken ct) =>
+        Task.FromResult(Resolved ?? branch);
+
     public Task PushAsync(string repositoryPath, string remote, string branch, string branchPrefix, AzureDevOpsCredential credential, CancellationToken ct)
     {
         GitPusher.EnsureAgentBranch(branch, branchPrefix);

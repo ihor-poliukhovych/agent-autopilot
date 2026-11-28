@@ -43,7 +43,7 @@ public sealed class TaskHistoryPublisher(IPublisher inner, LocalTaskService task
             tasks.AppendHistory(number, LocalTaskService.HistoryKind.Gate, $"Gate: {request.Decision.Outcome}.", string.Join('\n', findings));
             if (result.Succeeded)
             {
-                tasks.AppendHistory(number, LocalTaskService.HistoryKind.Draft, $"Draft on branch {request.BranchName}.", result.Location);
+                tasks.AppendHistory(number, LocalTaskService.HistoryKind.Draft, $"Draft on branch {result.BranchName ?? request.BranchName}.", result.Location);
             }
         }
 
