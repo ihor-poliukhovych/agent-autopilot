@@ -326,7 +326,29 @@ public sealed record PoolStatusView(
     IReadOnlyList<PoolDecision> Decisions,
     int RevertedDecisions,
     IntegrationInfo Integration,
-    bool Busy);
+    bool Busy)
+{
+    /// <summary>The status of the latest pool run (Planned when there is none).</summary>
+    public string Status { get; init; } = nameof(PoolRunStatus.Planned);
+
+    /// <summary>The sub-status of the latest pool run ("None" when it has none).</summary>
+    public string SubStatus { get; init; } = nameof(PoolRunSubStatus.None);
+
+    public PoolRunProgressView Progress { get; init; } = new(0, 0, 0);
+
+    /// <summary>The events of the latest pool run, in the order they were appended.</summary>
+    public IReadOnlyList<PoolTimelineEntryView> Timeline { get; init; } = [];
+
+    /// <summary>The tasks waiting in the pool, each with one readiness word.</summary>
+    public IReadOnlyList<PoolQueueTaskView> Queue { get; init; } = [];
+}
+
+public sealed record PoolRunProgressView(int Done, int Total, int Parked);
+
+public sealed record PoolTimelineEntryView(DateTimeOffset Time, string Event, string? Detail);
+
+/// <summary>Readiness is one of: ready, needs an answer, not triaged, waits for &lt;id&gt;, parked.</summary>
+public sealed record PoolQueueTaskView(string Id, string Title, string Readiness);
 
 /// <summary>The pool and its runs: order, remove, run now, run at night.</summary>
 public sealed class PoolOperations(WebUiOptions options)
@@ -452,18 +474,63 @@ public sealed class PoolOperations(WebUiOptions options)
 
         // A run that was killed leaves its slots 'working': a run with no sign of life for a few minutes is dead.
         state.ReleaseDead(DateTimeOffset.UtcNow, PoolStateStore.DefaultStaleAfter, scope.Options.IsProcessAlive ?? ProjectRunLock.IsAlive, Environment.ProcessId);
-        var titles = (await scope.CreateList().ListAsync(ct).ConfigureAwait(false)).ToDictionary(e => e.Id, e => e.Title, StringComparer.Ordinal);
+        var entries = (await scope.CreateList().ListAsync(ct).ConfigureAwait(false)).ToDictionary(e => e.Id, StringComparer.Ordinal);
+        var titles = entries.ToDictionary(e => e.Key, e => e.Value.Title, StringComparer.Ordinal);
         var integration = Integration(scope, view.Config).Info();
+
+        var events = new PoolRunEventStore(scope.Workspace);
+        var runId = events.LatestRunId();
+        var runEvents = runId is null ? [] : events.Read(runId);
+        var snapshot = PoolRunStatusFolder.Fold(runEvents);
+
+        var parked = state.Parked();
+        var parkedIds = parked.Select(p => p.WorkItemId).ToHashSet(StringComparer.Ordinal);
+        var inPool = scope.Pool.List().Select(e => e.WorkItemId).ToList();
+        var inPoolSet = inPool.ToHashSet(StringComparer.Ordinal);
+        var queue = inPool.Concat(parkedIds.Where(id => !inPoolSet.Contains(id))).Select(id =>
+        {
+            entries.TryGetValue(id, out var entry);
+            return new PoolQueueTaskView(id, entry?.Title ?? id, Readiness(id, entry, parkedIds, inPoolSet));
+        }).ToList();
+
         return new PoolStatusView(
             new PoolSettingsView(pool.Unattended, pool.Concurrency, Autopilot.Core.Config.PoolConfig.MaxConcurrency, pool.Master.Enabled, pool.Integration.Enabled,
                 pool.Budget.MaxAgentRuns, pool.Budget.StopAtUsagePercent, pool.AlwaysAsk, pool.OnFailure.Retries),
             [.. state.Slots().Select(s => new PoolSlotView(s.WorkItemId, titles.GetValueOrDefault(s.WorkItemId, s.WorkItemId), s.State, s.Detail, s.Since))],
             state.CurrentPause(),
-            state.Parked(),
+            parked,
             state.Decisions(50),
             state.RevertedCount(),
             integration,
-            scope.Lock.Holder(scope.Project.Key) is not null);
+            scope.Lock.Holder(scope.Project.Key) is not null)
+        {
+            Status = snapshot.State.Status.ToString(),
+            SubStatus = snapshot.State.Sub.ToString(),
+            Progress = new PoolRunProgressView(snapshot.Progress.Done, snapshot.Progress.Total, snapshot.Progress.Parked),
+            Timeline = [.. runEvents.Select(e => new PoolTimelineEntryView(e.At, e.Event.ToString(), e.Detail))],
+            Queue = queue,
+        };
+    }
+
+    private static string Readiness(string id, WorkItemListEntry? entry, IReadOnlySet<string> parked, IReadOnlySet<string> inPool)
+    {
+        if (parked.Contains(id))
+        {
+            return "parked";
+        }
+
+        if (entry?.Triage is not { } triage)
+        {
+            return "not triaged";
+        }
+
+        if (string.Equals(triage.Label, "needs-human", StringComparison.Ordinal))
+        {
+            return "needs an answer";
+        }
+
+        var waitsFor = PoolTaskHints.DependenciesFrom(entry.Labels ?? []).FirstOrDefault(d => d != id && inPool.Contains(d));
+        return waitsFor is null ? "ready" : "waits for " + waitsFor;
     }
 
     public PoolSettingsView SaveSettings(ProjectScope scope, PoolSettingsBody body)
