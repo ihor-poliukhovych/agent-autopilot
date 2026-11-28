@@ -17,6 +17,13 @@ public sealed class PoolRunEventStore(Workspace.Workspace workspace)
             ("$r", runId), ("$t", Db.Stamp(at)), ("$e", runEvent.ToString()), ("$i", taskId), ("$d", detail));
     }
 
+    /// <summary>The id of the run whose newest event was appended last, or null when no run has events.</summary>
+    public string? LatestRunId()
+    {
+        using var connection = workspace.Open();
+        return Db.Query(connection, r => r.GetString(0), "SELECT run_id FROM pool_run_events ORDER BY id DESC LIMIT 1").FirstOrDefault();
+    }
+
     /// <summary>The events of one run in the order they were appended. Empty when there are none.</summary>
     public IReadOnlyList<PoolRunEventRecord> Read(string runId)
     {
