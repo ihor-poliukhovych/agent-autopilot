@@ -27,6 +27,38 @@ function number(draft, path, min = 1) {
   input.addEventListener('input', () => setPath(draft, path, Number(input.value)));
   return input;
 }
+/** The three merge gate size limits: the draft property, the config name, the label, the default and the range allowed when saving. */
+export const GATE_LIMITS = [
+  { path: 'maxFilesChanged', name: 'gate.maxFilesChanged', label: 'Most files changed', def: 6, min: 1, max: 200 },
+  { path: 'maxSourceLinesChanged', name: 'gate.maxSourceLinesChanged', label: 'Most source lines changed', def: 150, min: 10, max: 5000 },
+  { path: 'maxTestLinesChanged', name: 'gate.maxTestLinesChanged', label: 'Most test lines changed', def: 300, min: 10, max: 5000 },
+];
+
+/**
+ * Problems with the limits the person changed, in plain words. A value equal to the one the page loaded is not
+ * checked, so an old config with an out-of-range limit can still be saved. `original` is the draft as loaded.
+ */
+export function gateLimitProblems(draft, original) {
+  const problems = [];
+  for (const l of GATE_LIMITS) {
+    const value = draft[l.path];
+    if (original && value === original[l.path]) continue;
+    if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isInteger(value)) problems.push(`${l.name} must be a whole number.`);
+    else if (value < l.min || value > l.max) problems.push(`${l.name} must be between ${l.min} and ${l.max}.`);
+  }
+  return problems;
+}
+
+function limitField(draft, l) {
+  const input = h('input', { type: 'number', step: 1, 'aria-label': l.label });
+  input.value = draft[l.path];
+  const loaded = draft[l.path];
+  input.addEventListener('input', () => { draft[l.path] = input.value === '' ? NaN : Number(input.value); });
+  return field(l.label, input,
+    `Default ${l.def}. Current value ${loaded}. Allowed when saving: whole numbers from ${l.min} to ${l.max}. ` +
+    'A larger limit loosens this review check: bigger changes pass the gate without a closer look, and the change is recorded in the history.');
+}
+
 function check(draft, path, label) {
   const box = h('input', { type: 'checkbox' });
   box.checked = !!getPath(draft, path);
@@ -150,9 +182,7 @@ export const STEPS = [
           field('Email', text(draft, 'identity.email'), 'An address without spaces, for example autopilot@localhost.'))),
         role('Triage', 'triage'), role('Implementer', 'implementer'), role('Reviewer', 'reviewer'),
         h('fieldset', {}, h('legend', {}, 'Limits the gate enforces'), h('div', { class: 'form-grid' },
-          field('Most files changed', number(draft, 'maxFilesChanged')),
-          field('Most source lines changed', number(draft, 'maxSourceLinesChanged')),
-          field('Most test lines changed', number(draft, 'maxTestLinesChanged')),
+          ...GATE_LIMITS.map(l => limitField(draft, l)),
           check(draft, 'requireTestChange', 'Changed source code must come with a test change'))));
     },
   },

@@ -50,6 +50,43 @@ public sealed class InboxApiTests
     }
 
     [Fact]
+    public async Task A_task_with_a_question_and_a_parked_entry_shows_one_question_row_with_the_park_reason()
+    {
+        await using var ui = new UiFixture();
+        await ui.CreateProjectAsync();
+        for (var i = 1; i <= 3; i++)
+        {
+            await ui.PostAsync("/api/projects/demo/tasks", new { title = "Task " + i, body = "Do it." });
+        }
+
+        var tasks = new LocalTaskService(ui.Workspace, "demo");
+        var triage = new TriageStore(ui.RepoFolder, ui.Workspace.ProjectFolder("demo"));
+        foreach (var n in new[] { 1, 2 })
+        {
+            await triage.SaveAsync(LocalTaskWorkItemSource.ToItem(tasks.Get(n)!),
+                new TriageResult(TriageLabel.NeedsHuman, "Which order?", [], RiskLevel.Low, ["a", "b"], 0), CancellationToken.None);
+        }
+        var state = new PoolStateStore(ui.Workspace, "demo");
+        state.Park("1", "other", "Gave up after two tries.", DateTimeOffset.UtcNow);
+        state.Park("3", "other", "Needs a decision.", DateTimeOffset.UtcNow);
+
+        var (_, items) = await ui.GetAsync(Inbox);
+
+        var list = items.EnumerateArray().ToArray();
+        var ids = list.Select(e => e.GetProperty("id").GetString()).ToArray();
+        Assert.Equal(ids.Distinct(), ids);
+        Assert.Equal(["1", "2", "3"], ids.Order());
+        var byId = list.ToDictionary(e => e.GetProperty("id").GetString()!);
+        Assert.Equal("question", byId["1"].GetProperty("kind").GetString());
+        Assert.Equal("Gave up after two tries.", byId["1"].GetProperty("parkReason").GetString());
+        Assert.Equal("question", byId["2"].GetProperty("kind").GetString());
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, byId["2"].GetProperty("parkReason").ValueKind);
+        Assert.Equal("parked", byId["3"].GetProperty("kind").GetString());
+        var times = list.Select(e => e.GetProperty("createdAt").GetDateTimeOffset()).ToArray();
+        Assert.Equal(times.Order(), times);
+    }
+
+    [Fact]
     public async Task Questions_and_parked_tasks_come_in_one_list_oldest_first()
     {
         await using var ui = new UiFixture();
