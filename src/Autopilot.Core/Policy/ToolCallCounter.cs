@@ -6,10 +6,13 @@ namespace Autopilot.Core.Policy;
 
 public static class ToolCallCounter
 {
-    private static readonly TimeSpan MaxWait = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan MaxWait = TimeSpan.FromSeconds(60);
 
     /// <summary>Atomically increments the counter in the file (creating it at 0) and returns the new value.</summary>
-    public static int Increment(string counterFile)
+    public static int Increment(string counterFile) => Increment(counterFile, MaxWait);
+
+    /// <summary>Same as <see cref="Increment(string)"/> but throws an IOException after <paramref name="timeout"/> of contention.</summary>
+    public static int Increment(string counterFile, TimeSpan timeout)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(counterFile);
 
@@ -27,11 +30,11 @@ public static class ToolCallCounter
             {
                 return IncrementOnce(counterFile);
             }
-            catch (IOException) when (clock.Elapsed < MaxWait)
+            catch (IOException) when (clock.Elapsed < timeout)
             {
                 // Another process holds the file. Wait and try again.
             }
-            catch (UnauthorizedAccessException) when (clock.Elapsed < MaxWait)
+            catch (UnauthorizedAccessException) when (clock.Elapsed < timeout)
             {
                 // On Windows a file in use can briefly refuse access.
             }
