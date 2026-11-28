@@ -280,3 +280,15 @@ A person merges the one final draft PR. Turning this off is an explicit setting.
 
 Schedules take a date, a repeat, a stop time and a task limit, and a missed run is started at the next
 sign-in. Details: [docs/POOL.md](docs/POOL.md).
+
+## D-022 External systems are tools of the agent, built when someone asks (accepted, 2026-11-28)
+
+The agent never learns an external API and never calls one directly: no `az`, `gh`, `curl` or raw REST
+in its prompt or its allowed commands. Every external system (a tracker, a git host, CI, logs) is a
+connector that offers typed tools with a tier (read, write, destructive), per-project enablement, an
+audit record for every write, and one MCP server that hosts them for people, Claude Code sessions and
+agent runs.
+
+A connector is built only when someone needs it. No connector is added on speculation. When a user asks
+for an integration with a new system, it is implemented as tools on this framework, not as a one-off
+script, a direct API call from the agent, or a manual step in the UI.
