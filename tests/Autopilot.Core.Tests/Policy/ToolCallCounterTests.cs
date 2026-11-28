@@ -66,7 +66,7 @@ public sealed class ToolCallCounterTests : IDisposable
             var values = new List<int>();
             for (var i = 0; i < perWorker; i++)
             {
-                values.Add(ToolCallCounter.Increment(file));
+                values.Add(ToolCallCounter.Increment(file, TimeSpan.FromMinutes(2)));
             }
 
             return values;
@@ -84,6 +84,6 @@ public sealed class ToolCallCounterTests : IDisposable
         var file = Path.Combine(_dir, "counter");
         using var holder = new FileStream(file, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
 
-        Assert.ThrowsAny<IOException>(() => ToolCallCounter.Increment(file));
+        Assert.ThrowsAny<IOException>(() => ToolCallCounter.Increment(file, TimeSpan.FromMilliseconds(200)));
     }
 }
