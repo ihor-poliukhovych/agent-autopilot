@@ -172,6 +172,65 @@ public sealed class PipelineStepsTests
         Assert.Equal("Small and clear", detail.Note);
     }
 
+    static WorkItemListEntry Entry(RunRecord? run) => new("7", "T", null, null, null, null, run, false, null);
+    static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-01-02T10:00:00Z");
+
+    [Fact]
+    public void Log_is_empty_without_a_run()
+    {
+        Assert.Empty(PipelineSteps.LogOf(Entry(null)));
+        Assert.Empty(PipelineSteps.DetailOf(Entry(null), 0).Log!);
+    }
+
+    [Fact]
+    public void Log_of_a_gate_rejected_run_has_outcome_and_gate_lines_and_no_merge_group()
+    {
+        var run = new RunRecord(1, "p", "7", null, T0, T0.AddMinutes(5), "succeeded", "rejected", false, false, null, null, null, "tests weak");
+        var log = PipelineSteps.LogOf(Entry(run));
+        var g = Assert.Single(log);
+        Assert.Equal("Implement", g.Stage);
+        Assert.Equal("2026-01-02 10:00:00 UTC", g.From);
+        Assert.Equal("2026-01-02 10:05:00 UTC", g.To);
+        Assert.Equal(2, g.Lines.Count);
+        Assert.Equal("succeeded", g.Lines[0].State);
+        Assert.Equal("tests weak", g.Lines[0].Message);
+        Assert.Equal("rejected", g.Lines[1].State);
+        Assert.All(g.Lines, l => Assert.Null(l.Href));
+    }
+
+    [Fact]
+    public void Log_of_a_passed_run_with_a_merged_decision_has_a_merge_group()
+    {
+        var run = new RunRecord(1, "p", "7", null, T0, T0.AddMinutes(5), "succeeded", "passed", false, true, HumanDecision.Merged, T0.AddHours(1), null, null);
+        var log = PipelineSteps.LogOf(Entry(run));
+        Assert.Equal(["Implement", "Merge"], log.Select(g => g.Stage));
+        var line = Assert.Single(log[1].Lines);
+        Assert.Equal("merged", line.State);
+        Assert.Equal("2026-01-02 11:00:00 UTC", line.Time);
+        Assert.Null(log[0].Lines[0].Message);
+    }
+
+    [Fact]
+    public void Log_of_a_failed_run_with_no_gate_verdict_has_only_the_outcome_line()
+    {
+        var run = new RunRecord(1, "p", "7", null, T0, T0.AddMinutes(1), "failed", null, false, false, null, null, null, "build broke");
+        var g = Assert.Single(PipelineSteps.LogOf(Entry(run)));
+        var line = Assert.Single(g.Lines);
+        Assert.Equal("failed", line.State);
+        Assert.Equal("build broke", line.Message);
+    }
+
+    [Fact]
+    public void Log_block_renders_only_with_data()
+    {
+        var js = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "Autopilot.Web", "wwwroot", "js", "pipeline.js"));
+        Assert.Contains("export function logBlock(log)", js);
+        Assert.Contains("if (!groups.length) return null;", js);
+        Assert.Contains("h('h3', { class: 'log-heading' }, g.stage", js);
+        Assert.Contains("log-line mono small", js);
+        Assert.Contains("logBlock(d.log)", js);
+    }
+
     [Fact]
     public void Detail_note_falls_back_to_the_run_message()
     {

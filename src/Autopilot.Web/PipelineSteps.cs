@@ -34,7 +34,13 @@ public sealed record PipelineCard(IReadOnlyList<PipelineDot> Dots, bool OutsideA
 public sealed record PipelineMetaPart(string Text, string? Href = null);
 
 /// <summary>The meta line, Result and Note of the detail panel. Result and Note are a dash when there is no data.</summary>
-public sealed record PipelineDetail(IReadOnlyList<PipelineMetaPart> Meta, string Result, string Note);
+public sealed record PipelineDetail(IReadOnlyList<PipelineMetaPart> Meta, string Result, string Note, IReadOnlyList<PipelineLogGroup>? Log = null);
+
+/// <summary>One log line. A field with no data is null; a link is set only when one is known.</summary>
+public sealed record PipelineLogLine(string? Time, string? Actor, string? Step, string? State, string? Message, string? Href = null);
+
+/// <summary>The log lines of one stage with the stage's time range (null parts when unknown).</summary>
+public sealed record PipelineLogGroup(string Stage, string? From, string? To, IReadOnlyList<PipelineLogLine> Lines);
 
 /// <summary>One sub-step of a stage with its state (<c>pending</c> when the app has no data for it).</summary>
 public sealed record PipelineSubStep(string Name, string State);
@@ -104,7 +110,36 @@ public static class PipelineSteps
             run.HumanDecision is { } d ? $"person {d.ToString().ToLowerInvariant()}" : null,
         }.Where(x => !string.IsNullOrEmpty(x)));
         var note = !string.IsNullOrWhiteSpace(item.Triage?.Reason) ? item.Triage!.Reason : run?.Message ?? "";
-        return new PipelineDetail(meta, result.Length > 0 ? result : "–", string.IsNullOrWhiteSpace(note) ? "–" : note);
+        return new PipelineDetail(meta, result.Length > 0 ? result : "–", string.IsNullOrWhiteSpace(note) ? "–" : note, LogOf(item));
+    }
+
+    static string Stamp(DateTimeOffset t) => t.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss") + " UTC";
+
+    /// <summary>
+    /// The log by stage, built only from the last run: Implement holds the run outcome and the gate verdict, Merge
+    /// holds the person's decision. A group with no lines is left out; no run gives an empty log.
+    /// </summary>
+    public static IReadOnlyList<PipelineLogGroup> LogOf(WorkItemListEntry item)
+    {
+        var run = item.LastRun;
+        if (run is null) return [];
+        var groups = new List<PipelineLogGroup>();
+
+        var implement = new List<PipelineLogLine>();
+        if (!string.IsNullOrWhiteSpace(run.Outcome))
+            implement.Add(new PipelineLogLine(Stamp(run.StartedAt), "agent", "Implement", run.Outcome,
+                string.IsNullOrWhiteSpace(run.Message) ? null : run.Message));
+        if (!string.IsNullOrWhiteSpace(run.GateVerdict))
+            implement.Add(new PipelineLogLine(Stamp(run.FinishedAt), "gate", "Gate", run.GateVerdict, null));
+        if (implement.Count > 0) groups.Add(new PipelineLogGroup("Implement", Stamp(run.StartedAt), Stamp(run.FinishedAt), implement));
+
+        if (run.HumanDecision is { } d)
+        {
+            var at = run.HumanDecidedAt is { } t ? Stamp(t) : null;
+            groups.Add(new PipelineLogGroup("Merge", at, at,
+                [new PipelineLogLine(at, "person", "Decision", d.ToString().ToLowerInvariant(), null)]));
+        }
+        return groups;
     }
 
     /// <summary>
