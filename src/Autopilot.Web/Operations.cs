@@ -47,6 +47,20 @@ public sealed record TaskQuery(string? State = null, string? Search = null, int 
     }
 }
 
+public sealed record TaskTreeCounts(int Done, int InProgress, int NeedsYou, int NotStarted);
+
+/// <summary>One node of the task tree. <see cref="Counts"/> is set on groups (tasks with children) only.</summary>
+public sealed record TaskTreeNode(int Id, string Title, int? ParentId, bool Closed, string? Kind, TaskTreeCounts? Counts, IReadOnlyList<TaskTreeNode> Children)
+{
+    [System.Text.Json.Serialization.JsonIgnore]
+    internal int Bucket { get; init; }
+
+    /// <summary>How many leaf tasks of this subtree fall in a bucket (0 done, 1 in progress, 2 needs you, 3 not started).</summary>
+    internal int Leaf(int bucket) => Counts is null
+        ? (Bucket == bucket ? 1 : 0)
+        : bucket switch { 0 => Counts.Done, 1 => Counts.InProgress, 2 => Counts.NeedsYou, _ => Counts.NotStarted };
+}
+
 /// <summary>A task with its text, comments, history, the stored triage and the last triage job.</summary>
 public sealed record TaskDetailView(
     LocalTask Task,
@@ -140,6 +154,35 @@ public sealed class TaskOperations(WebUiOptions options)
 
     public bool SetClosed(ProjectScope scope, int number, bool closed) =>
         closed ? Local(scope).Close(number, Author()) : Local(scope).Reopen(number, Author());
+
+    /// <summary>Moves a task or group under another task, or to the root (null). Cycles and unknown ids are rejected.</summary>
+    public LocalTask SetParent(ProjectScope scope, int number, int? parentId) => Local(scope).SetParent(number, parentId);
+
+    /// <summary>The task tree. A group's counts are taken over all its descendant leaf tasks.</summary>
+    public async Task<IReadOnlyList<TaskTreeNode>> TreeAsync(ProjectScope scope, CancellationToken ct)
+    {
+        var roots = Local(scope).Tree();
+        var entries = await scope.CreateList().ListAsync(ct).ConfigureAwait(false);
+        var needsYou = entries.Where(i => i.Triage is { Label: "needs-human" }).Select(i => i.Id).ToHashSet(StringComparer.Ordinal);
+        var active = scope.Jobs.List().Where(j => j.IsActive && j.Kind == JobKinds.Implement).Select(j => j.WorkItemId).ToHashSet(StringComparer.Ordinal);
+
+        TaskTreeNode Build(TaskNode node)
+        {
+            var children = node.Children.Select(Build).ToList();
+            var t = node.Task;
+            if (children.Count == 0)
+            {
+                var bucket = t.Closed ? 0 : active.Contains(t.Id) ? 1 : needsYou.Contains(t.Id) ? 2 : 3;
+                return new TaskTreeNode(t.Number, t.Title, t.ParentNumber, t.Closed, node.Kind, null, []) { Bucket = bucket };
+            }
+
+            var counts = new TaskTreeCounts(
+                children.Sum(c => c.Leaf(0)), children.Sum(c => c.Leaf(1)), children.Sum(c => c.Leaf(2)), children.Sum(c => c.Leaf(3)));
+            return new TaskTreeNode(t.Number, t.Title, t.ParentNumber, t.Closed, node.Kind, counts, children);
+        }
+
+        return roots.Select(Build).ToList();
+    }
 
     /// <summary>Starts one implement job in the background. Refused while another run holds the project.</summary>
     public JobRecord Start(ProjectScope scope, string id)
