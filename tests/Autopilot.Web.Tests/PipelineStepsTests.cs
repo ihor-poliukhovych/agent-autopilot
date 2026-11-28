@@ -115,6 +115,27 @@ public sealed class PipelineStepsTests
     }
 
     [Fact]
+    public void Stages_list_seven_nodes_with_the_sub_steps_of_each()
+    {
+        var stages = PipelineSteps.Stages(PipelineSteps.Dots(new PipelineInput(TriageLabel: "agent-ready", InPool: true)));
+        Assert.Equal(["Start", "Qualify", "Implement", "Merge", "Verify dev", "Verify prod", "Done"], stages.Select(s => s.Step).ToArray());
+        Assert.Equal([0, 3, 7, 7, 3, 3, 0], stages.Select(s => s.SubSteps.Count).ToArray());
+        Assert.Equal(["Read Task", "Decide", "Comment Task"], stages[1].SubSteps.Select(x => x.Name).ToArray());
+        Assert.Equal("Publish Pull Request", stages[2].SubSteps[6].Name);
+        Assert.Equal(["Wait for deployment", "Test", "Comment Task"], stages[5].SubSteps.Select(x => x.Name).ToArray());
+        Assert.Equal(["done", "done", "current", "pending", "pending", "pending", "pending"], stages.Select(s => s.State).ToArray());
+    }
+
+    [Fact]
+    public void Stages_with_no_data_are_all_pending()
+    {
+        var stages = PipelineSteps.Stages([]);
+        Assert.Equal(7, stages.Count);
+        Assert.All(stages, s => Assert.Equal("pending", s.State));
+        Assert.All(stages.SelectMany(s => s.SubSteps), x => Assert.Equal("pending", x.State));
+    }
+
+    [Fact]
     public void Card_of_an_entry_carries_dots_flag_release_and_action()
     {
         var entry = new WorkItemListEntry("7", "T", null, "Active", null, null, null, false, null, ["release:2.0"]);
@@ -123,5 +144,40 @@ public sealed class PipelineStepsTests
         Assert.Equal("2.0", card.Release);
         Assert.False(card.ActionDue);
         Assert.Equal(7, card.Dots.Count);
+        Assert.NotNull(card.Stages);
+        Assert.Equal(card.Dots.Select(d => d.State), card.Stages!.Select(s => s.State));
+        Assert.Equal([0, 3, 7, 7, 3, 3, 0], card.Stages!.Select(s => s.SubSteps.Count));
+        Assert.NotNull(card.Detail);
+    }
+
+    [Fact]
+    public void Detail_with_no_data_has_an_empty_meta_line_and_dashes()
+    {
+        var detail = PipelineSteps.DetailOf(new WorkItemListEntry("7", "T", null, null, null, null, null, false, null), 0);
+        Assert.Empty(detail.Meta);
+        Assert.Equal("–", detail.Result);
+        Assert.Equal("–", detail.Note);
+    }
+
+    [Fact]
+    public void Detail_meta_lists_state_assignee_link_events_and_last_activity_and_skips_the_rest()
+    {
+        var run = new RunRecord(1, "p", "7", null, DateTimeOffset.Parse("2026-01-02T10:00:00Z"), DateTimeOffset.Parse("2026-01-02T10:05:00Z"),
+            "succeeded", "passed", false, true, HumanDecision.Merged, null, null, "all good");
+        var triage = new TriageSummary("agent-ready", "low", "Small and clear", DateTimeOffset.UtcNow, false);
+        var detail = PipelineSteps.DetailOf(new WorkItemListEntry("7", "T", "http://x/7", "Active", null, triage, run, false, null), 2);
+        Assert.Equal(["Active", "Open task", "2 events", "last activity 2026-01-02 10:05 UTC"], detail.Meta.Select(m => m.Text));
+        Assert.Equal("http://x/7", detail.Meta[1].Href);
+        Assert.Equal("succeeded · gate passed · person merged", detail.Result);
+        Assert.Equal("Small and clear", detail.Note);
+    }
+
+    [Fact]
+    public void Detail_note_falls_back_to_the_run_message()
+    {
+        var run = new RunRecord(1, "p", "7", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "failed", null, false, false, null, null, null, "build broke");
+        var detail = PipelineSteps.DetailOf(new WorkItemListEntry("7", "T", null, null, null, null, run, false, null), 1);
+        Assert.Equal("build broke", detail.Note);
+        Assert.Contains("1 event", detail.Meta.Select(m => m.Text));
     }
 }
