@@ -113,8 +113,8 @@ export async function render({ view, key }) {
       h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Pool'),
         h('p', {}, 'Tasks the agent works through, in this order. Every result is a draft that a person merges.'))),
       h('div', { class: 'app-layout pool-layout' },
-        h('div', { class: 'app-left pool-settings' }, extra.element),
-        h('div', { class: 'app-right stack' }, statusCard, queue, runNow)));
+        h('div', { class: 'app-left pool-settings stack' }, extra.element, runNow),
+        h('div', { class: 'app-right open stack' }, statusCard, queue, extra.right)));
   }
 
   await load();

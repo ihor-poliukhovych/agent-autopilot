@@ -272,7 +272,15 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
 
 /* Pool tab: settings in the left column (--left-col), status and queue on the right. */
 .pool-layout { grid-template-columns: var(--left-col) minmax(0, 1fr); }
-@media (max-width: 900px) { .pool-layout { grid-template-columns: 1fr; } }
+/* Tasks tab: the task list in the left column, the selected task on the right. */
+.tasks-layout { grid-template-columns: var(--left-col) minmax(0, 1fr); }
+.task-card .inbox-title { -webkit-line-clamp: 3; line-clamp: 3; }
+/* Up to 900px both pages are one usable column: the right area stays in the flow (no drawer), nothing overflows. */
+@media (max-width: 900px) {
+  .pool-layout, .tasks-layout { grid-template-columns: minmax(0, 1fr); }
+  .pool-layout .app-right, .tasks-layout .app-right { position: static; width: auto; transform: none; padding: 0; overflow: visible; background: none; }
+  .pool-layout, .tasks-layout { overflow-x: hidden; }
+}
 .stepper { display: flex; gap: var(--s2); list-style: none; margin: 0; padding: 0; flex-wrap: wrap; }
 .stepper .step { flex: 1 1 5rem; text-align: center; padding: var(--s2); border-bottom: 3px solid var(--border); color: var(--muted); }
 .stepper .step.current { border-bottom-color: var(--accent); color: inherit; font-weight: 600; }
