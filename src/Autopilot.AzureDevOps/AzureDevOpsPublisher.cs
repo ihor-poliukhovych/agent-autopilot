@@ -66,18 +66,21 @@ public sealed class AzureDevOpsPublisher : IPublisher
             GitPusher.EnsureAgentBranch(request.BranchName, _branchPrefix);
             var repository = await _client.GetRepositoryAsync(_settings.Repository!, ct).ConfigureAwait(false);
             var credential = await _client.GetCredentialAsync(ct).ConfigureAwait(false);
-            await _pusher.PushAsync(_projectRoot, _settings.Remote, request.BranchName, _branchPrefix, credential, ct).ConfigureAwait(false);
+
+            // An earlier attempt may have left the task branch on the remote with other commits: never force it, use a free name.
+            var branch = await _pusher.ResolveBranchAsync(_projectRoot, _settings.Remote, request.BranchName, _branchPrefix, credential, ct).ConfigureAwait(false);
+            await _pusher.PushAsync(_projectRoot, _settings.Remote, branch, _branchPrefix, credential, ct).ConfigureAwait(false);
 
             var pr = await new AzureDevOpsPullRequests(_client, _settings).EnsureDraftAsync(
                 new DraftPullRequestRequest(
-                    request.BranchName,
+                    branch,
                     StripHeads(_baseBranch),
                     request.Title ?? Title(request.WorkItem.Title),
                     _description(request),
                     int.TryParse(request.WorkItem.Id, NumberStyles.None, CultureInfo.InvariantCulture, out var workItemId) ? workItemId : null),
                 ct).ConfigureAwait(false);
 
-            return new PublishResult(true, pr.WebUrl, null);
+            return new PublishResult(true, pr.WebUrl, null, string.Equals(branch, request.BranchName, StringComparison.Ordinal) ? null : branch);
         }
         catch (Exception ex) when (ex is AzureDevOpsException or AzureDevOpsAuthException or AzureDevOpsPublishException)
         {

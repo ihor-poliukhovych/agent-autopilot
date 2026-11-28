@@ -81,6 +81,80 @@ public sealed class GitPusherTests : IDisposable
         Assert.Equal(pushed, (await Git(_bare, "rev-parse", "autopilot/42")).Trim());
     }
 
+    private Task<string> CommitAsync(string message) =>
+        Git(_work, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "--quiet", "--allow-empty", "-m", message);
+
+    // The remote has autopilot/42 from an earlier attempt; the local branch is a new attempt from the same start.
+    private async Task<(GitPusher Pusher, AzureDevOpsCredential Credential, string OldRemote)> EarlierAttemptOnRemoteAsync()
+    {
+        await SetUpAsync();
+        var pusher = new GitPusher(new Uri(Ado.Org));
+        var credential = AzureDevOpsCredential.FromPat(Ado.Token);
+        await Git(_work, "checkout", "--quiet", "autopilot/42");
+        await CommitAsync("old attempt");
+        await pusher.PushAsync(_work, "origin", "autopilot/42", "autopilot/", credential, default);
+        var old = (await Git(_bare, "rev-parse", "autopilot/42")).Trim();
+
+        // The retry: the old local branch is kept under another name, the task starts again from main.
+        await Git(_work, "checkout", "--quiet", "main");
+        await Git(_work, "branch", "-m", "autopilot/42", "autopilot/42-attempt-1");
+        await Git(_work, "branch", "autopilot/42", "main");
+        await Git(_work, "checkout", "--quiet", "autopilot/42");
+        await CommitAsync("new attempt");
+        await Git(_work, "checkout", "--quiet", "main");
+        return (pusher, credential, old);
+    }
+
+    [Fact]
+    public async Task A_remote_branch_of_an_earlier_attempt_makes_the_publish_use_a_new_name_and_nothing_is_forced()
+    {
+        var (pusher, credential, old) = await EarlierAttemptOnRemoteAsync();
+        await Git(_work, "branch", "-m", "autopilot/42-attempt-1", "kept-old"); // free the first local name too
+        await Git(_work, "branch", "autopilot/42-attempt-2", "main"); // taken locally
+        var local = (await Git(_work, "rev-parse", "autopilot/42")).Trim();
+
+        var name = await pusher.ResolveBranchAsync(_work, "origin", "autopilot/42", "autopilot/", credential, default);
+        await pusher.PushAsync(_work, "origin", name, "autopilot/", credential, default);
+
+        Assert.Equal("autopilot/42-attempt-1", name);
+        Assert.Equal(local, (await Git(_work, "rev-parse", name)).Trim());
+        Assert.Equal(local, (await Git(_bare, "rev-parse", name)).Trim());
+        Assert.Equal(old, (await Git(_bare, "rev-parse", "autopilot/42")).Trim()); // untouched
+        Assert.DoesNotContain("  autopilot/42\n", await Git(_work, "branch", "--list", "autopilot/42"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_new_name_skips_names_that_exist_on_the_remote_or_locally_and_works_while_checked_out_in_a_worktree()
+    {
+        var (pusher, credential, _) = await EarlierAttemptOnRemoteAsync();
+        // autopilot/42-attempt-1 exists locally (the kept old attempt); attempt-2 only on the remote.
+        await Git(_work, "push", "--quiet", "origin", "main:refs/heads/autopilot/42-attempt-2");
+        var worktree = Path.Combine(_root, "wt");
+        await Git(_work, "worktree", "add", "--quiet", worktree, "autopilot/42");
+
+        var name = await pusher.ResolveBranchAsync(_work, "origin", "autopilot/42", "autopilot/", credential, default);
+
+        Assert.Equal("autopilot/42-attempt-3", name);
+        Assert.Equal(name, (await Git(worktree, "rev-parse", "--abbrev-ref", "HEAD")).Trim());
+    }
+
+    [Fact]
+    public async Task The_name_stays_when_the_remote_has_no_such_branch_or_only_an_ancestor_of_it()
+    {
+        await SetUpAsync();
+        var pusher = new GitPusher(new Uri(Ado.Org));
+        var credential = AzureDevOpsCredential.FromPat(Ado.Token);
+
+        Assert.Equal("autopilot/42", await pusher.ResolveBranchAsync(_work, "origin", "autopilot/42", "autopilot/", credential, default));
+
+        await pusher.PushAsync(_work, "origin", "autopilot/42", "autopilot/", credential, default);
+        await Git(_work, "checkout", "--quiet", "autopilot/42");
+        await CommitAsync("more work");
+        await Git(_work, "checkout", "--quiet", "main");
+
+        Assert.Equal("autopilot/42", await pusher.ResolveBranchAsync(_work, "origin", "autopilot/42", "autopilot/", credential, default));
+    }
+
     [Fact]
     public async Task Missing_remote_is_explained()
     {

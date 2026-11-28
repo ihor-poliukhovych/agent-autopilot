@@ -373,7 +373,7 @@ public sealed partial class AutopilotPipeline(AutopilotPipelineOptions options)
             return new ImplementResult(id, ImplementOutcome.Failed, $"The gate passed but publishing failed: {published.Error}", branch, runFolder, decision);
         }
 
-        return new ImplementResult(id, ImplementOutcome.Published, "The gate passed. A draft is waiting for a person.", branch, published.Location, decision);
+        return new ImplementResult(id, ImplementOutcome.Published, "The gate passed. A draft is waiting for a person.", published.BranchName ?? branch, published.Location, decision);
     }
 
     private async Task<ReviewResult?> ReviewAsync(WorkItem item, TriageResult triage, string baseCommit, string branch, string worktree, ProjectContext context, CancellationToken ct)

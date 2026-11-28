@@ -6,6 +6,14 @@ namespace Autopilot.AzureDevOps;
 public interface IGitPusher
 {
     Task PushAsync(string repositoryPath, string remote, string branch, string branchPrefix, AzureDevOpsCredential credential, CancellationToken ct);
+
+    /// <summary>
+    /// The name to publish <paramref name="branch"/> under. The same name unless the remote already has a branch of
+    /// that name that is not an ancestor of it (an earlier attempt that was pushed): then a free <c>-attempt-N</c> name,
+    /// and the local branch is renamed to match. Nothing on the remote is changed.
+    /// </summary>
+    Task<string> ResolveBranchAsync(string repositoryPath, string remote, string branch, string branchPrefix, AzureDevOpsCredential credential, CancellationToken ct) =>
+        Task.FromResult(branch);
 }
 
 /// <summary>The push or the pull request was refused or failed. The message never contains the token.</summary>
@@ -41,15 +49,7 @@ public sealed class GitPusher(Uri organizationUrl) : IGitPusher
 
         EnsureRemoteHost(url.StandardOutput.Trim(), organizationUrl);
 
-        var environment = new Dictionary<string, string?>
-        {
-            ["GIT_CONFIG_COUNT"] = "2",
-            ["GIT_CONFIG_KEY_0"] = "http.extraHeader",
-            ["GIT_CONFIG_VALUE_0"] = credential.ToGitExtraHeader(),
-            // No credential helper: nothing may prompt for, or store, a password during this push.
-            ["GIT_CONFIG_KEY_1"] = "credential.helper",
-            ["GIT_CONFIG_VALUE_1"] = string.Empty,
-        };
+        var environment = AuthEnvironment(credential);
         var refspec = $"refs/heads/{branch}:refs/heads/{branch}";
         var push = await RunAsync(repositoryPath, ["push", "--no-verify", "--porcelain", remote, refspec], environment, ct).ConfigureAwait(false);
         if (!push.Succeeded)
@@ -61,6 +61,89 @@ public sealed class GitPusher(Uri organizationUrl) : IGitPusher
                 (error.Length > 0 ? " git said: " + error : string.Empty));
         }
     }
+
+    public async Task<string> ResolveBranchAsync(string repositoryPath, string remote, string branch, string branchPrefix, AzureDevOpsCredential credential, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(credential);
+        EnsureAgentBranch(branch, branchPrefix);
+        EnsureRemoteName(remote);
+
+        var url = await RunAsync(repositoryPath, ["remote", "get-url", remote], null, ct).ConfigureAwait(false);
+        if (!url.Succeeded)
+        {
+            throw new AzureDevOpsPublishException($"The git remote '{remote}' does not exist. Add it (git remote add {remote} <repository URL>) or set \"remote\" in the settings.");
+        }
+
+        EnsureRemoteHost(url.StandardOutput.Trim(), organizationUrl);
+        var environment = AuthEnvironment(credential);
+
+        var remoteHeads = await ListRemoteHeadsAsync(repositoryPath, remote, [$"refs/heads/{branch}", $"refs/heads/{branch}-attempt-*"], environment, credential, ct).ConfigureAwait(false);
+        if (!remoteHeads.TryGetValue(branch, out var remoteCommit))
+        {
+            return branch;
+        }
+
+        // Every commit of the remote branch is already in ours: a plain (never forced) push moves it forward.
+        var known = await RunAsync(repositoryPath, ["cat-file", "-e", remoteCommit + "^{commit}"], null, ct).ConfigureAwait(false);
+        if (known.Succeeded
+            && (await RunAsync(repositoryPath, ["merge-base", "--is-ancestor", remoteCommit, "refs/heads/" + branch], null, ct).ConfigureAwait(false)).Succeeded)
+        {
+            return branch;
+        }
+
+        for (var attempt = 1; ; attempt++)
+        {
+            var candidate = $"{branch}-attempt-{attempt.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+            if (remoteHeads.ContainsKey(candidate)
+                || (await RunAsync(repositoryPath, ["show-ref", "--verify", "--quiet", "refs/heads/" + candidate], null, ct).ConfigureAwait(false)).Succeeded)
+            {
+                continue;
+            }
+
+            EnsureAgentBranch(candidate, branchPrefix);
+            var rename = await RunAsync(repositoryPath, ["branch", "-m", branch, candidate], null, ct).ConfigureAwait(false);
+            if (!rename.Succeeded)
+            {
+                throw new AzureDevOpsPublishException($"The remote already has '{branch}' with other commits, and renaming the local branch to '{candidate}' failed: {rename.StandardError.Trim()}");
+            }
+
+            return candidate;
+        }
+    }
+
+    private static async Task<Dictionary<string, string>> ListRemoteHeadsAsync(
+        string repositoryPath, string remote, IReadOnlyList<string> patterns, IReadOnlyDictionary<string, string?> environment, AzureDevOpsCredential credential, CancellationToken ct)
+    {
+        var list = await RunAsync(repositoryPath, ["ls-remote", "--heads", remote, .. patterns], environment, ct).ConfigureAwait(false);
+        if (!list.Succeeded)
+        {
+            throw new AzureDevOpsPublishException(
+                $"git could not list the branches of '{remote}' (exit code {list.ExitCode}), so it is not known whether the task branch is free." +
+                (credential.Redact(list.StandardError.Trim()) is { Length: > 0 } error ? " git said: " + error : string.Empty));
+        }
+
+        var heads = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var line in list.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = line.Split('\t', 2);
+            if (parts.Length == 2 && parts[1].StartsWith("refs/heads/", StringComparison.Ordinal))
+            {
+                heads[parts[1]["refs/heads/".Length..]] = parts[0];
+            }
+        }
+
+        return heads;
+    }
+
+    private static Dictionary<string, string?> AuthEnvironment(AzureDevOpsCredential credential) => new()
+    {
+        ["GIT_CONFIG_COUNT"] = "2",
+        ["GIT_CONFIG_KEY_0"] = "http.extraHeader",
+        ["GIT_CONFIG_VALUE_0"] = credential.ToGitExtraHeader(),
+        // No credential helper: nothing may prompt for, or store, a password during this call.
+        ["GIT_CONFIG_KEY_1"] = "credential.helper",
+        ["GIT_CONFIG_VALUE_1"] = string.Empty,
+    };
 
     /// <summary>Refuses anything that is not a plain branch name under the agent prefix.</summary>
     public static void EnsureAgentBranch(string branch, string branchPrefix)
