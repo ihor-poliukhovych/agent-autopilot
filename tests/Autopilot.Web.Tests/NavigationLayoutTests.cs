@@ -87,8 +87,28 @@ public sealed class NavigationLayoutTests
     public void Pipeline_tasks_pool_and_needs_pages_are_drawn_in_the_shared_layout()
     {
         var js = Wwwroot("js/app.js");
-        Assert.Contains("const LAYOUT = new Set(['pipeline', 'tasks', 'pool', 'needs'])", js);
+        Assert.Contains("const LAYOUT = new Set(['tasks', 'pool', 'needs'])", js);
+        Assert.DoesNotContain("'pipeline', 'tasks', 'pool'", js);
         Assert.Contains("class: 'app-layout'", js);
+    }
+
+    [Fact]
+    public void Pipeline_page_has_one_layout_with_chips_left_and_detail_or_hint_right()
+    {
+        var js = Wwwroot("js/pipeline.js");
+        var css = Wwwroot("app.css");
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(js, "class: 'app-layout'"));
+        Assert.DoesNotContain("app-right open' }, h('div', { class: 'app-layout'", js);
+        Assert.Contains("h('div', { class: 'app-left' }, filterBar, list)", js);
+        Assert.Contains("'Select a task'", js);
+        Assert.DoesNotContain("Waiting for a person", js);
+        Assert.DoesNotContain("waitingPanel", js);
+        Assert.Contains("link(key, 'inbox') }, 'Inbox'", js);
+        Assert.Contains("link(key, 'runs') }, 'Runs'", js);
+        Assert.Contains("class: 'pipeline-filters'", js);
+        Assert.Matches(@"\.pipeline-filters\s*\{[^}]*flex-direction: row;[^}]*flex-wrap: nowrap", css);
+        Assert.Matches(@"\[data-page=""pipeline""\] \.app-left\s*\{[^}]*overflow-y: auto;[^}]*max-height:", css);
+        Assert.Matches(@"\[data-part=""pipeline-list""\]\s*\{[^}]*overflow-y: auto;[^}]*max-height:", css);
     }
 
     [Fact]
