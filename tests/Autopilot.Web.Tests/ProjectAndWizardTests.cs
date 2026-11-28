@@ -1,5 +1,6 @@
 using System.Net;
 using Autopilot.Core.Config;
+using Autopilot.Core.Runs;
 using Autopilot.Core.Workspace;
 
 namespace Autopilot.Web.Tests;
@@ -210,6 +211,106 @@ public sealed class ProjectAndWizardTests
         Assert.Equal(HttpStatusCode.BadRequest, badStatus);
         Assert.True(bad.GetProperty("problems").GetArrayLength() >= 2);
         Assert.Equal("safe", ConfigLoader.Load(ui.RepoFolder, ui.Workspace.ProjectFolder("demo")).Trust);
+    }
+
+    private static async Task<System.Text.Json.Nodes.JsonNode> LoadDraftAsync(UiFixture ui)
+    {
+        var (_, current) = await ui.GetAsync("/api/projects/demo/setup");
+        return System.Text.Json.Nodes.JsonNode.Parse(current.GetRawText())!;
+    }
+
+    [Theory]
+    [InlineData("maxFilesChanged", 0, "gate.maxFilesChanged")]
+    [InlineData("maxFilesChanged", 201, "gate.maxFilesChanged")]
+    [InlineData("maxSourceLinesChanged", 9, "gate.maxSourceLinesChanged")]
+    [InlineData("maxSourceLinesChanged", 5001, "gate.maxSourceLinesChanged")]
+    [InlineData("maxTestLinesChanged", 9, "gate.maxTestLinesChanged")]
+    [InlineData("maxTestLinesChanged", 5001, "gate.maxTestLinesChanged")]
+    [InlineData("maxFilesChanged", 2.5, "gate.maxFilesChanged")]
+    [InlineData("maxTestLinesChanged", 100.5, "gate.maxTestLinesChanged")]
+    public async Task Changed_gate_limits_out_of_range_or_not_whole_are_refused_naming_the_field(string property, double value, string field)
+    {
+        await using var ui = new UiFixture();
+        await ui.CreateProjectAsync();
+        var draft = await LoadDraftAsync(ui);
+        draft[property] = value;
+        var (status, body) = await ui.SendAsync(HttpMethod.Put, "/api/projects/demo/setup", draft);
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.Contains(body.GetProperty("problems").EnumerateArray(), p => p.GetString()!.Contains(field, StringComparison.Ordinal));
+        Assert.Equal(6, ConfigLoader.Load(ui.RepoFolder, ui.Workspace.ProjectFolder("demo")).Gate.MaxFilesChanged);
+        Assert.Empty(new SettingsChangeStore(ui.Workspace, "demo").List());
+    }
+
+    [Fact]
+    public async Task Gate_limits_in_range_are_saved_the_rest_of_the_config_is_kept_and_each_change_is_recorded()
+    {
+        await using var ui = new UiFixture();
+        await ui.CreateProjectAsync();
+        var folder = ui.Workspace.ProjectFolder("demo");
+        var before = ConfigLoader.Load(ui.RepoFolder, folder);
+        var draft = await LoadDraftAsync(ui);
+        draft["maxFilesChanged"] = 200;
+        draft["maxSourceLinesChanged"] = 10;
+        draft["maxTestLinesChanged"] = 5000;
+        var (status, body) = await ui.SendAsync(HttpMethod.Put, "/api/projects/demo/setup", draft);
+        Assert.True(status == HttpStatusCode.OK, body.ToString());
+
+        var after = ConfigLoader.Load(ui.RepoFolder, folder);
+        Assert.Equal((200, 10, 5000), (after.Gate.MaxFilesChanged, after.Gate.MaxSourceLinesChanged, after.Gate.MaxTestLinesChanged));
+        var expected = before with { Gate = before.Gate with { MaxFilesChanged = 200, MaxSourceLinesChanged = 10, MaxTestLinesChanged = 5000 } };
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(expected), System.Text.Json.JsonSerializer.Serialize(after));
+
+        var history = new SettingsChangeStore(ui.Workspace, "demo").List();
+        Assert.Equal(3, history.Count);
+        var files = Assert.Single(history, c => c.Field == "gate.maxFilesChanged");
+        Assert.Equal(("6", "200"), (files.OldValue, files.NewValue));
+        Assert.True(files.At > DateTimeOffset.UtcNow.AddMinutes(-5));
+    }
+
+    [Fact]
+    public async Task A_save_that_changes_no_limit_writes_no_history_and_an_untouched_out_of_range_limit_still_saves()
+    {
+        await using var ui = new UiFixture();
+        await ui.CreateProjectAsync();
+        var folder = ui.Workspace.ProjectFolder("demo");
+        var config = ConfigLoader.Load(ui.RepoFolder, folder);
+        ConfigLoader.Save(config with { Gate = config.Gate with { MaxFilesChanged = 500, MaxSourceLinesChanged = 9000 } }, ui.RepoFolder, folder);
+
+        var draft = await LoadDraftAsync(ui);
+        Assert.Equal(500, draft["maxFilesChanged"]!.GetValue<double>());
+        draft["trust"] = "safe";
+        var (status, body) = await ui.SendAsync(HttpMethod.Put, "/api/projects/demo/setup", draft);
+        Assert.True(status == HttpStatusCode.OK, body.ToString());
+        var saved = ConfigLoader.Load(ui.RepoFolder, folder);
+        Assert.Equal((500, 9000), (saved.Gate.MaxFilesChanged, saved.Gate.MaxSourceLinesChanged));
+        Assert.Equal("safe", saved.Trust);
+        Assert.Empty(new SettingsChangeStore(ui.Workspace, "demo").List());
+
+        // Changing the out-of-range limit to another out-of-range value is a change, so it is refused.
+        draft["maxFilesChanged"] = 501;
+        var (refused, _) = await ui.SendAsync(HttpMethod.Put, "/api/projects/demo/setup", draft);
+        Assert.Equal(HttpStatusCode.BadRequest, refused);
+    }
+
+    [Fact]
+    public void Settings_page_script_checks_the_same_ranges_only_for_changed_values_and_shows_default_current_and_warning()
+    {
+        var root = AppContext.BaseDirectory;
+        var dir = new DirectoryInfo(root);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "Autopilot.Web", "wwwroot")))
+        {
+            dir = dir.Parent;
+        }
+
+        Assert.NotNull(dir);
+        var js = Path.Combine(dir.FullName, "src", "Autopilot.Web", "wwwroot", "js");
+        var form = File.ReadAllText(Path.Combine(js, "setupform.js"));
+        foreach (var expected in new[] { "min: 1, max: 200", "min: 10, max: 5000", "Number.isInteger", "value === original[l.path]", "Default ${l.def}", "Current value ${loaded}", "loosens this review check" })
+        {
+            Assert.Contains(expected, form, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("gateLimitProblems(draft, original)", File.ReadAllText(Path.Combine(js, "settings.js")), StringComparison.Ordinal);
     }
 
     [Fact]
