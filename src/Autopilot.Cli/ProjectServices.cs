@@ -25,7 +25,7 @@ public static class ProjectServices
     /// <c>.autopilot/tasks/</c> for this run whatever <c>modules.workItems</c> says, and then drafts stay
     /// local bundles too, so a local task id is never linked to an unrelated remote work item.
     /// </summary>
-    public static async Task<AutopilotPipeline> CreatePipelineAsync(string projectRoot, CliContext context, CancellationToken ct, string? source = null, string? dataFolder = null, LocalTaskService? tasks = null, Func<AutopilotConfig, AutopilotConfig>? adjustConfig = null)
+    public static async Task<AutopilotPipeline> CreatePipelineAsync(string projectRoot, CliContext context, CancellationToken ct, string? source = null, string? dataFolder = null, LocalTaskService? tasks = null, Func<AutopilotConfig, AutopilotConfig>? adjustConfig = null, Func<string, IDisposable>? acquireTriageLock = null)
     {
         AutopilotConfig config;
         try
@@ -79,6 +79,7 @@ public static class ProjectServices
             EvaluateGate = context.EvaluateGate ?? MergeGate.Evaluate,
             Log = context.Out,
             DiagnosticsServer = diagnosticsServer,
+            AcquireTriageLock = acquireTriageLock,
         });
     }
 

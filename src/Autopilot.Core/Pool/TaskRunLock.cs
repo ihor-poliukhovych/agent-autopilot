@@ -21,7 +21,20 @@ public sealed class TaskRunLock(Workspace.Workspace workspace, Func<int, bool>? 
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
     private readonly TimeSpan _staleAfter = staleAfter ?? PoolStateStore.DefaultStaleAfter;
 
-    public IDisposable Acquire(string projectKey, string workItemId, string owner)
+    /// <summary>The lock key of a task's triage. '@' cannot appear in an id, so it never meets a run lock.</summary>
+    public static string TriageKey(string workItemId) => "@triage-" + workItemId;
+
+    /// <summary>
+    /// Takes the triage lock of a task. Unlike a run lock it is also refused to the process that holds it, so
+    /// two triages of one task in one process never share a worktree either.
+    /// </summary>
+    public IDisposable AcquireTriage(string projectKey, string workItemId, string owner) =>
+        Acquire(projectKey, TriageKey(workItemId), owner, reentrant: false);
+
+    /// <summary>The live holder of a task's triage lock, or null.</summary>
+    public (int Pid, string Owner)? TriageHolder(string projectKey, string workItemId) => Holder(projectKey, TriageKey(workItemId));
+
+    public IDisposable Acquire(string projectKey, string workItemId, string owner, bool reentrant = true)
     {
         using var connection = workspace.Open();
         Db.Execute(connection, "BEGIN IMMEDIATE");
@@ -30,7 +43,7 @@ public sealed class TaskRunLock(Workspace.Workspace workspace, Func<int, bool>? 
             var held = Db.Query(connection, r => (Pid: r.GetInt32(0), Owner: r.GetString(1)),
                 "SELECT pid, owner FROM task_locks WHERE project_key = $k AND work_item_id = $i", ("$k", projectKey), ("$i", workItemId));
             // A holder whose process lives on but whose pool stopped beating is dead too (the process id was reused).
-            if (held.Count > 0 && held[0].Pid != _pid() && _isAlive(held[0].Pid)
+            if (held.Count > 0 && (!reentrant || held[0].Pid != _pid()) && _isAlive(held[0].Pid)
                 && !PoolStateStore.IsSilent(connection, projectKey, held[0].Pid, _clock.GetUtcNow(), _staleAfter))
             {
                 throw new TaskLockHeldException(projectKey, workItemId, held[0].Pid, held[0].Owner);
