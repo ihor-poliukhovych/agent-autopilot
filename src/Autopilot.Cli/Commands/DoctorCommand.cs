@@ -194,6 +194,7 @@ public static partial class DoctorCommand
                 : new CheckResult(CheckStatus.Fail, "writable paths", $"nothing exists for: {string.Join(", ", missing)}", "Fix writablePaths in .autopilot/autopilot.json.")).ConfigureAwait(false);
 
             await Report(await ContextCheckAsync(projectRoot, config, git, baseBranch, ct).ConfigureAwait(false)).ConfigureAwait(false);
+            await Report(NamingCheck(config)).ConfigureAwait(false);
         }
 
         // Build and tests.
@@ -278,6 +279,15 @@ public static partial class DoctorCommand
 
     [GeneratedRegex(@"\b0\s+error|\bfailed:\s*0\b|warnaserror", RegexOptions.IgnoreCase)]
     private static partial Regex NotAnError();
+
+    /// <summary>Shows the names a sample task would get from the configured or default templates.</summary>
+    internal static CheckResult NamingCheck(AutopilotConfig config)
+    {
+        var sample = new Autopilot.Core.WorkItem("42", "Add retry to the upload client", string.Empty, ["bug"]);
+        var commit = Autopilot.Core.Git.NamingTemplates.Commit(config, sample, 1).Split('\n')[0];
+        return new CheckResult(CheckStatus.Ok, "naming",
+            $"sample task 42: branch \"{Autopilot.Core.Git.NamingTemplates.Branch(config, sample)}\", commit \"{commit}\", pull request title \"{Autopilot.Core.Git.NamingTemplates.PullRequestTitle(config, sample)}\"");
+    }
 
     private static async Task<CheckResult> ContextCheckAsync(string projectRoot, AutopilotConfig config, GitClient? git, ResolvedBranch? baseBranch, CancellationToken ct)
     {

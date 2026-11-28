@@ -23,6 +23,21 @@ public sealed record AutopilotConfig
     /// </summary>
     public string CommitStyle { get; init; } = CommitStyles.Conventional;
 
+    /// <summary>
+    /// Optional branch name template with {id}, {slug}, {subject}, {type}, {title}; must contain {id}.
+    /// Unset: <see cref="BranchPrefix"/> followed by the id.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? BranchTemplate { get; init; }
+
+    /// <summary>Optional commit message template (same placeholders). Unset: <see cref="CommitStyle"/>.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? CommitTemplate { get; init; }
+
+    /// <summary>Optional pull request title template (same placeholders). Unset: "[autopilot] {title}".</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? PrTitleTemplate { get; init; }
+
     public CommandsConfig Commands { get; init; } = new();
 
     /// <summary>Glob patterns (relative to the project root) the implementer may write to.</summary>
