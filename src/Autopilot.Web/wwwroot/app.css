@@ -270,6 +270,21 @@ dialog .row.end { justify-content: flex-end; margin-top: var(--s4); }
 .app-left, .app-right { min-width: 0; }
 .drawer-open, .drawer-close { display: none; }
 
+/* Pool tab: settings in the left column (--left-col), status and queue on the right. */
+.pool-layout { grid-template-columns: var(--left-col) minmax(0, 1fr); }
+@media (max-width: 900px) { .pool-layout { grid-template-columns: 1fr; } }
+.stepper { display: flex; gap: var(--s2); list-style: none; margin: 0; padding: 0; flex-wrap: wrap; }
+.stepper .step { flex: 1 1 5rem; text-align: center; padding: var(--s2); border-bottom: 3px solid var(--border); color: var(--muted); }
+.stepper .step.current { border-bottom-color: var(--accent); color: inherit; font-weight: 600; }
+.sub-dots { display: flex; gap: 3px; justify-content: center; align-items: center; margin-top: 4px; font-size: .75em; font-weight: 400; }
+.sub-dots .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.sub-dots .sub-name { margin-left: 4px; }
+.progress-strip { display: flex; gap: var(--s3); align-items: center; }
+.progress-strip .bar-track { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.progress-strip .bar-fill { height: 100%; background: var(--ok); }
+.event-log { list-style: none; margin: 0; padding: 0; font-family: ui-monospace, monospace; font-size: .85em; max-height: 16rem; overflow: auto; }
+.event-log li { display: flex; gap: var(--s3); padding: 2px 0; }
+
 /* Inbox cards: id, kind badge and age on the first row, then a two-line title and a three-line summary. */
 .inbox-card { display: block; width: 100%; text-align: left; border-left: 3px solid transparent; }
 .inbox-card.selected { border-left-color: var(--accent); background: var(--accent-soft); }
