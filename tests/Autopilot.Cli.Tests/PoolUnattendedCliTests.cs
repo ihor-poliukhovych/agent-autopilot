@@ -88,6 +88,36 @@ public sealed class PoolUnattendedCliTests : IDisposable
     }
 
     [Fact]
+    public async Task A_new_integration_branch_is_pushed_with_its_upstream_before_any_task_targets_it()
+    {
+        using var repo = await TestRepo.CreateAsync(new Dictionary<string, string> { ["src/a.cs"] = "class A {}\n" });
+        var bare = _temp.Combine("remote.git");
+        Directory.CreateDirectory(bare);
+        Assert.True((await GitClient.RunAsync(bare, ["init", "--bare", "--quiet"])).Succeeded);
+        await repo.GitAsync("remote", "add", "origin", bare);
+        var service = Service(repo, Config());
+
+        var branch = (await service.EnsureBranchAsync(DateTimeOffset.UtcNow, default))!;
+
+        var remote = await GitClient.RunAsync(bare, ["rev-parse", "refs/heads/" + branch]);
+        Assert.True(remote.Succeeded, remote.StandardError);
+        Assert.Equal((await repo.GitAsync("rev-parse", branch)).Trim(), remote.StandardOutput.Trim());
+        Assert.Equal($"refs/remotes/origin/{branch}", (await repo.GitAsync("rev-parse", "--symbolic-full-name", branch + "@{upstream}")).Trim());
+        Assert.False((await GitClient.RunAsync(bare, ["rev-parse", "--verify", "--quiet", "refs/heads/main"])).Succeeded); // only that branch went
+    }
+
+    [Fact]
+    public async Task A_failed_push_of_the_integration_branch_does_not_stop_the_pool()
+    {
+        using var repo = await TestRepo.CreateAsync(new Dictionary<string, string> { ["src/a.cs"] = "class A {}\n" });
+        await repo.GitAsync("remote", "add", "origin", _temp.Combine("does-not-exist.git"));
+
+        var branch = await Service(repo, Config()).EnsureBranchAsync(DateTimeOffset.UtcNow, default);
+
+        Assert.StartsWith("integration/", branch, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_task_whose_build_or_tests_fail_is_not_kept_in_the_integration_branch()
     {
         using var repo = await TestRepo.CreateAsync(new Dictionary<string, string> { ["src/a.cs"] = "class A {}\n" });

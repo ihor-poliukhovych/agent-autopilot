@@ -68,12 +68,28 @@ public sealed class IntegrationService(
             var baseRef = await git.ResolveBranchAsync(BaseBranch, ct).ConfigureAwait(false)
                 ?? throw new GitException($"The base branch \"{BaseBranch}\" does not exist, so the integration branch cannot be created from it.");
             await git.CreateBranchAsync(branch, baseRef.Commit, ct).ConfigureAwait(false);
+            await PushNewBranchAsync(branch, ct).ConfigureAwait(false);
         }
 
         using var connection = workspace.Open();
         Db.Execute(connection, "INSERT OR IGNORE INTO pool_integration (project_key, branch, base_branch, created_at) VALUES ($k, $b, $base, $t)",
             ("$k", projectKey), ("$b", branch), ("$base", BaseBranch), ("$t", Db.Stamp(now)));
         return branch;
+    }
+
+    /// <summary>
+    /// Pushes a new integration branch and sets its upstream, so the first task pull request can target it (a tracker
+    /// answers that the target branch does not exist otherwise). Best effort: with no remote, or when the push
+    /// fails, the pool goes on; the final PR step pushes again and reports a failure.
+    /// </summary>
+    private async Task PushNewBranchAsync(string branch, CancellationToken ct)
+    {
+        var remotes = await git.ListRemotesAsync(ct).ConfigureAwait(false);
+        var remote = remotes.Contains("origin", StringComparer.Ordinal) ? "origin" : remotes.FirstOrDefault();
+        if (remote is not null)
+        {
+            await GitClient.RunAsync(git.RepositoryPath, ["push", "--no-verify", "--set-upstream", remote, $"refs/heads/{branch}:refs/heads/{branch}"], ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
