@@ -49,6 +49,9 @@ public sealed record CliContext(TextReader In, TextWriter Out, TextWriter Error)
     /// <summary>Tells whether a UI answers on a port of this machine (<c>ui status</c>). Null means try to connect.</summary>
     public Func<int, bool>? IsPortInUse { get; init; }
 
+    /// <summary>How long <c>ui restart</c> waits for the old UI to exit. Null means 30 seconds.</summary>
+    public TimeSpan? UiStopTimeout { get; init; }
+
     /// <summary>False skips the dotnet, git and claude version checks in doctor (tests never start claude).</summary>
     public bool DoctorChecksTools { get; init; } = true;
 
