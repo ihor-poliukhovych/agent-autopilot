@@ -22,6 +22,34 @@ public sealed class InboxApiTests
     }
 
     [Fact]
+    public async Task A_closed_task_drops_its_parked_entry_and_question_but_an_open_one_stays()
+    {
+        await using var ui = new UiFixture();
+        await ui.CreateProjectAsync();
+        for (var i = 1; i <= 3; i++)
+        {
+            await ui.PostAsync("/api/projects/demo/tasks", new { title = "Task " + i, body = "Do it." });
+        }
+
+        var triage = new TriageStore(ui.RepoFolder, ui.Workspace.ProjectFolder("demo"));
+        var tasks = new LocalTaskService(ui.Workspace, "demo");
+        await triage.SaveAsync(LocalTaskWorkItemSource.ToItem(tasks.Get(1)!),
+            new TriageResult(TriageLabel.NeedsHuman, "Which order? (A) by name, (B) by date.", [], RiskLevel.Low, ["by name", "by date"], 0), CancellationToken.None);
+        var state = new PoolStateStore(ui.Workspace, "demo");
+        state.Park("1", "other", "Gave up.", DateTimeOffset.UtcNow);
+        state.Park("2", "other", "Gave up.", DateTimeOffset.UtcNow);
+        state.Park("3", "other", "Gave up.", DateTimeOffset.UtcNow);
+        state.Park("99", "other", "Task was removed.", DateTimeOffset.UtcNow);
+        tasks.Close(1);
+        tasks.Close(2);
+
+        var (_, items) = await ui.GetAsync(Inbox);
+
+        Assert.Equal(["3"], items.EnumerateArray().Select(e => e.GetProperty("id").GetString()));
+        Assert.Equal(["3"], state.Parked().Select(p => p.WorkItemId));
+    }
+
+    [Fact]
     public async Task Questions_and_parked_tasks_come_in_one_list_oldest_first()
     {
         await using var ui = new UiFixture();

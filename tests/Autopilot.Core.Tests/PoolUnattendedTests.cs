@@ -808,6 +808,22 @@ public sealed class PoolUnattendedTests : IDisposable
     }
 
     [Fact]
+    public void Pruning_deletes_parked_entries_of_tasks_that_are_not_open_any_more()
+    {
+        _state.Park("1", "paid", "Closed since.", _clock.GetUtcNow());
+        _state.Park("2", "paid", "Still open.", _clock.GetUtcNow());
+        var other = new PoolStateStore(_workspace, "other");
+        other.Park("1", null, "Other project.", _clock.GetUtcNow());
+
+        var removed = _state.PruneParked(new HashSet<string>(["2"], StringComparer.Ordinal));
+
+        Assert.Equal(["1"], removed);
+        Assert.Equal(["2"], _state.Parked().Select(p => p.WorkItemId));
+        Assert.Single(other.Parked());
+        Assert.Empty(_state.PruneParked(new HashSet<string>(["2"], StringComparer.Ordinal)));
+    }
+
+    [Fact]
     public void The_masters_answer_is_read_from_the_model_output_and_checked_in_code()
     {
         var answer = new MasterAnswer(true, 1, "x", "y", "secrets", true);

@@ -19,7 +19,8 @@ public sealed record TaskListView(
     int Page,
     int PageSize,
     TaskCounts Counts,
-    IReadOnlyDictionary<string, JobRecord> TriageJobs);
+    IReadOnlyDictionary<string, JobRecord> TriageJobs,
+    IReadOnlyDictionary<string, PipelineCard>? Cards = null);
 
 /// <summary>How many open tasks each state filter would show.</summary>
 public sealed record TaskCounts(int All, int NeedsHuman, int AgentReady, int NotTriaged, int Stale);
@@ -104,7 +105,9 @@ public sealed class TaskOperations(WebUiOptions options)
         var pages = Math.Max(1, (matching.Count + pageSize - 1) / pageSize);
         var page = Math.Clamp(query.Page, 1, pages);
         var items = matching.Skip((page - 1) * pageSize).Take(pageSize).ToList();
-        return new TaskListView(items, scope.LocalTasks is not null, scope.LegacyTaskFiles, active, Status(scope), matching.Count, page, pageSize, counts, triageJobs);
+        var eventCounts = scope.Runs.List().GroupBy(r => r.WorkItemId, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        return new TaskListView(items, scope.LocalTasks is not null, scope.LegacyTaskFiles, active, Status(scope), matching.Count, page, pageSize, counts, triageJobs,
+            items.ToDictionary(i => i.Id, i => PipelineSteps.CardOf(i, active.ContainsKey(i.Id), eventCounts.GetValueOrDefault(i.Id)), StringComparer.Ordinal));
     }
 
     public static RunStatus Status(ProjectScope scope) =>
@@ -199,7 +202,9 @@ public sealed class TaskOperations(WebUiOptions options)
         var questions = items
             .Where(i => i.Triage is { Label: "needs-human" })
             .Select(i => new InboxItem(InboxKinds.Question, i.Id, i.Title, i.Triage!.TriagedAt, null, Needs(scope, i)));
-        var parked = new PoolStateStore(scope.Workspace, scope.Project.Key).Parked()
+        var store = new PoolStateStore(scope.Workspace, scope.Project.Key);
+        store.PruneParked(titles.Keys.ToHashSet(StringComparer.Ordinal));
+        var parked = store.Parked()
             .Select(p => new InboxItem(InboxKinds.Parked, p.WorkItemId, titles.GetValueOrDefault(p.WorkItemId, p.WorkItemId), p.ParkedAt, p.Reason, null));
         return [.. questions.Concat(parked).OrderBy(i => i.CreatedAt)];
     }
