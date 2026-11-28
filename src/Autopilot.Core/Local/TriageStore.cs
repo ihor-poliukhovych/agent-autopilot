@@ -51,7 +51,10 @@ public sealed class TriageStore(string projectRoot, string? dataFolder = null)
     public static string TextHash(WorkItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        var text = (item.Title ?? string.Empty) + "\n" + (item.Body ?? string.Empty);
+        // Notes the pool added below the marker are not part of the text a person wrote.
+        var body = item.Body ?? string.Empty;
+        var notes = body.IndexOf(Pool.PoolNotesWorkItemSource.Marker, StringComparison.Ordinal);
+        var text = (item.Title ?? string.Empty) + "\n" + (notes >= 0 ? body[..notes] : body);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
 
