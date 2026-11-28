@@ -1,5 +1,5 @@
 import { get, post } from './api.js';
-import { h, clear, toast, badge, ago, emptyState, loading, busy, ask } from './dom.js';
+import { h, clear, toast, badge, ago, emptyState, loading, busy, ask, keepStickyFit } from './dom.js';
 
 const base = key => `/projects/${encodeURIComponent(key)}`;
 const link = (key, path) => `#/p/${encodeURIComponent(key)}/${path}`;
@@ -179,6 +179,7 @@ export async function render({ view, key, rest, go }) {
     const detail = h('div', { class: 'stack', 'data-part': 'pipeline-detail' });
     const paintDetail = () => {
       clear(detail);
+      requestAnimationFrame(() => keepStickyFit(detail));
       const sel = selected && tasks.items.find(i => i.id === selected);
       if (sel) detail.append(detailPanel(key, sel, cardOf(tasks, sel), tabState, paintDetail));
       else detail.append(h('p', { class: 'muted pipeline-hint', 'data-part': 'pipeline-hint' }, 'Select a task'));
@@ -194,8 +195,10 @@ export async function render({ view, key, rest, go }) {
     const filterBar = filtersBar(tasks, filters, paintList);
     paintList();
     paintDetail();
-    holder.append(h('div', { class: 'app-layout', 'data-page': 'pipeline' },
-      h('div', { class: 'app-left' }, filterBar, list), h('div', { class: 'app-right open' }, detail)));
+    holder.append(h('div', { class: 'pipeline-page' }, filterBar,
+      h('div', { class: 'app-layout', 'data-page': 'pipeline' },
+        h('div', { class: 'app-left' }, list), h('div', { class: 'app-right open' }, detail))));
+    keepStickyFit(detail);
     return runs;
   }
 

@@ -1,5 +1,5 @@
 import { get, post } from './api.js';
-import { h, clear, toast, badge, emptyState, ago } from './dom.js';
+import { h, clear, toast, badge, emptyState, ago, keepStickyFit } from './dom.js';
 import * as needs from './needs.js';
 
 const base = key => `/projects/${encodeURIComponent(key)}`;
@@ -52,6 +52,7 @@ export async function render({ view, key }) {
   }
 
   async function paintDetail() {
+    requestAnimationFrame(() => keepStickyFit(detail));
     if (stopNeeds) { stopNeeds(); stopNeeds = null; }
     clear(detail);
     if (!selected) return;

@@ -93,3 +93,11 @@ export async function busy(button, work) {
   button.disabled = true;
   try { return await work(); } finally { button.disabled = false; }
 }
+
+// The detail panel sticks while a long list scrolls, but only when it fits the viewport; otherwise it scrolls with the page.
+export function keepStickyFit(el) {
+  const fit = () => el.classList.toggle('is-sticky', el.offsetHeight + 32 <= window.innerHeight);
+  if (!el.isConnected) return;
+  if (!el._stickyWatch && typeof ResizeObserver === 'function') { el._stickyWatch = new ResizeObserver(fit); el._stickyWatch.observe(el); }
+  fit();
+}

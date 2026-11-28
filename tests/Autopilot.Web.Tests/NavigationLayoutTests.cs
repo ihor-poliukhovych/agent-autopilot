@@ -71,7 +71,7 @@ public sealed class NavigationLayoutTests
         Assert.Contains("-webkit-line-clamp: 2", css);
         Assert.Contains("-webkit-line-clamp: 3", css);
         Assert.Contains(".inbox-card.selected { border-left-color: var(--accent)", css);
-        Assert.Contains("[data-part=\"inbox-detail\"] { position: sticky", css);
+        Assert.Contains("[data-part=\"inbox-detail\"].is-sticky { position: sticky", css);
     }
 
     [Fact]
@@ -130,16 +130,33 @@ public sealed class NavigationLayoutTests
         var css = Wwwroot("app.css");
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(js, "class: 'app-layout'"));
         Assert.DoesNotContain("app-right open' }, h('div', { class: 'app-layout'", js);
-        Assert.Contains("h('div', { class: 'app-left' }, filterBar, list)", js);
+        Assert.Contains("h('div', { class: 'pipeline-page' }, filterBar,", js);
+        Assert.Contains("h('div', { class: 'app-left' }, list)", js);
         Assert.Contains("'Select a task'", js);
         Assert.DoesNotContain("Waiting for a person", js);
         Assert.DoesNotContain("waitingPanel", js);
         Assert.Contains("link(key, 'inbox') }, 'Inbox'", js);
         Assert.Contains("link(key, 'runs') }, 'Runs'", js);
         Assert.Contains("class: 'pipeline-filters'", js);
-        Assert.Matches(@"\.pipeline-filters\s*\{[^}]*flex-direction: row;[^}]*flex-wrap: nowrap", css);
-        Assert.Matches(@"\[data-page=""pipeline""\] \.app-left\s*\{[^}]*overflow-y: auto;[^}]*max-height:", css);
-        Assert.Matches(@"\[data-part=""pipeline-list""\]\s*\{[^}]*overflow-y: auto;[^}]*max-height:", css);
+        Assert.Matches(@"\.pipeline-filters\s*\{[^}]*flex-wrap: wrap", css);
+        Assert.DoesNotMatch(@"\.pipeline-filters\s*\{[^}]*overflow", css);
+        Assert.DoesNotContain("pipeline-list\"]", css);
+    }
+
+    [Fact]
+    public void Pages_scroll_as_one_document_with_no_inner_scroll_containers()
+    {
+        var css = Wwwroot("app.css");
+        // Only code and log blocks (pre) may scroll inside themselves; no other rule may set overflow auto/scroll.
+        foreach (var rule in Regex.Matches(css, @"([^{}]+)\{([^{}]*)\}").Select(m => (Sel: m.Groups[1].Value.Trim(), Body: m.Groups[2].Value)))
+        {
+            if (Regex.IsMatch(rule.Body, @"overflow(-x|-y)?:\s*(auto|scroll)"))
+                Assert.True(rule.Sel == "pre", "inner scroll on: " + rule.Sel);
+        }
+        Assert.DoesNotMatch(@"max-height:\s*calc\(100vh", css);
+        Assert.Matches(@"\.tabs\s*\{[^}]*flex-wrap: wrap", css);
+        Assert.Matches(@"\.app-right > \.is-sticky\s*\{[^}]*position: sticky", css);
+        Assert.Contains("keepStickyFit", Wwwroot("js/pipeline.js"));
     }
 
     [Fact]
